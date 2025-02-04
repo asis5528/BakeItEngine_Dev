@@ -1,2 +1,43 @@
-﻿  SwapChain.cpp
-  VulkanEngine.vcxproj -> C:\Users\Asis\Documents\PersonalProjects\PlaygroundEngine\x64\Debug\PlayGround Engine.exe
+﻿C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\VC\v170\Microsoft.CppBuild.targets(531,5): warning MSB8028: The intermediate directory (x64\Debug\) contains files shared from another project (PlayGround Engine.vcxproj).  This can lead to incorrect clean and rebuild behavior.
+  Animation.cpp
+  ComputeShaderPipelines.cpp
+  GaussianFluidSim.cpp
+  ComputePipeline.cpp
+  EditorGui.cpp
+  GraphicsPipeline.cpp
+  Framebuffer.cpp
+  imgui.cpp
+  imgui_demo.cpp
+  imgui_draw.cpp
+  imgui_impl_glfw.cpp
+  imgui_impl_vulkan.cpp
+  imgui_tables.cpp
+  imgui_widgets.cpp
+  Loader.cpp
+  main.cpp
+  VulkanBase.cpp
+  VulkanDevice.cpp
+  SwapChain.cpp
+  VulkanImage.cpp
+  Generating Code...
+  Compiling...
+  VulkanUtils.cpp
+  VulkanBuffer.cpp
+  Mesh.cpp
+  VulkanDescriptor.cpp
+  VulkanImgui.cpp
+  Material.cpp
+  MathUtils.cpp
+  MeshToSdf.cpp
+  Model.cpp
+  Object.cpp
+  PostProcessingManager.cpp
+  quad.cpp
+  ResourceManager.cpp
+  ScenePipelines.cpp
+  Scene.cpp
+  SceneObjects.cpp
+  VolumeRendering.cpp
+  Generating Code...
+LINK : warning LNK4098: defaultlib 'MSVCRT' conflicts with use of other libs; use /NODEFAULTLIB:library
+  VulkanEngine.vcxproj -> C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\x64\Debug\BakeItEngine.exe

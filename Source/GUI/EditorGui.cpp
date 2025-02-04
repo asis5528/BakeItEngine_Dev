@@ -1,9 +1,9 @@
 #include "EditorGui.h"
 
-#include "../../Imgui/imgui.h"
-#include "../../Imgui/imgui_impl_glfw.h"
-#include "../../Imgui/imgui_impl_vulkan.h"
-#include "../../Imgui/imgui_internal.h"
+#include "../Imgui/imgui.h"
+#include "../Imgui/imgui_impl_glfw.h"
+#include "../Imgui/imgui_impl_vulkan.h"
+#include "../Imgui/imgui_internal.h"
 
 
  EditorGui::EditorGui(Scene *scene,VulkanBase *base)

@@ -14,7 +14,7 @@
 
 
 #define STB_IMAGE_IMPLEMENTATION
-#include <stb_image.h>
+#include <stb/stb_image.h>
 
 
 
@@ -120,7 +120,7 @@ private:
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
        // glfwWindowHint(GLFW_DECORATED, false);
      //   glfwWindowHint(GLFW_TRANSPARENT_FRAMEBUFFER, 1);
-        window = glfwCreateWindow(WIDTH, HEIGHT, "PlayGround Engine", nullptr, nullptr);
+        window = glfwCreateWindow(WIDTH, HEIGHT, "BakeIt Engine", nullptr, nullptr);
         glfwSetWindowUserPointer(window, this);
         glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
         glfwSetDropCallback(window, dropCallback);

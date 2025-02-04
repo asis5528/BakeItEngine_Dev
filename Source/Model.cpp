@@ -1,7 +1,7 @@
 #include "Model.h"
 #include <iostream>
 #include <glm/gtx/matrix_decompose.hpp>
-#include <stb_image.h>
+#include <stb/stb_image.h>
 
 
 Model::Model(const char* path, const Scene *enscene):engineScene(enscene){

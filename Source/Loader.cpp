@@ -1,6 +1,6 @@
 #include "Loader.h"
 #include "Model.h"
-#include <stb_image.h>
+#include <stb/stb_image.h>
 #include <glm/gtx/matrix_decompose.hpp>
 #include "ResourceManager.h"
 
