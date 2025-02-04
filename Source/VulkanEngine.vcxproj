@@ -1,0 +1,258 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>16.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{2bbb14c0-fb49-4ae3-b25e-6dd5830c169a}</ProjectGuid>
+    <RootNamespace>VulkanProject</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <ProjectName>PlayGround Engine</ProjectName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="Shared">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <LinkIncremental>true</LinkIncremental>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <LinkIncremental>true</LinkIncremental>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <ClCompile>
+      <WarningLevel>TurnOffAllWarnings</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <AdditionalIncludeDirectories>C:\Users\asisp\source\repos\VulkanEngine\ThirdParty\Headers\OpenVR;C:\Users\asisp\Documents\Visual Studio 2019\Libraries\tinyobjloader-master;C:\Users\asisp\Documents\Visual Studio 2019\Libraries\glm-0.9.9.8\glm;C:\Users\asisp\Documents\Visual Studio 2019\Libraries\glfw-3.3.4.bin.WIN64\glfw-3.3.4.bin.WIN64\include;C:\VulkanSDK\1.2.189.2\Include;C:\Users\asisp\Documents\Visual Studio 2019\Libraries\stb;C:\Users\asisp\Documents\source\assimp\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <ExternalWarningLevel>InheritWarningLevel</ExternalWarningLevel>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>C:\Users\asisp\source\repos\VulkanEngine\ThirdParty\Libs\OpenVR;C:\Users\asisp\Documents\source\build\lib\Debug;C:\Users\asisp\Documents\Visual Studio 2019\Libraries\glfw-3.3.4.bin.WIN64\glfw-3.3.4.bin.WIN64\lib-vc2019;C:\VulkanSDK\1.2.189.2\Lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>vulkan-1.lib;glfw3.lib;assimp.lib;openvr_api.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <AdditionalIncludeDirectories>C:\Users\asisp\Documents\Visual Studio 2019\Libraries\glm-0.9.9.8\glm;C:\Users\asisp\Documents\Visual Studio 2019\Libraries\glfw-3.3.4.bin.WIN64\glfw-3.3.4.bin.WIN64\include;C:\VulkanSDK\1.2.182.0\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>C:\Users\asisp\Documents\Visual Studio 2019\Libraries\glfw-3.3.4.bin.WIN64\glfw-3.3.4.bin.WIN64\lib-vc2019;C:\VulkanSDK\1.2.182.0\Lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>vulkan-1.lib;glfw3.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>TurnOffAllWarnings</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <AdditionalIncludeDirectories>C:\Users\Asis\Documents\PersonalProjects\PlaygroundEngine\ThirdParty\Headers\OpenVR;C:\Users\asisp\Documents\Visual Studio 2019\Libraries\tinyobjloader-master;C:\Users\Asis\Documents\PersonalProjects\PlaygroundEngine\ThirdParty\Headers;C:\Users\Asis\Documents\PersonalProjects\PlaygroundEngine\Include\stb;C:\VulkanSDK\1.2.189.2\Include;C:\Users\asisp\Documents\Visual Studio 2019\Libraries\stb;C:\VulkanSDK\1.3.268.0\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <ExternalWarningLevel>InheritWarningLevel</ExternalWarningLevel>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>C:\Users\asisp\source\repos\VulkanEngine\ThirdParty\Libs\OpenVR;C:\Users\asisp\Documents\source\build\lib\Debug;C:\Users\asisp\Documents\Visual Studio 2019\Libraries\glfw-3.3.4.bin.WIN64\glfw-3.3.4.bin.WIN64\lib-vc2019;C:\Users\Asis\Documents\PersonalProjects\PlaygroundEngine\libs;C:\Users\Asis\Documents\PersonalProjects\PlaygroundEngine\ThirdParty\Libs;C:\VulkanSDK\1.3.268.0\Lib;C:\Users\Asis\Documents\PersonalProjects\PlaygroundEngine\ThirdParty\Libs\OpenVR;C:\VulkanSDK\1.2.189.2\Lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>vulkan-1.lib;glfw3.lib;assimp.lib;openvr_api.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <AdditionalIncludeDirectories>C:\Users\asisp\Documents\Visual Studio 2019\Libraries\glm-0.9.9.8\glm;C:\Users\asisp\Documents\Visual Studio 2019\Libraries\glfw-3.3.4.bin.WIN64\glfw-3.3.4.bin.WIN64\include;C:\VulkanSDK\1.2.182.0\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>C:\Users\asisp\Documents\Visual Studio 2019\Libraries\glfw-3.3.4.bin.WIN64\glfw-3.3.4.bin.WIN64\lib-vc2019;C:\VulkanSDK\1.2.182.0\Lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>vulkan-1.lib;glfw3.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <None Include="..\..\engine\game-engine\imgui.ini" />
+    <None Include="shaders\ComputeShaders\GaussianFluidSim.comp" />
+    <None Include="shaders\ComputeShaders\MeshtoSdf.comp" />
+    <None Include="shaders\PostProcessing\quad.frag" />
+    <None Include="shaders\PostProcessing\quad.vert" />
+    <None Include="shaders\ComputeShaders\sdfCompute _pottery.comp" />
+    <None Include="shaders\ComputeShaders\sdfCompute.comp" />
+    <None Include="shaders\ComputeShaders\simple.comp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Animation.cpp" />
+    <ClCompile Include="ComputeShaderPipelines.cpp" />
+    <ClCompile Include="ComputeShaderPipelines\GaussianFluidSim.cpp" />
+    <ClCompile Include="Graphics\ComputePipeline.cpp" />
+    <ClCompile Include="GUI\EditorGui.cpp" />
+    <ClCompile Include="Graphics\GraphicsPipeline.cpp" />
+    <ClCompile Include="Graphics\Framebuffer.cpp" />
+    <ClCompile Include="Imgui\imgui.cpp" />
+    <ClCompile Include="Imgui\imgui_demo.cpp" />
+    <ClCompile Include="Imgui\imgui_draw.cpp" />
+    <ClCompile Include="Imgui\imgui_impl_glfw.cpp" />
+    <ClCompile Include="Imgui\imgui_impl_vulkan.cpp" />
+    <ClCompile Include="Imgui\imgui_tables.cpp" />
+    <ClCompile Include="Imgui\imgui_widgets.cpp" />
+    <ClCompile Include="Loader.cpp" />
+    <ClCompile Include="main.cpp" />
+    <ClCompile Include="Graphics\VulkanBase.cpp" />
+    <ClCompile Include="Graphics\VulkanDevice.cpp" />
+    <ClCompile Include="Graphics\SwapChain.cpp" />
+    <ClCompile Include="Graphics\VulkanImage.cpp" />
+    <ClCompile Include="Graphics\VulkanUtils.cpp" />
+    <ClCompile Include="Graphics\VulkanBuffer.cpp" />
+    <ClCompile Include="Graphics\Mesh.cpp" />
+    <ClCompile Include="Graphics\VulkanDescriptor.cpp" />
+    <ClCompile Include="Graphics\IMGUI\VulkanImgui.cpp" />
+    <ClCompile Include="Material.cpp" />
+    <ClCompile Include="MathUtils.cpp" />
+    <ClCompile Include="ComputeShaderPipelines\MeshToSdf.cpp" />
+    <ClCompile Include="Model.cpp" />
+    <ClCompile Include="Object.cpp" />
+    <ClCompile Include="PostProcessing\PostProcessingManager.cpp" />
+    <ClCompile Include="quad.cpp" />
+    <ClCompile Include="ResourceManager.cpp" />
+    <ClCompile Include="Scene\ScenePipelines.cpp" />
+    <ClCompile Include="Scene\Scene.cpp" />
+    <ClCompile Include="SceneObjects.cpp" />
+    <ClCompile Include="PostProcessing\VolumeRendering.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Animation.h" />
+    <ClInclude Include="AnimationData.h" />
+    <ClInclude Include="ComputeShaderPipelines.h" />
+    <ClInclude Include="ComputeShaderPipelines\GaussianFluidSim.h" />
+    <ClInclude Include="Graphics\ComputePipeline.h" />
+    <ClInclude Include="GUI\EditorGui.h" />
+    <ClInclude Include="Graphics\GraphicsPipeline.h" />
+    <ClInclude Include="Graphics\Framebuffer.h" />
+    <ClInclude Include="Imgui\imconfig.h" />
+    <ClInclude Include="Imgui\imgui.h" />
+    <ClInclude Include="Imgui\imgui_impl_glfw.h" />
+    <ClInclude Include="Imgui\imgui_impl_vulkan.h" />
+    <ClInclude Include="Imgui\imgui_internal.h" />
+    <ClInclude Include="Imgui\imgui_stdlib.h" />
+    <ClInclude Include="Imgui\imstb_rectpack.h" />
+    <ClInclude Include="Imgui\imstb_textedit.h" />
+    <ClInclude Include="Imgui\imstb_truetype.h" />
+    <ClInclude Include="Graphics\VulkanBase.h" />
+    <ClInclude Include="Graphics\VulkanDevice.h" />
+    <ClInclude Include="Graphics\SwapChain.h" />
+    <ClInclude Include="Graphics\VulkanImage.h" />
+    <ClInclude Include="Graphics\VulkanUtils.h" />
+    <ClInclude Include="Graphics\VulkanBuffer.h" />
+    <ClInclude Include="Graphics\Mesh.h" />
+    <ClInclude Include="Graphics\VulkanDescriptor.h" />
+    <ClInclude Include="Graphics\IMGUI\VulkanImgui.h" />
+    <ClInclude Include="Loader.h" />
+    <ClInclude Include="Material.h" />
+    <ClInclude Include="MathUtils.h" />
+    <ClInclude Include="ComputeShaderPipelines\MeshToSdf.h" />
+    <ClInclude Include="Model.h" />
+    <ClInclude Include="Object.h" />
+    <ClInclude Include="PGEResourceTypes.h" />
+    <ClInclude Include="PostProcessing\PostProcessingManager.h" />
+    <ClInclude Include="quad.h" />
+    <ClInclude Include="ResourceManager.h" />
+    <ClInclude Include="Scene\ScenePipelines.h" />
+    <ClInclude Include="Scene\Scene.h" />
+    <ClInclude Include="SceneObjects.h" />
+    <ClInclude Include="Shader.h" />
+    <ClInclude Include="PostProcessing\VolumeRendering.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="REMAINDER.txt" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>
