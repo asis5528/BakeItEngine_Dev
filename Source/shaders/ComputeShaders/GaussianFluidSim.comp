@@ -97,7 +97,11 @@ vec4 r = vec4(1.0);
         if(mod(ubo.time,50.)<1.){
       //  r.w = 1.;
         }
-            r.xyz*=vec3(-1.);
+        if(r.y>0.0){
+         r.y*=-1.;
+        }
+
+           
        //     r.w = -1.;
         }
        // r.w*=1.+bounds*0.1;

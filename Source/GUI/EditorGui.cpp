@@ -102,11 +102,11 @@
          auto dock_id_right2 = ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Right, 0.25f, nullptr, &dockspace_id);
 
 
-         ImGui::DockBuilderDockWindow("tools", dock_id_down);
+       //  ImGui::DockBuilderDockWindow("tools", dock_id_down);
          ImGui::DockBuilderDockWindow("scene", dock_id_left);
-         ImGui::DockBuilderDockWindow("scene3", dock_id_right);
-         ImGui::DockBuilderDockWindow("inspector", dock_id_right2);
-         ImGui::DockBuilderDockWindow("Demo window", dock_id_up);
+       //  ImGui::DockBuilderDockWindow("scene3", dock_id_right);
+       //  ImGui::DockBuilderDockWindow("inspector", dock_id_right2);
+       //  ImGui::DockBuilderDockWindow("Demo window", dock_id_up);
          ImGui::DockBuilderDockWindow("Viewport", dock_id_center->ID);
          ImGui::DockBuilderFinish(dockspace_id);
      }
@@ -157,23 +157,23 @@
      ImGui::Image(ds[0], ImVec2{ viewportPanelSize.x, viewportPanelSize.y });
      ImGui::End();
 
-     ImGui::Begin("tools");
-     ImGui::End();
+   
      
      ImGui::Begin("scene");
      tree(m_scene->rootNode);
 
      ImGui::End();
-
+     
+     /*
      ImGui::Begin("inspector");
     if( ImGui::Button("MeshToSDF Dispatch")) {
          m_scene->dispatch = true;
      }
    //  m_scene->objects[m_scene->selectedID].
      //ImGui::DragFloat3("position", &scene.objects[scene.selectionIndex].position[0], 0.1, 0.0, 0.0, "%3f");
-     ImGui::End();
-     ImGui::Begin("scene3");
-     ImGui::End();
+     ImGui::End();*/
+
+     /*
      ImGui::Begin("Demo window");
      ImGui::BeginTabBar("List", 1);
      if (ImGui::BeginTabItem("Mesh List")) {
@@ -184,7 +184,7 @@
      }
      ImGui::EndTabItem();
      ImGui::EndTabBar();
-     ImGui::End();
+     ImGui::End();*/
 
      ImGui::Render();
  }

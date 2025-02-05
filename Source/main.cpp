@@ -170,6 +170,7 @@ private:
 #endif
 
         base = new VulkanBase();
+        
         base->init(window);
         ResourceManager::setVulkanBase(base);
        // ResourceManager& resourceManager = ResourceManager::getInstance();
