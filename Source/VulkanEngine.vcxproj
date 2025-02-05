@@ -126,14 +126,14 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>$(SolutionDir)ThirdParty\Include;$(SolutionDir)ThirdParty\VulkanSDK\1.2.189.2\Include;$(SolutionDir)ThirdParty\OpenVR\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)ThirdParty\Include;$(SolutionDir)ThirdParty\VulkanSDK\1.4.304.0\Include;$(SolutionDir)ThirdParty\OpenVR\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <ExternalWarningLevel>InheritWarningLevel</ExternalWarningLevel>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(SolutionDir)ThirdParty\VulkanSDK\1.2.189.2\Lib;$(SolutionDir)ThirdParty\OpenVR\Libs;$(SolutionDir)ThirdParty\Libs;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(SolutionDir)ThirdParty\VulkanSDK\1.4.304.0\Lib;$(SolutionDir)ThirdParty\OpenVR\Libs;$(SolutionDir)ThirdParty\Libs;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>vulkan-1.lib;glfw3.lib;assimp.lib;openvr_api.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
