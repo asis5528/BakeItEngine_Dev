@@ -887,9 +887,9 @@ outColor.a = 1.0;
 //  discard;
 if(border<=0.0){
 
-//discard;
+discard;
 //outColor.a = 0.0;
-} discard;
+} //discard;
 outColor.a = 1.0;
 
 //outColor.a = 0.0;

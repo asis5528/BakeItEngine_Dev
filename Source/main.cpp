@@ -365,7 +365,7 @@ private:
       
      
         vulkanImgui->recreate();
-        scene->recreate();
+         scene->recreate();
    
         createCommandBuffers();
 
