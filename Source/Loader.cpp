@@ -71,10 +71,13 @@ void Loader::load(int path_count, const char* paths[])
                     if (mesh.bones.size()) base->vbuffer->createSkinnedVertexBuffer(mesh);
                     else base->vbuffer->createVertexBuffer(mesh);
                     base->vbuffer->createIndexBuffer(mesh);
+                    if (!mesh.bones.size() && mesh.indices.size() < 100) {
+                        // Small cube meshes are rendered as volume instances; provide explicit per-instance block IDs.
+                        base->vbuffer->createInstanceIdBuffer(mesh, 64u * 64u * 64u);
+                    }
                     scene->meshes.push_back(mesh);
                     object.meshID[i] = scene->meshes.size() - 1;
                 }
-
                 if (modelData.animations.size() > 0) {
                     object.animationID = this->scene->animations.size() - 1;
                     object.hasAnimation = true;

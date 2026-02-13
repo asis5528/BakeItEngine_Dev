@@ -83,6 +83,11 @@ struct Mesh {
     VkDeviceMemory vertexBufferMemory;
     VkBuffer indexBuffer;
     VkDeviceMemory indexBufferMemory;
+    VkBuffer instanceIdBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory instanceIdBufferMemory = VK_NULL_HANDLE;
+    uint32_t instanceCount = 0;
+    uint32_t instanceCapacity = 0;
+    bool hasInstanceIdBuffer = false;
     glm::vec4 color;
     int texID = -1;
     int matID = 0;

@@ -16,6 +16,10 @@ public:
     std::vector<UBO> computeUBO2;
     ComputePipeline* comp2;
 
+    PGEResourceTypes::Texture3D computeTexture3;
+    std::vector<UBO> computeUBO3;
+    ComputePipeline* comp3;
+
     int Frame = 0;
     GaussianFluidSim(VulkanBase* base, Scene* scene, PGEResourceTypes::Texture3D sdftex);
     ~GaussianFluidSim();

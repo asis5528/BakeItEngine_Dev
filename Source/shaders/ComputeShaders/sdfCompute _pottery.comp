@@ -1,80 +1,283 @@
 #version 450
 
-layout (local_size_x = 8, local_size_y = 8,local_size_z = 8) in;
-layout (binding = 0, rgba32f) uniform coherent image3D resultImage;
-layout(binding = 1) uniform sampler2D tex;
-layout(binding = 2) uniform computeUbo {
-vec4 data;
+// One workgroup per block, 9x9x9 threads per block
+layout(local_size_x = 9, local_size_y = 9, local_size_z = 9) in;
+
+layout(binding = 0, rgba32f) uniform coherent image3D resultImage;
+
+layout(binding = 1) uniform computeUbo {
+    vec4  BrushData;
+    vec4  BrushColor;
+    float BrushAction;  // 1.0 add, 0.0 remove
     float time;
-    
+    float BrushShape;   // 0.0 cube, 1.0 sphere, 2.0 plane
+    float BrushEmissive; // 1.0 emissive paint mode, 0.0 default
+    float BrushRecolor;  // 1.0 recolor existing touched blocks
 } ubo;
 
+layout(binding = 2) buffer BrickBuffer {
+    float bricks[];
+};
 
-float opSmoothSubtraction( float d1, float d2, float k ) {
-    float h = clamp( 0.5 - 0.5*(d2+d1)/k, 0.0, 1.0 );
-    return mix( d2, -d1, h ) + k*h*(1.0-h); }
+layout(binding = 3) buffer BlockBuffer {
+    int blocks[];
+};
 
+layout(binding = 4) buffer Counter {
+    int counter;
+};
 
-	float smin( float a, float b, float k )
-{
-    float h = clamp( 0.5+0.5*(b-a)/k, 0.0, 1.0 );
-    return mix( b, a, h ) - k*h*(1.0-h);
+layout(binding = 5) buffer BlockColorBuffer {
+    vec4 blockColors[];
+};
+layout(binding = 6) buffer DirtyCounter {
+    int dirtyBlockCount;
+};
+
+// -------- shared variables MUST be at global scope --------
+shared uint  sGotHit;
+shared uint  sInsideBand;
+shared uint  sTouched;
+shared float sInsideBandDis;
+shared float hShared[9 * 9 * 9];
+// ----------------------------------------------------------
+
+const int BLOCK_EMISSIVE_FLAG = (1 << 30);
+const int BLOCK_INDEX_MASK = BLOCK_EMISSIVE_FLAG - 1;
+
+float smin(float a, float b, float k) {
+    float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+    return mix(b, a, h) - k * h * (1.0 - h);
 }
+float sdfBox(vec3 p, vec3 halfExtents) {
+    vec3 q = abs(p) - halfExtents;
+    return length(max(q, vec3(0.0))) + min(max(q.x, max(q.y, q.z)), 0.0);
+}
+
+float sdfSphere(vec3 p, float radius) {
+    return length(p) - radius;
+}
+
+float sdfPlanePatch(vec3 p, float radius, float halfThickness) {
+    // Finite flat plane brush: square on XZ with small Y thickness.
+    return sdfBox(p, vec3(radius, 0.001, radius));
+}
+
 void main()
 {
-ivec3 dims = imageSize(resultImage);
-vec3 p = vec3(gl_GlobalInvocationID)/vec3(dims);
+    ivec3 dims = imageSize(resultImage); // e.g. 64,64,64
 
+    const ivec3 blockDim = ivec3(8);        // 8x8x8 voxels per block
+    ivec3 blocksPerAxis  = dims / blockDim; // 64/8 = 8
 
-vec2 h1 = imageLoad(resultImage,ivec3(gl_GlobalInvocationID)).rg;
-h1.g+=0.01*(1.+h1.g*0.04);
+    ivec3 blockId = ivec3(gl_WorkGroupID);
+    
+   // blockId = gl_BaseInstanceARB + blockId; // support multi-dispatch
+    //what is gl_WorkGroupID?
+    // gl_WorkGroupID is the index of the current workgroup in the dispatch grid.
+    //do all threads have same workgroupid or specific id,i need to know how do i get id for each thread
+    // All threads in a workgroup share the same gl_WorkGroupID.
+    // Individual threads within the workgroup can be identified using gl_LocalInvocationID.
+    // So, gl_WorkGroupID gives you the workgroup's position in the overall dispatch,
+    // while gl_LocalInvocationID gives you the thread's position within that workgroup.
+    // how do i find the position of each thread in global space,like worldposition
+    // To find the global position of each thread (voxel) in world space,
+    // you can combine the workgroup ID and the local invocation ID.
+    // Here's how you can calculate it:
+    // 1. Calculate the base position of the workgroup in voxel space:
+    //	ivec3 workgroupBase = blockId * blockDim;
+    // 2. Add the local invocation ID to get the global voxel position:
+    //	ivec3 globalVoxelPos = workgroupBase + ivec3(gl_LocalInvocationID);
+    // This globalVoxelPos now represents the position of the voxel that the current thread is responsible for in the overall 3D texture.
+    // Note that this position is still in voxel coordinates.
+    // If you need to convert it to world coordinates, you'll need to apply any necessary transformations based on your scene's setup.
+    // so in short,global position of each thread=workgroupid*blockdim+localinvocationid
+    // so basically gl_WorkGroupID+gl_LocalInvocationID gives global position of each thread?
+    // Not quite. You need to multiply gl_WorkGroupID by the block dimensions first, then add gl_LocalInvocationID.
+    // won't gl_WorkGroupID give index of each thread group?
+    // Yes, gl_WorkGroupID gives the index of each workgroup (thread group) in the dispatch grid.
+    // so lets say first workgroup is 0,second is 1 ...and so on,right? so workgroupid * localinnovationsize+localinnovationid?
+    // Correct. To get the global position of each thread (voxel), you would calculate it as:
+    //what are the wrap features i can use in compute shader,so i can utilize the wraps
+    // In compute shaders, you can utilize various built-in variables and features to manage workgroups and threads effectively. Here are some key features you can use:
+    // 1. gl_WorkGroupID: Identifies the current workgroup in the dispatch grid.
+    // 2. gl_LocalInvocationID: Identifies the thread's position within its workgroup.
+    // 3. gl_GlobalInvocationID: Identifies the thread's position in the overall dispatch grid.
+    // 4. gl_NumWorkGroups: Provides the total number of workgroups dispatched.
+    // no i dont mean this values,like i mean communication between threads in workgroup,so i can know if some thread finished and some haven't so i can optimize
+    // In compute shaders, threads within a workgroup can communicate and synchronize using shared memory and barriers. Here are some features you can use for inter-thread communication and synchronization:
+    // 1. Shared Memory: You can declare shared variables that are accessible by all threads within a workgroup. This allows threads to share data and results.
+    // 2. Barriers: You can use the barrier() function to synchronize threads within a workgroup. This ensures that all threads reach the same point in the code before proceeding, which is useful for coordinating access to shared memory.
+    // 3. Atomic Operations: You can use atomic functions (like atomicAdd, atomicOr, etc.) to safely update shared variables from multiple threads without
+    // race conditions
+    // 4. Memory Barriers: You can use memoryBarrier() and memoryBarrierShared() to ensure proper ordering of memory operations, which is important when threads read from and write to shared memory.
+    // These features help you manage the execution flow and data sharing among threads in a workgroup, allowing for more efficient parallel processing.
+    // can u tell how barrier() works in compute shader? do all threads wait in barrier till all thread reaches it?
+    // Yes, in a compute shader, when a thread reaches a barrier() call, it will wait until all other threads in the same workgroup also reach that barrier. Once all threads have reached the barrier, they are all released to continue execution past the barrier point. This ensures that all threads are synchronized at that point in the code, which is useful for coordinating access to shared resources or ensuring that certain computations are completed before proceeding.
+    // so if one thread is slow and other threads reach barrier first,those threads will wait for slow thread,right?
+    // Yes, that's correct. If one thread is slower and reaches the barrier later than the others, all the faster threads will wait at the barrier until the slowest thread arrives. Once all threads in the workgroup have reached the barrier, they will all proceed past it together.
+    // so its better to avoid barrier if not necessary,right?
+    // Yes, it's generally a good practice to minimize the use of barriers in compute shaders. While barriers are essential for synchronization and ensuring correct data access among threads, they can introduce performance bottlenecks if overused or used unnecessarily. Excessive barriers can lead to idle threads waiting for others, which reduces overall parallel efficiency. Therefore, it's best to use barriers only when necessary for coordinating shared data access or ensuring that certain computations are completed before proceeding.
+    // what are other powerful wrap features ,like i could find maximum/minimum between threads without any performance lost?
+    // In compute shaders, you can use atomic operations to find the maximum or minimum values between threads without significant performance loss. Atomic operations allow multiple threads to safely read and write shared variables concurrently. Here are some useful atomic functions for this purpose:
+    // 1. atomicMax: This function updates a shared variable to the maximum value between its current value and a new value provided by a thread.
+    // 2. atomicMin: This function updates a shared variable to the minimum value between its current value and a new value provided by a thread.
+    // By using these atomic functions, you can efficiently compute the maximum or minimum values across threads in a workgroup without the need for complex synchronization mechanisms or barriers, thus maintaining good performance.
+    // so how these minimum/maximum works without needing to barrier or synchronization
+    // Atomic operations like atomicMax and atomicMin work without explicit barriers or synchronization because they are designed to handle concurrent access to shared variables safely. When multiple threads attempt to update the same variable using an atomic operation, the GPU ensures that these updates are performed in a way that prevents
+    // is it coz of instruction cycle ?
+    //how can i utilize this wrap functions?
+    // Atomic operations are implemented at the hardware level, allowing them to be executed in a single instruction cycle. This means that when multiple threads attempt to perform an atomic operation on the same variable, the GPU can manage these requests efficiently without the need for additional synchronization mechanisms like barriers. The hardware ensures that each atomic operation is completed fully before another thread can access the same variable, preventing
 
+    // This 'if' is uniform for the whole workgroup: either all threads return,
+    // or none. So it's safe (no barrier reached in this case).
 
-float time = ubo.time;
-p-=0.5;
-float h = h1.r;
-vec3 q = p;
-float y = sin(time*0.02);
-float off = sin((1.57075-abs(y-0.1)));
-q.y+=y*0.3;
-q.x+=(sin(time)*0.3)*off;
+    //so tell me more bout wrap functions in compute shaders
+    // In compute shaders, "wrap functions" typically refer to built-in functions and features that facilitate parallel processing and inter-thread communication. Here are some additional powerful features you can utilize in compute shaders:
 
-q.z+=(cos(time)*0.3)*off;
-vec3 pq = p;
-pq+=ubo.data.xyz;
-float eraser  = length(pq)-(0.05+time*0.0002);
-//float eraser2 = length(q)-(0.01+time*0.0001);
+   
 
-h = opSmoothSubtraction(eraser,h,0.05);
-h = mix(h,length(p)-(0.3),0.0075);
-//h = smin(eraser2,h,0.01);
+    if (any(greaterThanEqual(blockId, blocksPerAxis)))
+        return;
 
-if(time<0.03){
- h =length(p)-(0.3);
-}
+    // Flatten block index (same idea as your old 'index')
+    int index =
+        blockId.x +
+        blockId.y * blocksPerAxis.x +
+        blockId.z * blocksPerAxis.x * blocksPerAxis.y;
 
-/*
-float fl = floor(h1.g*0.08);
-p.y+=fl*0.1;
-p.x+=fl*0.1;
-p.x+=sin(h1.g*(1.+fl*0.5))*0.05;
-p.z+=cos(h1.g)*0.07;
-p.z+=p.x*p.x*0.07;
-p.y+=sin(h1.g*2.)*0.05;
-p.y+=cos(h1.g*0.5)*0.1;
-float h =length(p)-(0.01);
+    ivec3 localOffset = ivec3(gl_LocalInvocationID); // 0..8
 
-if(h1.g>0.02){
+    ivec3 blockBase = blockId * blockDim;
+    ivec3 pos       = blockBase + localOffset;
 
-h = min(h,h1.r);
+    uint lid = gl_LocalInvocationIndex; // 0..728
 
+    // Init shared vars once per block
+    if (lid == 0u) {
+        sGotHit        = 0u;
+        sInsideBand    = 0u;
+        sTouched       = 0u;
+        sInsideBandDis = 0.0;
+    }
+    barrier();
 
-}
-*/
+    // Check if this voxel is actually inside the 3D texture
+    bool valid = !(
+        any(lessThan(pos, ivec3(0))) ||
+        any(greaterThanEqual(pos, dims))
+    );
 
+    float h = 10.01; // default far value
 
-	imageStore(resultImage, ivec3(gl_GlobalInvocationID), vec4(h,ubo.data.xyz));
-	
+    if (valid) {
+        vec3 p = pos- (dims/2.0);
+        p = p/dims;
 
+        // Base SDF from previous state
+        int blkRaw = blocks[index];
+        int blkBase = (blkRaw & BLOCK_INDEX_MASK);
+        if (blkRaw > 0) {
+            h = bricks[blkBase
+                       + localOffset.x
+                       + localOffset.y * 9
+                       + localOffset.z * 9 * 9];
+        } else if (blkRaw == -999999) {
+            h = 100.01;
+        } else {
+            h = 100.01;
+        }
 
+       // p -= 0.5;
+       // p*=8.;
+        vec3 pq = p + ubo.BrushData.xyz-0.031;
+        float brushRadius = ubo.BrushData.w;
+        if (ubo.BrushAction < 0.5) {
+            brushRadius *= 1.15; // Remove is slightly larger than add.
+        }
+
+        int shapeMode = int(floor(ubo.BrushShape + 0.5));
+        float eraser = 0.0;
+        if (shapeMode == 1) {
+            eraser = sdfSphere(pq, brushRadius);
+        } else if (shapeMode == 2) {
+            eraser = sdfPlanePatch(pq, brushRadius, max(brushRadius * 0.08, 0.0005));
+        } else {
+            eraser = sdfBox(pq, vec3(brushRadius));
+        }
+
+        if (eraser < 0.0) {
+            atomicOr(sTouched, 1u);
+        }
+
+        if (ubo.BrushRecolor < 0.5) {
+            if (ubo.BrushAction < 0.5) {
+                h = max(-eraser, h);
+            } else {
+                h = smin(eraser, h,0.001);
+            }
+        }
+
+        bool hit        = (h < -0.000  && h > -0.02);
+        bool insideBand = (h < -0.02);
+
+        if (hit) {
+            atomicOr(sGotHit, 1u);
+        }
+        if (insideBand) {
+            atomicOr(sInsideBand, 1u);
+            // "last wins" like your original code
+            sInsideBandDis = h;
+        }
+    }
+
+    // Store per-thread value in shared array
+    hShared[lid] = h;
+
+    barrier();
+
+    bool groupGotHit = (sGotHit != 0u);
+    bool groupInside = (sInsideBand != 0u);
+
+    // Block-level decision & brick allocation
+    if (lid == 0u) {
+        int blkRaw = blocks[index];
+        int blkBase = (blkRaw & BLOCK_INDEX_MASK);
+        int blkFlags = (blkRaw & BLOCK_EMISSIVE_FLAG);
+        if (ubo.BrushRecolor > 0.5) {
+            if (sTouched != 0u && blkRaw >= 0) {
+                blockColors[index] = vec4(ubo.BrushColor.rgb, 1.0);
+            }
+            blocks[index] = blkRaw;
+        } else
+        if (groupGotHit) {
+            if (blkRaw < 0) {
+                blkBase = atomicAdd(counter, 9 * 9 * 9);
+                // Emissive applies only to newly created blocks while mode is ON.
+                blkFlags = (ubo.BrushEmissive > 0.5 && ubo.BrushAction >= 0.5) ? BLOCK_EMISSIVE_FLAG : 0;
+                blockColors[index] = vec4(ubo.BrushColor.rgb, 1.0);
+            }
+            blocks[index] = blkBase | blkFlags;
+        } 
+        else {
+            if (groupInside) {
+                blocks[index] = int(sInsideBandDis * 0.1);
+            } else {
+                blocks[index] = -999999;
+            }
+        }
+        if (blocks[index] >= 0) {
+            atomicAdd(dirtyBlockCount, 1);
+        }
+    }
+
+    barrier();
+
+    // Write 9x9x9 brick for surface blocks
+    if (ubo.BrushRecolor < 0.5 && groupGotHit && valid) {
+        int base = (blocks[index] & BLOCK_INDEX_MASK);
+        if (base >= 0) {
+            bricks[base + int(lid)] = hShared[lid];
+        }
+    }
 }

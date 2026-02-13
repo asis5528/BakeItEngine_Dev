@@ -79,6 +79,7 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
+    <LocalDebuggerWorkingDirectory>$(ProjectDir)</LocalDebuggerWorkingDirectory>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
@@ -136,6 +137,11 @@
       <AdditionalLibraryDirectories>$(SolutionDir)ThirdParty\VulkanSDK\1.4.304.0\Lib;$(SolutionDir)ThirdParty\OpenVR\Libs;$(SolutionDir)ThirdParty\Libs;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>vulkan-1.lib;glfw3.lib;assimp.lib;openvr_api.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Command>if exist "$(ProjectDir)assimp-vc143-mtd.dll" copy /Y "$(ProjectDir)assimp-vc143-mtd.dll" "$(OutDir)"
+if exist "$(ProjectDir)openvr_api.dll" copy /Y "$(ProjectDir)openvr_api.dll" "$(OutDir)"
+if exist "$(SolutionDir)ThirdParty\Libs\glfw3.dll" copy /Y "$(SolutionDir)ThirdParty\Libs\glfw3.dll" "$(OutDir)"</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -171,6 +177,7 @@
     <ClCompile Include="Animation.cpp" />
     <ClCompile Include="ComputeShaderPipelines.cpp" />
     <ClCompile Include="ComputeShaderPipelines\GaussianFluidSim.cpp" />
+    <ClCompile Include="ComputeShaderPipelines\Pottery.cpp" />
     <ClCompile Include="Graphics\ComputePipeline.cpp" />
     <ClCompile Include="GUI\EditorGui.cpp" />
     <ClCompile Include="Graphics\GraphicsPipeline.cpp" />
@@ -211,6 +218,7 @@
     <ClInclude Include="AnimationData.h" />
     <ClInclude Include="ComputeShaderPipelines.h" />
     <ClInclude Include="ComputeShaderPipelines\GaussianFluidSim.h" />
+    <ClInclude Include="ComputeShaderPipelines\Pottery.h" />
     <ClInclude Include="Graphics\ComputePipeline.h" />
     <ClInclude Include="GUI\EditorGui.h" />
     <ClInclude Include="Graphics\GraphicsPipeline.h" />

@@ -25,13 +25,11 @@ vec4 r = vec4(1.0);
         vec3 v = neigh.xyz;                          // neighbour velocity
       
        vec3 fv = v+i;
-       r += m * exp(-(fv.x*fv.x+fv.y*fv.y+fv.z*fv.z)) /( 5.56833) * vec4(v,1.0);
+       r += m * exp(-((fv.x*fv.x+fv.y*fv.y+fv.z*fv.z)/2.0)) /( pow(3.1415*2.0,1.5)) * vec4(v,1.0);
                
            
             r.xyz += 0.2*m * exp(-(fv.x*fv.x+fv.y*fv.y+fv.z*fv.z))/( 5.56833) * (1.5-m) * fv;
-               
-
-
+            
     }
 
     r.xyz /= r.w + 1e-6;
@@ -49,7 +47,7 @@ vec4 r = vec4(1.0);
        if(mod(ubo.time,20.)<15.){
             vec3 n = m;
           //  n.x = mod(n.x*5.,4.)-2.0;
-         r += vec4(0.,0.,0.,1.0) * smoothstep(0.1,0.09,length(n+vec3(sin(ubo.time*0.8)*0.9,-1.7,0.)));
+         r += vec4(0.,0.,0.,1.0) * smoothstep(0.4,0.399,length(n+vec3(sin(ubo.time*0.8)*0.9,-1.7,0.)));
        float rn = texelFetch(sdf,ivec3(u),0).r;
        if(rn.r>0.00){
        r.xyz*=0.;
@@ -59,28 +57,31 @@ vec4 r = vec4(1.0);
        
          if(u.y<10){
          
-         if(r.y<0.0){
-            r.xyz*=vec3(1.,-1.0,1.);
-         }
+         r.y = abs(r.y);
+        
+           
         r.y+=0.1;
        //  r.y+=0.5;
          
 
     }
 
-      if(u.x<5){
-      
-        r.xyz*=vec3(-1.,1.,1.);
+      if(u.x<10){
+      r.x = abs(r.x);
+        //r.xyz*=vec3(-1.,1.,1.);
         
     }
       if(u.x>123.){
-        r.xyz*=vec3(-1.,1.,1.);
+      //  r.xyz*=vec3(-1.,1.,1.);
+        r.x = -abs(r.x);
     }
-          if(u.z<3.0){
-        r.xyz*=vec3(1.,1.,-1.);
+          if(u.z<10.0){
+       // r.xyz*=vec3(1.,1.,-1.);
+       r.z = abs(r.z);
     }
       if(u.z>123.){
-        r.xyz*=vec3(1.,1.,-1.);
+        //r.xyz*=vec3(1.,1.,-1.);
+         r.z = -abs(r.z);
     }
     if(length(m+vec3(-1.3,0.1,0.))<0.3){
      if(mod(ubo.time,50.)<30.){

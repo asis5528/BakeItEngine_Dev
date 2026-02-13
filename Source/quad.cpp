@@ -7,13 +7,7 @@ Quad::Quad(VulkanBase* vbase,Framebuffer *fr)
     
 }
 
-Quad::~Quad() {
-    vkDestroyDescriptorPool(base->device, descriptorPool, nullptr);
-  //  for (VulkanTexture& tex : textures) {
-    //    vkDestroySampler(base->device, tex.imageSampler, nullptr);
-    //}
-    //delete graphicsPipeline;
-}
+
 
 void Quad::createGraphicsPipeline(std::string vshaderpath, std::string fshaderpath, std::vector<descriptorTypes> descriptorTypes)
 {
@@ -65,10 +59,19 @@ void Quad::createdescriptors()
     descriptorSet = base->vulkandescriptor->createDescriptorSets(1, Qlayouts, descriptorPool)[0];
 
 
-    base->vulkandescriptor->updateDescriptorSets(descriptorSet, {  }, textures);
+    base->vulkandescriptor->updateDescriptorSets(descriptorSet, shader.ubos, textures,shader.sbos);
 }
 
 void Quad::cleandescriptors()
 {
+    
     vkDestroyDescriptorPool(base->device, descriptorPool, nullptr);
+}
+Quad::~Quad() {
+    cleandescriptors();
+    //float a = 1.0;
+    //  for (VulkanTexture& tex : textures) {
+      //    vkDestroySampler(base->device, tex.imageSampler, nullptr);
+      //}
+      //delete graphicsPipeline;
 }

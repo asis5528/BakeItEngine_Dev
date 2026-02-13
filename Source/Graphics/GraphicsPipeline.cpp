@@ -54,10 +54,27 @@ void GraphicsPipeline::setupPipeline(PipelineInput  pipelineInput) {
         infoLocal.bindingDescription = Vertex::getBindingDescription();
         infoLocal.attributeDescriptions = Vertex::getAttributeDescriptions();
     }
-  
-    infoLocal.vertexInputInfo.vertexBindingDescriptionCount = 1;
+
+    infoLocal.bindingDescriptions.clear();
+    infoLocal.bindingDescriptions.push_back(infoLocal.bindingDescription);
+    if (pipelineInput.useInstanceIdAttribute) {
+        VkVertexInputBindingDescription instanceBinding{};
+        instanceBinding.binding = 1;
+        instanceBinding.stride = sizeof(int32_t);
+        instanceBinding.inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
+        infoLocal.bindingDescriptions.push_back(instanceBinding);
+
+        VkVertexInputAttributeDescription instanceAttr{};
+        instanceAttr.location = 3;
+        instanceAttr.binding = 1;
+        instanceAttr.format = VK_FORMAT_R32_SINT;
+        instanceAttr.offset = 0;
+        infoLocal.attributeDescriptions.push_back(instanceAttr);
+    }
+
+    infoLocal.vertexInputInfo.vertexBindingDescriptionCount = static_cast<uint32_t>(infoLocal.bindingDescriptions.size());
     infoLocal.vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(infoLocal.attributeDescriptions.size());
-    infoLocal.vertexInputInfo.pVertexBindingDescriptions = &infoLocal.bindingDescription;
+    infoLocal.vertexInputInfo.pVertexBindingDescriptions = infoLocal.bindingDescriptions.data();
     infoLocal.vertexInputInfo.pVertexAttributeDescriptions = infoLocal.attributeDescriptions.data();
 
 
@@ -89,11 +106,11 @@ void GraphicsPipeline::setupPipeline(PipelineInput  pipelineInput) {
 
     //static VkPipelineRasterizationStateCreateInfo rasterizer{};
     infoLocal.rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    infoLocal.rasterizer.depthClampEnable = VK_FALSE;
+    infoLocal.rasterizer.depthClampEnable = VK_TRUE;
     infoLocal.rasterizer.rasterizerDiscardEnable = VK_FALSE;
     infoLocal.rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
     infoLocal.rasterizer.lineWidth = 1.0f;
-  //  infoLocal.rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
+    infoLocal.rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
    // if(frontFaceCull) infoLocal.rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
     infoLocal.rasterizer.depthBiasEnable = VK_FALSE;
 
@@ -109,9 +126,9 @@ void GraphicsPipeline::setupPipeline(PipelineInput  pipelineInput) {
     infoLocal.depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
     infoLocal.depthStencil.depthTestEnable = VK_TRUE;
     infoLocal.depthStencil.depthWriteEnable = VK_TRUE;
-    infoLocal.depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+    infoLocal.depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
     infoLocal.depthStencil.depthBoundsTestEnable = VK_FALSE;
-    infoLocal.depthStencil.stencilTestEnable = VK_FALSE;
+    infoLocal.depthStencil.stencilTestEnable = VK_TRUE;
 
     //static VkPipelineColorBlendAttachmentState colorBlendAttachment{};
     infoLocal.colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;

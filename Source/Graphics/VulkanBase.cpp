@@ -228,15 +228,22 @@ uint32_t VulkanBase::getFrameIndex()
 
     uint32_t imageIndex;
     VkResult result = vkAcquireNextImageKHR(device, swapChain->swapChain, UINT64_MAX, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
-    /*if (result == VK_ERROR_OUT_OF_DATE_KHR) {
-            recreateSwapChain();
-            return;
-        }*/
-    submitCommandBuffers.push_back(commandBuffers[imageIndex]);
+    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || swapChain->framebufferResized) {
+       // std::cout << "error" << "\n";
+       // recreate();
+        //    return;
+        }
+ //   submitCommandBuffers.push_back(commandBuffers[imageIndex]);
     if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
         throw std::runtime_error("failed to acquire swap chain image!");
     }
+    if (imagesInFlight[imageIndex] != VK_NULL_HANDLE) {
+        vkWaitForFences(device, 1, &imagesInFlight[imageIndex], VK_TRUE, UINT64_MAX);
+    }
+    // This image will now be associated with the current frame's fence
+    imagesInFlight[imageIndex] = inFlightFences[currentFrame];
     this->imageIndex = imageIndex;
+    submitCommandBuffers.push_back(commandBuffers[imageIndex]);
     return imageIndex;
 }
 
@@ -352,7 +359,7 @@ VulkanBase::~VulkanBase()
 {
   //  delete offscreenbuffer;
     delete swapChain;
-
+    swapChain = nullptr;
 
     for (int i = 0; i < commandBuffers.size(); i++) {
         vkFreeCommandBuffers(device, vulkandevice->commandPool, 1, &commandBuffers[i]);

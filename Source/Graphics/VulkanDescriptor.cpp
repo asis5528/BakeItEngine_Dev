@@ -40,10 +40,10 @@ std::vector<VkDescriptorSet> VulkanDescriptor::createDescriptorSets(uint32_t siz
 	}
 	return descriptorSets;
 }
-void VulkanDescriptor::updateDescriptorSets(VkDescriptorSet descriptorSet, std::vector<UBO> ubos, std::vector<VulkanTexture> textures) {
+void VulkanDescriptor::updateDescriptorSets(VkDescriptorSet descriptorSet, std::vector<UBO> ubos, std::vector<VulkanTexture> textures, std::vector<SBO> sbos) {
 
 	std::vector<VkWriteDescriptorSet> descriptorWrites;
-	descriptorWrites.resize(ubos.size() + textures.size());
+	descriptorWrites.resize(ubos.size()+ sbos.size() + textures.size());
 	int index = 0;
 	std::vector< VkDescriptorBufferInfo> bufferInfos;
 	for (int i = 0; i < ubos.size(); i++) {
@@ -59,7 +59,6 @@ void VulkanDescriptor::updateDescriptorSets(VkDescriptorSet descriptorSet, std::
 		bufferInfo.buffer = ubos[i].buffer;
 		bufferInfo.offset = 0;
 		bufferInfo.range = ubos[i].size;
-
 		descriptorWrites[index].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 		descriptorWrites[index].dstSet = descriptorSet;
 		descriptorWrites[index].dstBinding = index;
@@ -70,16 +69,15 @@ void VulkanDescriptor::updateDescriptorSets(VkDescriptorSet descriptorSet, std::
 		index++;
 	}
 
+
+	
 	std::vector< VkDescriptorImageInfo> imageInfos;
 	for (int i = 0; i < textures.size(); i++) {
-
-
 		VkDescriptorImageInfo imageInfo{};
 		imageInfo.imageLayout = textures[i].imageLayout;
 		imageInfo.imageView = textures[i].imageView;
 		imageInfo.sampler = textures[i].imageSampler;
 		imageInfos.push_back(imageInfo);
-
 	}
 	for (int i = 0; i < textures.size(); i++) {
 
@@ -95,6 +93,31 @@ void VulkanDescriptor::updateDescriptorSets(VkDescriptorSet descriptorSet, std::
 		descriptorWrites[index].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 		descriptorWrites[index].descriptorCount = 1;
 		descriptorWrites[index].pImageInfo = &imageInfos[i];
+		index++;
+	}
+	std::vector< VkDescriptorBufferInfo> StoragebufferInfos;
+	
+	for (int i = 0; i < sbos.size(); i++) {
+		VkDescriptorBufferInfo binfo{};
+		binfo.buffer = sbos[i].buffer;
+		binfo.offset = 0;
+		binfo.range = sbos[i].size;
+		StoragebufferInfos.push_back(binfo);
+	}
+	for (int i = 0; i < sbos.size(); i++) {
+
+		VkDescriptorBufferInfo bufferInfo{};
+		bufferInfo.buffer = sbos[i].buffer;
+		bufferInfo.offset = 0;
+		bufferInfo.range = sbos[i].size;
+
+		descriptorWrites[index].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		descriptorWrites[index].dstSet = descriptorSet;
+		descriptorWrites[index].dstBinding = index;
+		descriptorWrites[index].dstArrayElement = 0;
+		descriptorWrites[index].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		descriptorWrites[index].descriptorCount = 1;
+		descriptorWrites[index].pBufferInfo = &StoragebufferInfos[i];
 		index++;
 	}
 

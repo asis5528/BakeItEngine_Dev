@@ -22,7 +22,7 @@ void main() {
 
 vec3 v = inPosition;
 //v.xyz+=(inColor.xyz*0.1)*0.6;
-    gl_Position = ubo.proj[gl_ViewIndex] * ubo.view[gl_ViewIndex] * ubo.model * vec4(v, 1.0);
+    gl_Position = ubo.proj[gl_ViewIndex] * ubo.view[gl_ViewIndex]  * vec4(v, 1.0);
 
    // gl_Position = vec4(v, 1.0);
     fragColor = inColor;

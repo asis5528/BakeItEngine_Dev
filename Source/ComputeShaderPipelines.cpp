@@ -16,15 +16,23 @@ ComputeShaderPipelines::ComputeShaderPipelines(VulkanBase* base,Scene *scene) {
     this->scene = scene;
     meshtosdf = new MeshToSdf(base, scene);
     fluidSim = new GaussianFluidSim(base,scene, meshtosdf->computeTexture); 
+    pottery = new Pottery(base, scene);
   //  ct3D = fluidSim->computeTexture;
-    scene->ptextures.push_back(fluidSim->computeTexture);
+    scene->ptextures.push_back(pottery->computeTexture);
+	scene->SBOs.push_back(pottery->computeSBO);
+   // scene->ptextures.push_back(fluidSim->computeTexture);
 }
 ComputeShaderPipelines::~ComputeShaderPipelines() {
     delete meshtosdf;
     delete fluidSim;
+    delete pottery;
 }
 
 void ComputeShaderPipelines::update(float time) {
     meshtosdf->update(time);
-    fluidSim->update(time);
+   // glfwSetMouseButtonCallback(base->window, mouse_button_cb);
+    //fluidSim->update(time);
+ //   if (ButtonPressed ||time<0.01) {
+        pottery->update(time);
+   // }
 }

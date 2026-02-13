@@ -73,6 +73,87 @@ void VBuffer::createIndexBuffer(Mesh& mesh) {
     vkFreeMemory(vulkandevice->device, stagingBufferMemory, nullptr);
 }
 
+void VBuffer::createInstanceIdBuffer(Mesh& mesh, uint32_t instanceCount) {
+    if (instanceCount == 0) {
+        return;
+    }
+
+    std::vector<int32_t> ids(instanceCount);
+    for (uint32_t i = 0; i < instanceCount; ++i) {
+        ids[i] = static_cast<int32_t>(i);
+    }
+
+    VkDeviceSize bufferSize = sizeof(int32_t) * ids.size();
+    VkBuffer stagingBuffer;
+    VkDeviceMemory stagingBufferMemory;
+    vulkandevice->createBuffer(
+        bufferSize,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        stagingBuffer,
+        stagingBufferMemory
+    );
+
+    void* data = nullptr;
+    vkMapMemory(vulkandevice->device, stagingBufferMemory, 0, bufferSize, 0, &data);
+    memcpy(data, ids.data(), static_cast<size_t>(bufferSize));
+    vkUnmapMemory(vulkandevice->device, stagingBufferMemory);
+
+    vulkandevice->createBuffer(
+        bufferSize,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        mesh.instanceIdBuffer,
+        mesh.instanceIdBufferMemory
+    );
+    vulkandevice->copyBuffer(stagingBuffer, mesh.instanceIdBuffer, bufferSize);
+
+    vkDestroyBuffer(vulkandevice->device, stagingBuffer, nullptr);
+    vkFreeMemory(vulkandevice->device, stagingBufferMemory, nullptr);
+
+    mesh.instanceCount = instanceCount;
+    mesh.instanceCapacity = instanceCount;
+    mesh.hasInstanceIdBuffer = true;
+}
+
+void VBuffer::updateInstanceIdBuffer(Mesh& mesh, const std::vector<int32_t>& instanceIds) {
+    if (!mesh.hasInstanceIdBuffer || mesh.instanceIdBuffer == VK_NULL_HANDLE) {
+        return;
+    }
+
+    uint32_t clampedCount = static_cast<uint32_t>(instanceIds.size());
+    if (clampedCount > mesh.instanceCapacity) {
+        clampedCount = mesh.instanceCapacity;
+    }
+    if (clampedCount == 0) {
+        mesh.instanceCount = 0;
+        return;
+    }
+
+    VkDeviceSize writeSize = sizeof(int32_t) * clampedCount;
+    VkBuffer stagingBuffer;
+    VkDeviceMemory stagingBufferMemory;
+    vulkandevice->createBuffer(
+        writeSize,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        stagingBuffer,
+        stagingBufferMemory
+    );
+
+    void* data = nullptr;
+    vkMapMemory(vulkandevice->device, stagingBufferMemory, 0, writeSize, 0, &data);
+    memcpy(data, instanceIds.data(), static_cast<size_t>(writeSize));
+    vkUnmapMemory(vulkandevice->device, stagingBufferMemory);
+
+    vulkandevice->copyBuffer(stagingBuffer, mesh.instanceIdBuffer, writeSize);
+
+    vkDestroyBuffer(vulkandevice->device, stagingBuffer, nullptr);
+    vkFreeMemory(vulkandevice->device, stagingBufferMemory, nullptr);
+
+    mesh.instanceCount = clampedCount;
+}
+
 std::vector<UBO> VBuffer::createUniformBuffers(std::vector<uint64_t> Buffersize) {
     std::vector<UBO> ubos;
 
@@ -103,6 +184,48 @@ std::vector<UBO> VBuffer::createUniformBuffers(std::vector<uint64_t> Buffersize)
     }*/
     return ubos;
 }
+
+std::vector<SBO> VBuffer::createStorageBuffers(std::vector<uint64_t> bufferSizes) {
+    std::vector<SBO> sbos;
+
+    for (size_t i = 0; i < bufferSizes.size(); i++) {
+        VkDeviceSize bufferSize = bufferSizes[i];
+
+        VkBuffer sBuffer;
+        VkDeviceMemory sBufferMemory;
+
+        vulkandevice->createBuffer(
+            bufferSize,
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,  // or DEVICE_LOCAL if staging
+            sBuffer,
+            sBufferMemory
+        );
+
+
+        // Fill with -1 right after creation
+        void* data;
+        vkMapMemory(vulkandevice->device, sBufferMemory, 0, bufferSize, 0, &data);
+
+        // Example: if buffer is float elements
+        size_t count = bufferSize / sizeof(int);
+        std::fill_n(reinterpret_cast<int*>(data), count, -1);
+
+        // If instead it's int32_t:
+        // size_t count = bufferSize / sizeof(int32_t);
+        // std::fill_n(reinterpret_cast<int32_t*>(data), count, -1);
+
+        vkUnmapMemory(vulkandevice->device, sBufferMemory);
+
+
+        SBO sbo = SBO{ sBuffer, sBufferMemory };
+        sbo.size = bufferSize;
+        sbos.push_back(sbo);
+    }
+
+    return sbos;
+}
+
 
 //Remove making sampler for each image,add a feature to initialize bunch of samplers at first and assigned them to different images
 PGEResourceTypes::Texture VBuffer::createTexturefromBuffer(VulkanTexture& texture,void *pixels) {

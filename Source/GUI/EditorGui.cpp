@@ -160,10 +160,34 @@
    
      
      ImGui::Begin("scene");
+	 ImGui::Text("FPS : %.1f", ImGui::GetIO().Framerate);
+     ImGui::Text("FPS2 : %.1f", m_scene->fps);
      tree(m_scene->rootNode);
 
      ImGui::End();
-     
+
+
+     ImGui::Begin("scene");
+     ImGui::Text("this is for testing");
+     if (ImGui::Button("MeshToSDF Dispatch")) {
+         m_scene->dispatch = true;
+     }
+     ImGui::Separator();
+     ImGui::Text("Brush");
+     const char* brushShapeName = "Cube";
+     if (m_scene->brushShapeMode == 1) brushShapeName = "Sphere";
+     else if (m_scene->brushShapeMode == 2) brushShapeName = "Plane";
+     ImGui::Text("Shape   : %s (U to toggle)", brushShapeName);
+     ImGui::Text("Radius  : %.4f (A/D)", m_scene->brushRadius);
+     ImGui::ColorEdit3("Color", &m_scene->brushColor.x);
+     ImGui::Text("Z Offset: %.4f (W/S)", m_scene->brushZAxis);
+     ImGui::Text("Action  : %s", (m_scene->brushAction < 0.5f) ? "Remove (RMB)" : "Add (LMB)");
+     ImGui::Text("Emissive Paint: %s (I)", m_scene->emissiveMode ? "On" : "Off");
+     ImGui::Text("Dirty Blocks: %d", m_scene->dirtyBlockCount);
+     ImGui::Text("Mode: %s (MMB toggle)", m_scene->cameraMoveMode ? "Camera" : "Edit");
+     ImGui::Text("Shift+LMB: Recolor existing blocks");
+     ImGui::End();
+    
      /*
      ImGui::Begin("inspector");
     if( ImGui::Button("MeshToSDF Dispatch")) {

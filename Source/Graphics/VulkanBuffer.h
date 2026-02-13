@@ -14,7 +14,10 @@ struct VBuffer {
 	void createVertexBuffer(Mesh& mesh); 
 	void createSkinnedVertexBuffer(Mesh& mesh);
 	void createIndexBuffer(Mesh& mesh);
+	void createInstanceIdBuffer(Mesh& mesh, uint32_t instanceCount);
+	void updateInstanceIdBuffer(Mesh& mesh, const std::vector<int32_t>& instanceIds);
 	std::vector<UBO> createUniformBuffers(std::vector<uint64_t> Buffersize);
+	std::vector<SBO> createStorageBuffers(std::vector<uint64_t> bufferSizes);
 //	std::vector 
 	PGEResourceTypes::Texture createTexturefromBuffer(VulkanTexture& texture, void* pixels);
 	PGEResourceTypes::Texture3D createTexture3DGeneral(int w,int h,int d);

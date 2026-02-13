@@ -138,6 +138,9 @@
     <ClCompile Include="ResourceManager.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="ComputeShaderPipelines\Pottery.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Imgui\imconfig.h">
@@ -199,6 +202,7 @@
     <ClInclude Include="ComputeShaderPipelines\MeshToSdf.h" />
     <ClInclude Include="ResourceManager.h" />
     <ClInclude Include="PGEResourceTypes.h" />
+    <ClInclude Include="ComputeShaderPipelines\Pottery.h" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="REMAINDER.txt" />

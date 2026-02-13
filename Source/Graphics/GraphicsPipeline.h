@@ -22,6 +22,7 @@
         int MultiviewLayer = 1;
         VkDevice device;
         bool skinned = false;
+        bool useInstanceIdAttribute = false;
       //  VkPipelineCache pipelineCache;
         std::vector<descriptorTypes> descriptorTypes;
 
@@ -32,6 +33,7 @@
         std::vector<VkPipelineShaderStageCreateInfo> shaderStagess;
         VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
         VkVertexInputBindingDescription bindingDescription;
+        std::vector<VkVertexInputBindingDescription> bindingDescriptions;
        // std::array<VkVertexInputAttributeDescription, 3> attributeDescriptions;
         std::vector< VkVertexInputAttributeDescription> attributeDescriptions;
         VkPipelineInputAssemblyStateCreateInfo inputAssembly{};

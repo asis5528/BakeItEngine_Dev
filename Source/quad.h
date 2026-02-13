@@ -8,6 +8,7 @@ public:
 	GraphicsPipeline *graphicsPipeline;
 	VulkanBase* base;
 	VkDescriptorSet descriptorSet;
+	VulkanShader shader;
 	VkDescriptorPool descriptorPool;
 	std::vector<VulkanTexture> textures;
 	Framebuffer *fr;

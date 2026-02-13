@@ -9,8 +9,14 @@ Scene::Scene(VulkanBase* vbase) {
    
 }
 
+
+
+
 void Scene::init()
 {
+    printf("Setting mouse callback to my function\n");
+    //glfwSetWindowUserPointer(base->window, this);
+    //glfwSetMouseButtonCallback(base->window, mouse_button_cbb);
     standardSampler = base->vbuffer->createTextureSampler(1);
     
    
@@ -32,9 +38,9 @@ void Scene::init()
     quad->createdescriptors();
     quads.push_back(quad);
     */
-    postprocessingManager = new PostProcessingManager(base,framebuffers[0]);
+    postprocessingManager = new PostProcessingManager(base,this,framebuffers[0]);
     scenePipelines = new ScenePipelines(base, framebuffers[0]->renderPass);
-
+   
     /*
     GraphicsPipeline* opipe = new GraphicsPipeline();
     pipelines.push_back(opipe);
@@ -173,8 +179,68 @@ void Scene::renderPass() {
    
 }
 
+static float an;
+
+struct FreeCam
+{
+    glm::vec3 pos = glm::vec3(0, 0, 0);
+    float yaw = -90.0f;
+    float pitch = 0.0f;
+    float roll = 0.0f;
+};
+
+void UpdateFreeCamera(
+    FreeCam& cam,
+    glm::mat4& outView,
+    float dx, float dy,            // mouse delta (pixels)
+    float moveF, float moveR, float moveU, // movement intent (-1..1)
+    float rollInput,               // roll intent (-1..1)
+    float dt,
+    float mouseSens = 0.1f,
+    float moveSpeed = 5.0f,
+    float rollSpeed = 90.0f
+)
+{
+    // --- mouse look ---
+    cam.yaw += dx * mouseSens;
+    cam.pitch += dy * mouseSens;
+    cam.pitch = glm::clamp(cam.pitch, -89.0f, 89.0f);
+    cam.roll += rollInput * rollSpeed * dt;
+
+    // --- forward vector ---
+    glm::vec3 forward;
+    forward.x = cos(glm::radians(cam.yaw)) * cos(glm::radians(cam.pitch));
+    forward.y = sin(glm::radians(cam.pitch));
+    forward.z = sin(glm::radians(cam.yaw)) * cos(glm::radians(cam.pitch));
+    forward = glm::normalize(forward);
+
+    // --- basis ---
+    glm::vec3 worldUp = glm::vec3(0, 1, 0);
+    glm::vec3 right = glm::normalize(glm::cross(forward, worldUp));
+    glm::vec3 up = glm::normalize(glm::cross(right, forward));
+
+    if (glm::abs(cam.roll) > 0.0001f) {
+        glm::mat4 rollRot = glm::rotate(glm::mat4(1.0f), glm::radians(cam.roll), forward);
+        up = glm::normalize(glm::vec3(rollRot * glm::vec4(up, 0.0f)));
+        right = glm::normalize(glm::cross(forward, up));
+    }
+
+    // --- movement (camera space) ---
+    cam.pos += forward * moveF * moveSpeed * dt;
+    cam.pos += right * moveR * moveSpeed * dt;
+    cam.pos += up * moveU * moveSpeed * dt;
+
+    // --- view matrix ---
+    outView = glm::lookAt(cam.pos, cam.pos + forward, up);
+}
 void Scene::update(float iTime) {
    
+
+    static float tmi = 0.0;
+
+    float delTime = iTime - tmi;
+    tmi = iTime;
+
     float time = iTime;
     
   
@@ -184,15 +250,74 @@ void Scene::update(float iTime) {
 #ifndef VR
     ///for non vr////////
     
-    proj[0] = glm::perspective(glm::radians(45.0f), (float)viewport_resolution.x / (float)viewport_resolution.y, 0.1f, 1000.0f);
+    proj[0] = glm::perspective(glm::radians(45.0f), (float)viewport_resolution.x / (float)viewport_resolution.y, camNearPlane,camFarPlane);
+    // TAA disabled: keep projection stable.
+    taaJitter = glm::vec2(0.0f);
     // offset =1.5;
     
     ///for non vr////////
-    float angle = (sin(iTime/3.)*3.1415);
-    float an = sin(iTime / 12.) * 0.3;
+    
+    float angle = (sin(iTime/3.)*3.1415)*0.;
+ //   float an = iTime*0.;
+    double mouseX, mouseY;
+    glfwGetCursorPos(base->window, &mouseX, &mouseY);
+
+    float msx = mouseX / base->swapChain->swapChainExtent.width;
+    float msy = mouseY / base->swapChain->swapChainExtent.height;
+    static float msxold = 0.0;
+	static float msyold = 0.0;
+	float msxdelta = msx - msxold;
+	float msydelta = msy - msyold;
+	msxold = msx;
+	msyold = msy;
+    
+
+    std::cout << msx<<"\n";
+    if(cameraMoveMode){
+       
+        an += (msx-0.5)*0.03;
+        //std::cout << an << "\n";
+	}
    // angle = 1.4;
-    glm::vec3 camPos = glm::vec3(glm::sin(3.1415) * offset, glm::cos(3.1415) * offset, glm::sin(an)*0.);
-   view[0] = glm::lookAt(camPos, glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+   //camPos = glm::vec3(glm::sin(an) * offset,  glm::cos(an)*0., glm::cos(an ) * offset);
+   if (cameraMoveMode) {
+	   std::cout << "camPos: " << camPos.x << " " << camPos.y << " " << camPos.z << "\n";
+   }
+ //  view[0] = glm::lookAt(camPos, glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+
+   float dx = msxdelta* base->swapChain->swapChainExtent.width*4.;
+   float dy = -msydelta* base->swapChain->swapChainExtent.height*4.;
+   static float forwardKey = 0;
+   static float backwardKey = 0;
+   static float rightKey = 0;
+   static float leftKey = 0;
+   float cameraStep = 0.005;
+   if (slowZoom) cameraStep = 0.0001;
+   forwardKey += WKeyDown ? cameraStep : 0.0;
+   backwardKey += SKeyDown ? cameraStep : 0.0;
+   forwardKey *= WKeyDown ? 1.0 : 0.0;
+   backwardKey *= SKeyDown ? 1.0 : 0.0;
+   rightKey += DKeyDown ? cameraStep : 0.0;
+   leftKey += AKeyDown ? cameraStep : 0.0;
+   rightKey *= DKeyDown ? 1.0 : 0.0;
+   leftKey *= AKeyDown ? 1.0 : 0.0;
+
+   float upKey = 0;
+   float downKey = 0;
+   float moveF = forwardKey - backwardKey; // W/S
+   float moveR = rightKey - leftKey;      // D/A
+   float moveU = upKey - downKey;      // Space/Shift
+   float rollInput = 0.0f;
+   rollInput += LeftArrowDown ? 1.0f : 0.0f;
+   rollInput -= RightArrowDown ? 1.0f : 0.0f;
+   static FreeCam cam;
+   if (cameraMoveMode || LeftArrowDown || RightArrowDown) {
+       float mouseDx = cameraMoveMode ? dx : 0.0f;
+       float mouseDy = cameraMoveMode ? dy : 0.0f;
+       UpdateFreeCamera(cam, view[0], mouseDx, mouseDy, moveF, moveR, moveU, rollInput, delTime);
+       camPos = cam.pos;
+   }
+
 #endif
   //  glm::vec3 camPos;
     UniformBufferObject ubo{};
@@ -295,9 +420,14 @@ void Scene::update(float iTime) {
                         }
                         else {
                             BasicUbo bubo{};
-                            // bubo.color = mesh->color;
-                            bubo.color = glm::inverse(ubo.model)* glm::vec4(camPos, 1.);
-                            bubo.color.a = iTime;
+                            if (object.shader[i].graphicsPipeline == pipelines[4]) {
+                                // Volumetric object base color; per-block emissive comes from block metadata.
+                                bubo.color = glm::vec4(1.0f, 0.35f, 0.75f, iTime);
+                            } else {
+                                // Legacy behavior for non-volumetric basic materials.
+                                bubo.color = glm::inverse(ubo.model) * glm::vec4(camPos, 1.);
+                                bubo.color.a = iTime;
+                            }
                             object.shader[i].ubos[1].map(base->device, sizeof(bubo), &bubo);
                         }
                     }
@@ -322,6 +452,9 @@ void Scene::update(float iTime) {
         }
     }*/
     }
+
+	postprocessingManager->update();
+
 }
 
 void Scene::createSceneDescriptor()
@@ -336,7 +469,7 @@ void Scene::createSceneDescriptor()
         }
     }
     base->vulkandescriptor->createDescriptorPool(objectWithMeshSize,
-        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ,VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER },
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ,VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,VK_DESCRIPTOR_TYPE_STORAGE_BUFFER },
         objectWithMeshSize + 10, &descriptorPool);
 
     //std::vector<VkDescriptorSetLayout> layouts(objects.size(), base->objectPipeline->descriptorSetLayout);
@@ -379,10 +512,12 @@ void Scene::createSceneDescriptor()
                   // MaterialTexturedData k = *dat;
                    descriptorsTextures.push_back(ResourceManager::getTexture(ptextures[dat->DiffuseTexture].id));
                }
-               base->vulkandescriptor->updateDescriptorSets(object->shader[meshID].descriptorSet, { object->shader[meshID].ubos }, descriptorsTextures);
+               base->vulkandescriptor->updateDescriptorSets(object->shader[meshID].descriptorSet, { object->shader[meshID].ubos }, descriptorsTextures, object->shader[meshID].sbos);
            }
         }
     }
+	postprocessingManager->createDescriptors();
+
    rootNode.updateTransoformation(glm::mat4(1.0),objects);
 
 }
@@ -419,6 +554,10 @@ void Scene::clean() {
 
         vkDestroyBuffer(base->device, mesh.vertexBuffer, nullptr);
         vkFreeMemory(base->device, mesh.vertexBufferMemory, nullptr);
+        if (mesh.hasInstanceIdBuffer && mesh.instanceIdBuffer != VK_NULL_HANDLE) {
+            vkDestroyBuffer(base->device, mesh.instanceIdBuffer, nullptr);
+            vkFreeMemory(base->device, mesh.instanceIdBufferMemory, nullptr);
+        }
     }
   /*
     for (GraphicsPipeline*& pipeline : pipelines) {
@@ -501,5 +640,6 @@ void Scene::recreate()
 
 }
 void Scene::cleanDescriptors() {
+    
     vkDestroyDescriptorPool(base->device, descriptorPool, nullptr);
 }

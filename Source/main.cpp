@@ -5,6 +5,8 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
+
+#define GLM_FORCE_RIGHT_HANDED
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #define GLM_ENABLE_EXPERIMENTAL
@@ -39,7 +41,7 @@ const uint32_t HEIGHT = 601;
 //for quad to render compute texture
 //const std::string MODEL_PATH = "models/nerd.glb";
 
-const std::string MODEL_PATH = "models/cube.glb";
+const std::string MODEL_PATH = "models/ube.glb";
 
 const std::string TEXTURE_PATH = "textures/bounds3.png";
 const std::string TEXTURE_PATH2 = "textures/viking_room.png";
@@ -93,7 +95,7 @@ private:
     VulkanBase *base;
 
     Scene* scene;
-
+    bool framebufferResized = false;
     Loader* loader;
 
     VulkanImgui *vulkanImgui;
@@ -124,9 +126,26 @@ private:
         glfwSetWindowUserPointer(window, this);
         glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
         glfwSetDropCallback(window, dropCallback);
+        glfwSetMouseButtonCallback(window, mouse_button_cbb);
          
     }
+    static void mouse_button_cbb(GLFWwindow* win, int button, int action, int mods) {
+        auto app = reinterpret_cast<Vulkan*>(glfwGetWindowUserPointer(win));
+		Scene* scene = app->scene;
 
+        // now you can safely access members
+        scene->ButtonPressed = (action == GLFW_PRESS);
+        scene->ShiftDown = ((mods & GLFW_MOD_SHIFT) != 0);
+
+        if (button == GLFW_MOUSE_BUTTON_LEFT)
+            scene->LeftButtonDown = (action == GLFW_PRESS);
+        else if (button == GLFW_MOUSE_BUTTON_RIGHT)
+            scene->RightButtonDown = (action == GLFW_PRESS);
+        else if (button == GLFW_MOUSE_BUTTON_MIDDLE && action == GLFW_PRESS) {
+            scene->cameraMoveMode = !scene->cameraMoveMode;
+            scene->MiddleButtonDown = scene->cameraMoveMode; // keep legacy path behavior aligned
+        }
+    }
     static void dropCallback(GLFWwindow* window, int path_count, const char* paths[]) {
 
         auto app = reinterpret_cast<Vulkan*>(glfwGetWindowUserPointer(window));
@@ -148,7 +167,13 @@ private:
     static void scroll_callback(GLFWwindow* window, double xoffset, double yoffset)
     {
         auto app = reinterpret_cast<Vulkan*>(glfwGetWindowUserPointer(window));
-        app->scene->offset -= float(yoffset)*0.1;
+        if (app->scene->slowZoom) {
+            app->scene->offset -= float(yoffset) * 0.001;
+        }
+        else {
+            app->scene->offset -= float(yoffset) * 0.1;
+        }
+        
     }
 
     static void  mouse_callback(GLFWwindow* window, double xpos, double ypos) {
@@ -156,8 +181,15 @@ private:
     }
 
     static void framebufferResizeCallback(GLFWwindow* window, int width, int height) {
+        if (!window) return;
+
         auto app = reinterpret_cast<Vulkan*>(glfwGetWindowUserPointer(window));
-        app->base->swapChain->framebufferResized = true;
+        if (!app) return;
+        if (app->base == nullptr) return;
+        if (app->base->swapChain == nullptr) return;
+        app->framebufferResized = true;
+        //if (app->base->swapChain->framebufferResized == nullptr) return;
+        //app->base->swapChain->framebufferResized = true;
     }
 
  
@@ -170,52 +202,62 @@ private:
 #endif
 
         base = new VulkanBase();
-        
+
         base->init(window);
         ResourceManager::setVulkanBase(base);
-       // ResourceManager& resourceManager = ResourceManager::getInstance();
+        // ResourceManager& resourceManager = ResourceManager::getInstance();
         scene = new Scene(base);
         loader = new Loader(base, scene);
-        editorGui = new EditorGui(scene,base);
-       
+        editorGui = new EditorGui(scene, base);
+
         //ResourceManager::addTexture(createTexture(TEXTURE_PATH.c_str()));
         scene->ptextures.push_back(createTexture(TEXTURE_PATH.c_str()));
-      //  ResourceManager::addTexture(createTexture(TEXTURE_PATH2.c_str()));
+        //  ResourceManager::addTexture(createTexture(TEXTURE_PATH2.c_str()));
         scene->ptextures.push_back(createTexture(TEXTURE_PATH2.c_str()));
         //scene->textures.push_back(createTexture3D());
-       
+
         scene->init();
-        
+
         vulkanImgui = new VulkanImgui(base, window);
         const char* p[] = { MODEL_PATH.c_str() };
-      //  loadModel(MODEL_PATH.c_str());
-        loader->load(1,p);
-     //   scene->materials[0].skinnedPipeline = scene->pipelines[1];
-    //    scene->materials[0].type = TexturedMaterial;
-       // MaterialTexturedData dat;
-      //  dat.DiffuseTexture = 0;
-       // scene->materials[0].materialData = &dat;
-   
-      
+        //  loadModel(MODEL_PATH.c_str());
+        loader->load(1, p);
+        //   scene->materials[0].skinnedPipeline = scene->pipelines[1];
+       //    scene->materials[0].type = TexturedMaterial;
+          // MaterialTexturedData dat;
+         //  dat.DiffuseTexture = 0;
+          // scene->materials[0].materialData = &dat;
+
+
         clines = new ComputeShaderPipelines(base, scene);
-       // prepareCompute();
+        // prepareCompute();
 
-     //   scene->computeTexture = ct;
-        
+      //   scene->computeTexture = ct;
 
-        //scene->textures.push_back(clines->ct3D);
+
+         //scene->textures.push_back(clines->ct3D);
         scene->objects[0].shader[0].graphicsPipeline = scene->pipelines[4];
         //scene->objects[0].ModelMatrix = glm::translate(scene->objects[0].ModelMatrix, glm::vec3(0., 1., 0.));
         Material material;
         material.type = TexturedMaterial;
         MaterialTexturedData* matData = new MaterialTexturedData();
-        matData->DiffuseTexture = scene->ptextures.size()-1;
+        matData->DiffuseTexture = scene->ptextures.size() - 1;
         material.materialData = matData;
         scene->materials.push_back(material);
         scene->meshes[scene->objects[0].meshID[0]].matID = scene->materials.size() - 1;
 
-
-
+        scene->objects[0].shader[scene->objects[0].meshID[0]].sbos = {
+            scene->SBOs[0][0],
+            scene->SBOs[0][1],
+            scene->SBOs[0][2],
+            scene->SBOs[0][3]
+        };
+        scene->postprocessingManager->volumeRendering->quads[0]->shader.sbos = {
+            scene->SBOs[0][0],
+            scene->SBOs[0][1],
+            scene->SBOs[0][2],
+            scene->SBOs[0][3]
+        };
         //scene->meshes[scene->objects[0].meshID[0]].matID =  
        
         scene->createSceneDescriptor();
@@ -283,7 +325,7 @@ private:
         cleanCommandBuffers();
 
 
-        vkDestroySwapchainKHR(base->device, base->swapChain->swapChain, nullptr);
+        //vkDestroySwapchainKHR(base->device, base->swapChain->swapChain, nullptr);
 
 
     }
@@ -714,6 +756,22 @@ private:
         float iTime = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
         float deltaTime = iTime - oldTime;
         oldTime = iTime;
+
+        float fps = 0.0f;
+        if (deltaTime > 0.0f) {
+            fps = 1.0f / deltaTime;
+        }
+         static float fpsTimer = 0.0f;
+    static int frames = 0;
+    frames++;
+    scene->fps = frames / fpsTimer;
+    fpsTimer += deltaTime;
+    if (fpsTimer >= 1.0f) {
+        std::cout << "FPS: " << frames / fpsTimer << std::endl;
+        frames = 0;
+        fpsTimer = 0.0f;
+    }
+
        // static float iTime = 0.;
        // iTime += 0.2;
        // std::cout << delta << "\n";
@@ -721,7 +779,12 @@ private:
     
       //  if (frameid == 0) {
        
-            
+
+      //  vkWaitForFences(base->device, 1, &base->inFlightFences[base->currentFrame],
+        //    VK_TRUE, UINT64_MAX);
+
+
+        uint32_t imageIndex = base->getFrameIndex();
         vulkanImgui->newFrame();
       
 
@@ -730,7 +793,6 @@ private:
         vr::VREvent_t event;
         //sym->PollNextEvent(&event, sizeof(event));
 
-        uint32_t imageIndex = base->getFrameIndex();
 
         //IMGUI/////////////
   
@@ -754,8 +816,8 @@ private:
         renderVR();
 #endif       
         
-        if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || base->swapChain->framebufferResized) {
-            base->swapChain->framebufferResized = false;
+        if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebufferResized) {
+            framebufferResized = false;
             recreateSwapChain();
             editorGui->ds[0] = ImGui_ImplVulkan_AddTexture(scene->standardSampler, scene->postprocessingManager->framebuffers[scene->postprocessingManager->bufferSize - 1]->MultisampledColorImage->imageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         }

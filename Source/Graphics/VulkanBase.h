@@ -16,6 +16,7 @@ public:
 	VkPhysicalDevice vkPhysicalDevice;
 	VkDevice device;
 	VkQueue queue;
+	GLFWwindow* window;
 	VkDebugUtilsMessengerEXT vkDebugMessenger;
 	VkSampleCountFlagBits msaaSamples;
 	VulkanDevice* vulkandevice;
@@ -44,7 +45,7 @@ public:
 	~VulkanBase();
 
 private:
-	GLFWwindow* window;
+	
 	const int MAX_FRAMES_IN_FLIGHT = 2;
 	
 	void createInstance();

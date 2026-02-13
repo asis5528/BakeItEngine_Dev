@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "Graphics/GraphicsPipeline.h"
 struct UBO {
 	VkBuffer buffer;
@@ -20,6 +20,21 @@ struct SBO {
 	VkBuffer buffer;
 	VkDeviceMemory bufferMemory;
 	uint64_t size;
+	void map(const VkDevice device, uint64_t size, void* ubo) {
+		void* data;
+		vkMapMemory(device, bufferMemory, 0, size, 0, &data);
+		//void* k = &ubo;
+		memcpy(data, ubo, size);
+		vkUnmapMemory(device, bufferMemory);
+
+	}
+
+	void read(const VkDevice device, uint64_t size, void* dst) {
+		void* src;
+		vkMapMemory(device, bufferMemory, 0, size, 0, &src);
+		memcpy(dst, src, size);   // <-- GPU → CPU
+		vkUnmapMemory(device, bufferMemory);
+	}
 
 };
 struct VulkanShader {
@@ -27,6 +42,7 @@ struct VulkanShader {
 	VkDescriptorPool descriptorPool;
 	VkDescriptorSet descriptorSet;
 	std::vector<UBO> ubos;
+	std::vector<SBO> sbos;
 
 };
 

@@ -14,6 +14,7 @@ GaussianFluidSim::GaussianFluidSim(VulkanBase* base, Scene* scene, PGEResourceTy
 	int size = 128;
 	computeTexture = base->vbuffer->createTexture3DGeneral(size, size, size);
 	computeTexture2 = base->vbuffer->createTexture3DGeneral(size, size, size);
+	computeTexture3 = base->vbuffer->createTexture3DGeneral(size, size, size);
 
 	computeUBO = base->vbuffer->createUniformBuffers({ sizeof(fluidUBO) });
 	ComputeInput input;

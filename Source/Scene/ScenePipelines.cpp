@@ -22,7 +22,6 @@ ScenePipelines::ScenePipelines(VulkanBase *base,VkRenderPass renderPass) {
     pipelines[0]->setupPipeline(input);
     pipelines[0]->createGraphicsPipeline();
 
-
     GraphicsPipeline* skinned = new GraphicsPipeline();
     pipelines.push_back(skinned);
     input.skinned = true;
@@ -30,7 +29,6 @@ ScenePipelines::ScenePipelines(VulkanBase *base,VkRenderPass renderPass) {
     pipelines[1]->bufferSize = { sizeof(SkinnedUniformBufferObject),sizeof(ubo1) };
     pipelines[1]->setupPipeline(input);
     pipelines[1]->createGraphicsPipeline();
-
 
     GraphicsPipeline* basic = new GraphicsPipeline();
     pipelines.push_back(basic);
@@ -54,17 +52,25 @@ ScenePipelines::ScenePipelines(VulkanBase *base,VkRenderPass renderPass) {
     pipelines[3]->createGraphicsPipeline();
 
     GraphicsPipeline* volumetric = new GraphicsPipeline();
-    volumetric->frontFaceCull = 0;
+    volumetric->frontFaceCull = 1;
     pipelines.push_back(volumetric);
     input.skinned = false;
     input.vertexShaderpath = "shaders/ObjectShaders/ObjectVolumetricVS.spv";
     input.fragmentShaderpath = "shaders/ObjectShaders/ObjectVolumetricFS.spv";
+    input.useInstanceIdAttribute = true;
 
-    input.descriptorTypes = { descriptorTypes{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_SHADER_STAGE_VERTEX_BIT},
+    input.descriptorTypes = { descriptorTypes{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_SHADER_STAGE_ALL_GRAPHICS},
          descriptorTypes{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_SHADER_STAGE_FRAGMENT_BIT},
-         descriptorTypes{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,VK_SHADER_STAGE_FRAGMENT_BIT} };
+         descriptorTypes{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,VK_SHADER_STAGE_FRAGMENT_BIT,
+},descriptorTypes{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,VK_SHADER_STAGE_FRAGMENT_BIT,
+} ,descriptorTypes{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,VK_SHADER_STAGE_ALL_GRAPHICS,
+},descriptorTypes{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,VK_SHADER_STAGE_FRAGMENT_BIT,
+},descriptorTypes{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,VK_SHADER_STAGE_ALL_GRAPHICS,
+} };
     pipelines[4]->bufferSize = { sizeof(UniformBufferObject),sizeof(BasicUbo) };
+    
     pipelines[4]->setupPipeline(input);
+    //pipelines[4]->infoLocal.depthStencil.depthWriteEnable = false;
     pipelines[4]->createGraphicsPipeline();
 }
 void ScenePipelines::recreate(VkRenderPass renderPass, VkExtent2D extent)

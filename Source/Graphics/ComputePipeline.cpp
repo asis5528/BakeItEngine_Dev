@@ -267,6 +267,7 @@ void ComputePipeline::dispatch(uint32_t x, uint32_t y, uint32_t z)
     vkCmdBindDescriptorSets(computeCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, &descriptorSet, 0, 0);
 
     vkCmdDispatch(computeCommandBuffer,x, y, z);
+    
 
     if (vkEndCommandBuffer(computeCommandBuffer) != VK_SUCCESS) {
         throw std::runtime_error("failed to record command buffer!");
@@ -285,10 +286,16 @@ void ComputePipeline::submit()
     computeSubmitInfo.commandBufferCount = 1;
     computeSubmitInfo.pCommandBuffers = &computeCommandBuffer;
 
+    VkMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 
+   
     if (vkQueueSubmit(base->queue, 1, &computeSubmitInfo, computeFence) != VK_SUCCESS) {
         throw std::runtime_error("failed to sumbit queue!");
     }
+
 }
 ComputePipeline::~ComputePipeline() {
     vkDestroyShaderModule(base->device, shaderModule, nullptr);

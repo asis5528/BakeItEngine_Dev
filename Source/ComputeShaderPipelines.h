@@ -4,6 +4,7 @@
 #include "Graphics/ComputePipeline.h"
 #include "ComputeShaderPipelines/GaussianFluidSim.h"
 #include "ComputeShaderPipelines/MeshToSdf.h"
+#include "ComputeShaderPipelines/Pottery.h"
 class ComputeShaderPipelines
 {
 
@@ -24,6 +25,7 @@ public:
 
     GaussianFluidSim *fluidSim;
     MeshToSdf *meshtosdf;
+    Pottery* pottery;
     ComputeShaderPipelines(VulkanBase* base, Scene* scene);
     ~ComputeShaderPipelines();
     void update(float time);
