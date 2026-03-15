@@ -508,6 +508,7 @@ void VBuffer::generateMipmaps(VkImage image, VkFormat imageFormat, int32_t texWi
 VkSampler VBuffer::createTextureSampler(uint32_t miplevels) {
     VkPhysicalDeviceProperties properties{};
     vkGetPhysicalDeviceProperties(vulkandevice->physicalDevice, &properties);
+    const float mipLodBias = 0.5f;
     
     VkSamplerCreateInfo samplerInfo{};
     samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
@@ -525,7 +526,7 @@ VkSampler VBuffer::createTextureSampler(uint32_t miplevels) {
     samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
     samplerInfo.minLod = 0.0f;
     samplerInfo.maxLod = static_cast<float>(miplevels);
-    samplerInfo.mipLodBias = 0.0f;
+    samplerInfo.mipLodBias = mipLodBias;
     
     VkSampler textureSampler;
     if (vkCreateSampler(vulkandevice->device, &samplerInfo, nullptr, &textureSampler) != VK_SUCCESS) {

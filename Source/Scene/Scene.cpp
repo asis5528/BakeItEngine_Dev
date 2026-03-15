@@ -4,6 +4,47 @@
 #include "../Graphics/VulkanUtils.h"
 #include "../ResourceManager.h"
 
+namespace
+{
+float Halton(uint32_t index, uint32_t base)
+{
+    float result = 0.0f;
+    float invBase = 1.0f / float(base);
+    float fraction = invBase;
+
+    while (index > 0) {
+        result += float(index % base) * fraction;
+        index /= base;
+        fraction *= invBase;
+    }
+
+    return result;
+}
+
+glm::vec2 NextTaaJitter(uint32_t frameIndex, float width, float height)
+{
+    if (width <= 0.0f || height <= 0.0f) {
+        return glm::vec2(0.0f);
+    }
+
+    const glm::vec2 halton = glm::vec2(
+        Halton((frameIndex % 8u) + 1u, 2u),
+        Halton((frameIndex % 8u) + 1u, 3u));
+    const float jitterScalePixels = 0.20f;
+    const glm::vec2 jitterPixels = (halton - glm::vec2(0.5f)) * jitterScalePixels;
+
+    return glm::vec2(
+        (2.0f * jitterPixels.x) / width,
+        (2.0f * jitterPixels.y) / height);
+}
+
+void ApplyProjectionJitter(glm::mat4& projection, const glm::vec2& jitterNdc)
+{
+    projection[2][0] += jitterNdc.x*17.;
+    projection[2][1] += jitterNdc.y*17.;
+}
+}
+
 Scene::Scene(VulkanBase* vbase) {
 	this->base = vbase;
    
@@ -249,10 +290,15 @@ void Scene::update(float iTime) {
     }
 #ifndef VR
     ///for non vr////////
-    
-    proj[0] = glm::perspective(glm::radians(45.0f), (float)viewport_resolution.x / (float)viewport_resolution.y, camNearPlane,camFarPlane);
-    // TAA disabled: keep projection stable.
-    taaJitter = glm::vec2(0.0f);
+
+    const float viewportWidth = glm::max(viewport_resolution.x, 1.0f);
+    const float viewportHeight = glm::max(viewport_resolution.y, 1.0f);
+    static uint32_t taaFrameIndex = 0;
+
+    projNoJitter[0] = glm::perspective(glm::radians(camFovDegrees), viewportWidth / viewportHeight, camNearPlane,camFarPlane);
+    proj[0] = projNoJitter[0];
+    taaJitter = NextTaaJitter(taaFrameIndex++, viewportWidth, viewportHeight);
+    ApplyProjectionJitter(proj[0], taaJitter);
     // offset =1.5;
     
     ///for non vr////////
@@ -272,7 +318,7 @@ void Scene::update(float iTime) {
 	msyold = msy;
     
 
-    std::cout << msx<<"\n";
+    //std::cout << msx<<"\n";
     if(cameraMoveMode){
        
         an += (msx-0.5)*0.03;
@@ -407,12 +453,13 @@ void Scene::update(float iTime) {
 
                     for (int i = 0; i < object.meshID.size(); i++) {
                         Mesh* mesh = &meshes[object.meshID[i]];
-                        if (mesh->vertices.size() > 100.) {
-                            ubo.model = glm::translate(ubo.model, glm::vec3(1., -0.3, 0.));
-                        }
-                        else {
-                            ubo.model = glm::rotate(ubo.model, angle, glm::vec3(0., 1., 0.));
-
+                        if (object.shader[i].graphicsPipeline != pipelines[4]) {
+                            if (mesh->vertices.size() > 100.) {
+                                ubo.model = glm::translate(ubo.model, glm::vec3(1., -0.3, 0.));
+                            }
+                            else {
+                                ubo.model = glm::rotate(ubo.model, angle, glm::vec3(0., 1., 0.));
+                            }
                         }
                         object.shader[i].ubos[0].map(base->device, sizeof(ubo), &ubo);
                         if (mesh->texID >= 0) {
@@ -469,7 +516,16 @@ void Scene::createSceneDescriptor()
         }
     }
     base->vulkandescriptor->createDescriptorPool(objectWithMeshSize,
-        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ,VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,VK_DESCRIPTOR_TYPE_STORAGE_BUFFER },
+        {
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+        },
         objectWithMeshSize + 10, &descriptorPool);
 
     //std::vector<VkDescriptorSetLayout> layouts(objects.size(), base->objectPipeline->descriptorSetLayout);

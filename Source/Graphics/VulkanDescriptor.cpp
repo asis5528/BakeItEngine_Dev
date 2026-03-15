@@ -1,5 +1,6 @@
 #include "VulkanDescriptor.h"
 #include <stdexcept>
+#include <unordered_map>
 
 VulkanDescriptor::VulkanDescriptor(VulkanDevice* vulkandevice) {
 	this->vulkandevice = vulkandevice;
@@ -7,12 +8,17 @@ VulkanDescriptor::VulkanDescriptor(VulkanDevice* vulkandevice) {
 
 void VulkanDescriptor::createDescriptorPool(uint32_t size, std::vector<VkDescriptorType> descriptorTypes, uint32_t maxsets, VkDescriptorPool* descriptorPool)
 {
-	const uint32_t siz = descriptorTypes.size();
 	std::vector<VkDescriptorPoolSize> poolSizes;
-	poolSizes.resize(descriptorTypes.size());
-	for (int i = 0; i < poolSizes.size(); i++) {
-		poolSizes[i].type = descriptorTypes[i];
-		poolSizes[i].descriptorCount = static_cast<uint32_t>(size+1);
+	std::unordered_map<VkDescriptorType, uint32_t> descriptorCounts;
+	for (VkDescriptorType descriptorType : descriptorTypes) {
+		descriptorCounts[descriptorType] += static_cast<uint32_t>(size + 1);
+	}
+	poolSizes.reserve(descriptorCounts.size());
+	for (const auto& [descriptorType, descriptorCount] : descriptorCounts) {
+		VkDescriptorPoolSize poolSize{};
+		poolSize.type = descriptorType;
+		poolSize.descriptorCount = descriptorCount;
+		poolSizes.push_back(poolSize);
 	}
 	VkDescriptorPoolCreateInfo poolInfo{};
 	poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;

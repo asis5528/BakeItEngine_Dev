@@ -24,6 +24,9 @@ const std::vector<const char*> validationLayers = {
  }
 
 VkSampleCountFlagBits VulkanDevice::getMaxUsableSampleCount() {
+    // Temporary override: keep the MSAA path intact but force the lowest valid sample count.
+    return VK_SAMPLE_COUNT_1_BIT;
+
     VkPhysicalDeviceProperties physicalDeviceProperties;
     vkGetPhysicalDeviceProperties(physicalDevice, &physicalDeviceProperties);
 

@@ -5,8 +5,11 @@ layout(location = 0) out vec4 outColor;
 layout(std140, binding = 0) uniform CameraUBO {
   mat4 invView;
   mat4 invProj;
+  mat4 invProjNoJitter;
   mat4 currViewProj;
   mat4 prevViewProj;
+  mat4 currViewProjNoJitter;
+  mat4 prevViewProjNoJitter;
   vec3 camPos;
   vec2 resolution;
   float nearPlane;
@@ -15,6 +18,9 @@ layout(std140, binding = 0) uniform CameraUBO {
   vec4 brushMeta; // x: action, y: shape mode (0 cube, 1 sphere, 2 plane)
   vec4 taaData;   // x,y current jitter, z,w previous jitter
   vec4 taaState;  // x: history valid (0/1)
+  vec4 floorBlobShadows[64];
+  vec4 floorBlobBounceColors[64];
+  vec4 floorBlobMeta; // x: count
 };
 layout(binding = 1) uniform sampler2DArray texSampler;
 layout(binding = 2) uniform sampler2DArray depthSampler;
@@ -28,10 +34,24 @@ layout(std430, binding = 5) readonly buffer BlockBuffer {
 
 const int BLOCK_EMISSIVE_FLAG = (1 << 30);
 const int BLOCK_INDEX_MASK = BLOCK_EMISSIVE_FLAG - 1;
+vec2 UVToNDC(vec2 uv) {
+  vec2 ndc = uv * 2.0 - 1.0;
+  ndc.y = -ndc.y;
+  return ndc;
+}
+
+vec2 NDCToUV(vec2 ndc) {
+  return vec2(ndc.x, -ndc.y) * 0.5 + 0.5;
+}
+
+float BandlimitedSine(float phase) {
+  float w = max(fwidth(phase), 1e-5);
+  return (sin(phase + 0.5 * w) - sin(phase - 0.5 * w)) / w;
+}
+
 void getRay(out vec3 rayOrigin, out vec3 rayDir) {
   // NDC in [-1, 1]
-  vec2 ndc = (gl_FragCoord.xy / resolution.xy) * 2.0 - 1.0;
-  ndc.y = -ndc.y;  // keep if your projection expects this
+  vec2 ndc = UVToNDC(gl_FragCoord.xy / resolution.xy);
 
   // Point on near plane in clip space
   // For Vulkan, clip Z is 0 at near. For OpenGL, it's -1.
@@ -46,6 +66,17 @@ void getRay(out vec3 rayOrigin, out vec3 rayDir) {
 
   // Ray origin & direction in world space
   rayOrigin = camPos;  // world-space camera pos
+  rayDir = normalize(worldPos.xyz - camPos);
+}
+
+void getRayNoJitter(out vec3 rayOrigin, out vec3 rayDir) {
+  vec2 ndc = UVToNDC(gl_FragCoord.xy / resolution.xy);
+  vec4 rayClip = vec4(ndc, 0.0, 1.0);
+  vec4 viewPos = invProjNoJitter * rayClip;
+  viewPos /= viewPos.w;
+  vec4 worldPos = invView * viewPos;
+
+  rayOrigin = camPos;
   rayDir = normalize(worldPos.xyz - camPos);
 }
 vec2 rayBoxDst(vec3 boundsMi, vec3 boundsMa, vec3 rayOrigin, vec3 invRaydir) {
@@ -136,8 +167,7 @@ return (2.0 * nearPlane * farPlane) / (farPlane + nearPlane - z * (farPlane - ne
 float linearDepthFromBuffer(float depth)
 {
     vec2 fragCoord = gl_FragCoord.xy; // use actual pixel
-    vec2 ndc = (fragCoord / resolution.xy) * 2.0 - 1.0;
-    ndc.y = -ndc.y;
+    vec2 ndc = UVToNDC(fragCoord / resolution.xy);
 
     vec4 clip = vec4(ndc, depth, 1.0); // Vulkan
     vec4 view = invProj * clip;
@@ -300,26 +330,24 @@ vec3 calculateSdfLighting(vec3 ro,vec3 rd, float t){
 
 vec3 ReconstructWorldPos(vec2 uv, float depth01)
 {
-    // Vulkan NDC: x,y in [-1,1], z in [0,1]
-    vec4 ndc = vec4(uv * 2.0 - 1.0, depth01, 1.0);
-    //  mat4 invView;
-  //mat4 invProj;
-    vec4 world = invProj * ndc;
-    return world.xyz / world.w;
+    vec4 ndc = vec4(UVToNDC(uv), depth01, 1.0);
+    vec4 view = invProj * ndc;
+    view /= view.w;
+    vec4 world = invView * vec4(view.xyz, 1.0);
+    return world.xyz;
 }
 
 
 vec3 ReconstructViewPos(vec2 uv, float depth01, mat4 invProj)
 {
-    vec4 ndc = vec4(uv * 2.0 - 1.0, depth01, 1.0);
+    vec4 ndc = vec4(UVToNDC(uv), depth01, 1.0);
     vec4 view = invProj * ndc;
     return view.xyz / view.w;
 }
 
 vec3 ReconstructViewPos(vec2 uv, float depth01)
 {
-    // Vulkan NDC: z in [0,1]
-    vec4 ndc = vec4(uv * 2.0 - 1.0, depth01, 1.0);
+    vec4 ndc = vec4(UVToNDC(uv), depth01, 1.0);
     vec4 v = invProj * ndc;
     return v.xyz / v.w;
 }
@@ -328,6 +356,18 @@ vec3 ReconstructWorldPoss(vec2 uv, float depth01)
     vec3 viewPos = ReconstructViewPos(uv, depth01, invProj);
     vec4 worldH = invView * vec4(viewPos, 1.0);
     return worldH.xyz;
+}
+
+vec3 NormalFromWorldGradient(vec3 worldPos)
+{
+    vec3 dPdx = dFdx(worldPos);
+    vec3 dPdy = dFdy(worldPos);
+    vec3 normalW = normalize(cross(dPdx, dPdy));
+    vec3 viewDir = normalize(camPos - worldPos);
+    if (dot(normalW, viewDir) < 0.0) {
+        normalW = -normalW;
+    }
+    return normalW;
 }
 
 
@@ -351,23 +391,38 @@ vec4 textureGood( sampler2DArray sam, vec3 uv )
 
 vec3 NormalFromDepth(vec2 uv)
 {
-    float d = textureGood(depthSampler, vec3(uv,0.)).r;
+    vec2 texel = 1.0 / resolution.xy;
+    
+    float dC = texture(depthSampler, vec3(uv, 0.0)).r;
+    if (dC >= 0.999999) {
+        return vec3(0.0, 0.0, 0.0);
+    }
 
-    // If depth is invalid (skybox/cleared), you may want to early out
-    // (choose a threshold based on your clear value)
-    // if (d >= 0.999999) return vec3(0,0,1);
+    float dR = texture(depthSampler, vec3(uv + vec2(texel.x, 0.0), 0.0)).r;
+    float dL = texture(depthSampler, vec3(uv - vec2(texel.x, 0.0), 0.0)).r;
+    float dU = texture(depthSampler, vec3(uv + vec2(0.0, texel.y), 0.0)).r;
+    float dD = texture(depthSampler, vec3(uv - vec2(0.0, texel.y), 0.0)).r;
 
-    vec3 P  = ReconstructWorldPoss(uv, d);
-    vec3 dPdx = dFdx(P);
-    vec3 dPdy = dFdy(P);
-   
-    vec3 N = normalize(cross(dPdx, dPdy));
+    float dX = (abs(dR - dC) < abs(dL - dC)) ? dR : dL;
+    float dY = (abs(dU - dC) < abs(dD - dC)) ? dU : dD;
 
-    // Optional: make it face the camera (avoids flipped normals on some triangles)
-    // vec3 V = normalize(pc.camPosWS - P);
-    // if (dot(N, V) < 0.0) N = -N;
+    vec2 uvX = (dX == dR) ? (uv + vec2(texel.x, 0.0)) : (uv - vec2(texel.x, 0.0));
+    vec2 uvY = (dY == dU) ? (uv + vec2(0.0, texel.y)) : (uv - vec2(0.0, texel.y));
 
-    return N;
+    vec3 Pc = ReconstructWorldPoss(uv, dC);
+    vec3 Px = ReconstructWorldPoss(uvX, dX);
+    vec3 Py = ReconstructWorldPoss(uvY, dY);
+
+    vec3 dx = Px - Pc;
+    vec3 dy = Py - Pc;
+    vec3 N = normalize(cross(dx, dy));
+    
+    vec3 viewDir = normalize(camPos - Pc);
+    if (dot(N, viewDir) < 0.0) {
+        N = -N;
+    }
+
+    return vec3(N.x,-N.y,N.z);
 }
 float PickClosest(float center, float a, float b)
 {
@@ -508,8 +563,7 @@ vec3 ReconstructWorldPos(float dp,vec2 uv)
 {
     float depth01 = dp;
 
-    // NDC: x,y in [-1,1], z in [0,1] for Vulkan/D3D
-    vec4 ndc = vec4(uv * 2.0 - 1.0, depth01, 1.0);
+    vec4 ndc = vec4(UVToNDC(uv), depth01, 1.0);
 
     // To view space
     vec4 view = invProj * ndc;
@@ -530,7 +584,7 @@ bool ProjectWorldToUV(vec3 worldPos, mat4 viewMat, mat4 projMat, out vec2 uv, ou
     }
 
     vec3 ndc = clip.xyz / clip.w;
-    uv = ndc.xy * 0.5 + 0.5;
+    uv = NDCToUV(ndc.xy);
     ndcZ = ndc.z;
     return all(greaterThanEqual(uv, vec2(0.0))) && all(lessThanEqual(uv, vec2(1.0)));
 }
@@ -600,11 +654,53 @@ vec3 ComputeSSR(vec2 uv, vec3 worldPos, vec3 normalW, vec3 baseColor, out float 
     return mix(baseColor, reflectedColor, ssrWeight);
 }
 
+float ComputeFloorShadow(vec3 floorPos, float floorY)
+{
+    float occlusion = 0.0;
+    int blobCount = int(floor(floorBlobMeta.x + 0.5));
+    const float heightFade = 0.30;
+
+    for (int i = 0; i < blobCount && i < 64; ++i) {
+        vec3 blobCenter = floorBlobShadows[i].xyz;
+        float blobRadius = max(floorBlobShadows[i].w, 0.001);
+        float dist = length(floorPos.xz - blobCenter.xz);
+        float radial = exp(-4.0 * (dist * dist) / (blobRadius * blobRadius));
+        float nearFloor = 1.0 - clamp((blobCenter.y - floorY) / heightFade, 0.0, 1.0);
+        occlusion = max(occlusion, radial * nearFloor);
+    }
+
+    return clamp(occlusion, 0.0, 1.0);
+}
+
+vec3 ComputeFloorBlobBounce(vec3 worldPos, float floorY)
+{
+    vec3 bounce = vec3(0.0);
+    int blobCount = int(floor(floorBlobMeta.x + 0.5));
+
+    for (int i = 0; i < blobCount && i < 64; ++i) {
+        vec3 blobCenter = floorBlobShadows[i].xyz;
+        float blobRadius = max(floorBlobShadows[i].w, 0.001) * 3.6;
+        float dist = length(worldPos.xz - blobCenter.xz);
+        float radial = exp(-1.35 * (dist * dist) / (blobRadius * blobRadius));
+        float nearFloor = 1.0 - clamp((blobCenter.y - floorY) / 0.45, 0.0, 1.0);
+        bounce += floorBlobBounceColors[i].rgb * radial * nearFloor;
+    }
+
+    return clamp(bounce * 0.09, vec3(0.0), vec3(0.16));
+}
+
 float hash12(vec2 p)
 {
     vec3 p3 = fract(vec3(p.xyx) * 0.1031);
     p3 += dot(p3, p3.yzx + 33.33);
     return fract((p3.x + p3.y) * p3.z);
+}
+
+mat2 Rotation2D(float a)
+{
+    float s = sin(a);
+    float c = cos(a);
+    return mat2(c, -s, s, c);
 }
 
 mat3 makeTBN(vec3 n)
@@ -632,14 +728,19 @@ float Luminance(vec3 c)
 
 vec3 ExtractEmissive(vec3 sceneColor)
 {
-    // Treat only values above this threshold as emissive energy.
-    // Non-emissive shaded surfaces stay black for GI.
-    const float emissiveThreshold = 1.05;
-    const float emissiveBoost = 2.0;
     float lum = Luminance(sceneColor);
-    float w = smoothstep(emissiveThreshold, emissiveThreshold + 0.35, lum);
-    vec3 energy = max(sceneColor - vec3(emissiveThreshold), vec3(0.0));
-    return energy * w * emissiveBoost;
+    float mx = max(sceneColor.r, max(sceneColor.g, sceneColor.b));
+    float mn = min(sceneColor.r, min(sceneColor.g, sceneColor.b));
+    float chroma = mx - mn;
+
+    // The main scene target is LDR/clamped, so emissive chunks cannot be detected
+    // with HDR thresholds. Use a bright + colorful heuristic for now.
+    float bright = smoothstep(0.50, 0.82, lum);
+    float colorful = smoothstep(0.10, 0.28, chroma);
+    float w = bright * colorful;
+
+    vec3 energy = max(sceneColor - vec3(0.32), vec3(0.0));
+    return energy * w * 4.0;
 }
 
 vec3 ComputeSSGI(vec2 uv, vec3 worldPos, vec3 normalW)
@@ -647,20 +748,34 @@ vec3 ComputeSSGI(vec2 uv, vec3 worldPos, vec3 normalW)
     mat4 viewMat = inverse(invView);
     mat4 projMat = inverse(invProj);
 
-    const int sampleCount = 8;
-    const float baseRadius = 0.10;
-    const float thickness = 0.03;
+    const int sampleCount = 12;
+    const float baseRadius = 0.18;
+    const float thickness = 0.06;
+    const vec3 hemisphereSamples[12] = vec3[](
+        normalize(vec3( 0.00,  0.00, 1.00)),
+        normalize(vec3( 0.55,  0.00, 0.84)),
+        normalize(vec3(-0.55,  0.00, 0.84)),
+        normalize(vec3( 0.00,  0.55, 0.84)),
+        normalize(vec3( 0.00, -0.55, 0.84)),
+        normalize(vec3( 0.42,  0.42, 0.80)),
+        normalize(vec3(-0.42,  0.42, 0.80)),
+        normalize(vec3( 0.42, -0.42, 0.80)),
+        normalize(vec3(-0.42, -0.42, 0.80)),
+        normalize(vec3( 0.82,  0.18, 0.54)),
+        normalize(vec3(-0.82,  0.18, 0.54)),
+        normalize(vec3( 0.00, -0.82, 0.58))
+    );
 
     mat3 tbn = makeTBN(normalize(normalW));
     vec3 giAccum = vec3(0.0);
     float wAccum = 0.0;
+    float rotationAngle = hash12(floor(worldPos.xz * 48.0) + worldPos.yx * 13.0) * 6.2831853;
+    mat2 kernelRotation = Rotation2D(rotationAngle);
 
     for (int i = 0; i < sampleCount; ++i) {
         float fi = float(i);
-        float u1 = hash12(uv * resolution.xy + vec2(fi * 17.0, fi * 3.0));
-        float u2 = hash12(uv.yx * resolution.xy + vec2(fi * 11.0, fi * 5.0));
-
-        vec3 dirLocal = sampleHemisphere(u1, u2);
+        vec3 dirLocal = hemisphereSamples[i];
+        dirLocal.xy = kernelRotation * dirLocal.xy;
         vec3 dir = normalize(tbn * dirLocal);
 
         float t = baseRadius * mix(0.25, 1.0, (fi + 0.5) / float(sampleCount));
@@ -700,7 +815,8 @@ vec3 ComputeSSGI(vec2 uv, vec3 worldPos, vec3 normalW)
         return vec3(0.0);
     }
 
-    return giAccum / wAccum;
+    vec3 gi = giAccum / wAccum;
+    return clamp(gi, vec3(0.0), vec3(0.55));
 }
 
 vec3 DenoiseSSGI(vec2 uv, vec3 centerWorldPos, vec3 centerNormal, vec3 centerGI)
@@ -708,7 +824,7 @@ vec3 DenoiseSSGI(vec2 uv, vec3 centerWorldPos, vec3 centerNormal, vec3 centerGI)
     vec2 texel = 1.0 / resolution.xy;
 
     vec3 accum = centerGI;
-    float wsum = 1.0;
+    float wsum = 2.0;
 
     const vec2 taps[8] = vec2[](
         vec2( 1, 0), vec2(-1, 0), vec2( 0, 1), vec2( 0,-1),
@@ -730,16 +846,16 @@ vec3 DenoiseSSGI(vec2 uv, vec3 centerWorldPos, vec3 centerNormal, vec3 centerGI)
         vec3 n = NormalFromDepth(suv);
         vec3 giN = ComputeSSGI(suv, p, n);
 
-        float wSpatial = (i < 4) ? 0.8 : 0.55;
-        float wDepth = exp(-length(p - centerWorldPos) * 8.0);
-        float wNormal = pow(max(dot(normalize(centerNormal), normalize(n)), 0.0), 8.0);
+        float wSpatial = (i < 4) ? 1.0 : 0.7;
+        float wDepth = exp(-length(p - centerWorldPos) * 12.0);
+        float wNormal = pow(max(dot(normalize(centerNormal), normalize(n)), 0.0), 16.0);
         float w = wSpatial * wDepth * wNormal;
 
         accum += giN * w;
         wsum += w;
     }
 
-    return accum / max(wsum, 1e-5);
+    return clamp(accum / max(wsum, 1e-5), vec3(0.0), vec3(0.42));
 }
 
 vec3 NeighborhoodClamp(vec3 history, vec2 uv)
@@ -755,105 +871,171 @@ vec3 NeighborhoodClamp(vec3 history, vec2 uv)
     return clamp(history, mn, mx);
 }
 
+vec3 NeighborhoodAverage(vec2 uv)
+{
+    vec2 texel = 1.0 / resolution.xy;
+    vec3 c = texture(texSampler, vec3(uv, 0.0)).rgb;
+    vec3 c1 = texture(texSampler, vec3(uv + vec2(texel.x, 0.0), 0.0)).rgb;
+    vec3 c2 = texture(texSampler, vec3(uv - vec2(texel.x, 0.0), 0.0)).rgb;
+    vec3 c3 = texture(texSampler, vec3(uv + vec2(0.0, texel.y), 0.0)).rgb;
+    vec3 c4 = texture(texSampler, vec3(uv - vec2(0.0, texel.y), 0.0)).rgb;
+    return (c * 4.0 + c1 + c2 + c3 + c4) / 8.0;
+}
+
+float TaaHistoryWeight(vec2 motionUV, vec3 currentColor, vec3 historyColor)
+{
+    float motionPixels = length(motionUV * resolution.xy);
+    vec3 colorDiff = abs(historyColor - currentColor);
+    float maxColorDiff = max(colorDiff.r, max(colorDiff.g, colorDiff.b));
+    float lumCurrent = Luminance(currentColor);
+    float lumHistory = Luminance(historyColor);
+    float lumDiff = abs(lumHistory - lumCurrent) / max(max(lumCurrent, lumHistory), 0.001);
+
+    if (motionPixels < 0.08 && maxColorDiff < 0.035 && lumDiff < 0.08) {
+        return 0.985;
+    }
+
+    float historyWeight = 0.92;
+    historyWeight *= 1.0 - smoothstep(0.2, 3.5, motionPixels);
+    historyWeight *= 1.0 - smoothstep(0.03, 0.20, maxColorDiff);
+    historyWeight *= 1.0 - 0.65 * smoothstep(0.10, 0.75, lumDiff);
+
+    return clamp(historyWeight, 0.0, 0.92);
+}
+
+vec2 JitterNdcToUv(vec2 jitterNdc)
+{
+    return vec2(jitterNdc.x, -jitterNdc.y) * 0.5;
+}
+
+bool ComputeMotionVector(vec2 uv, float depth, out vec2 prevUV, out vec2 motionUV)
+{
+    prevUV = uv;
+    motionUV = vec2(0.0);
+
+    if (depth >= 0.99999) {
+        prevUV = uv;
+        return true;
+    }
+
+    vec3 worldPos = ReconstructWorldPoss(uv, depth);
+    vec4 prevClip = prevViewProj * vec4(worldPos, 1.0);
+    if (prevClip.w <= 0.000001) {
+        return false;
+    }
+
+    prevUV = NDCToUV(prevClip.xy / prevClip.w);
+
+    vec4 currNoJitterClip = currViewProjNoJitter * vec4(worldPos, 1.0);
+    vec4 prevNoJitterClip = prevViewProjNoJitter * vec4(worldPos, 1.0);
+    if (currNoJitterClip.w > 0.000001 && prevNoJitterClip.w > 0.000001) {
+        vec2 currNoJitterUV = NDCToUV(currNoJitterClip.xy / currNoJitterClip.w);
+        vec2 prevNoJitterUV = NDCToUV(prevNoJitterClip.xy / prevNoJitterClip.w);
+        motionUV = currNoJitterUV - prevNoJitterUV;
+    }
+
+    return true;
+}
+
 vec3 ApplyTAA(vec2 uv, float depth, vec3 currentColor)
 {
     if (taaState.x < 0.5) {
         return currentColor;
     }
 
-    if (depth >= 0.99999) {
-        return currentColor;
+    vec3 filteredCurrent = mix(currentColor, NeighborhoodAverage(uv), 0.35);
+    vec3 stableHistoryRaw = texture(historySampler, vec3(uv, 0.0)).rgb;
+    vec3 stableHistory = NeighborhoodClamp(stableHistoryRaw, uv);
+
+    vec2 prevUV;
+    vec2 motionUV;
+    bool hasReprojection = ComputeMotionVector(uv, depth, prevUV, motionUV);
+    bool validPrevUv = hasReprojection &&
+        all(greaterThanEqual(prevUV, vec2(0.0))) &&
+        all(lessThanEqual(prevUV, vec2(1.0)));
+
+    vec3 historyRaw = stableHistoryRaw;
+    vec3 historyColor = stableHistory;
+
+    if (validPrevUv && depth < 0.99999) {
+        vec3 reprojectedHistoryRaw = texture(historySampler, vec3(prevUV, 0.0)).rgb;
+        vec3 reprojectedHistory = NeighborhoodClamp(reprojectedHistoryRaw, uv);
+        float motionPixels = length(motionUV * resolution.xy);
+        float staticBlend = 1.0 - smoothstep(0.05, 0.45, motionPixels);
+        historyRaw = mix(reprojectedHistoryRaw, stableHistoryRaw, staticBlend);
+        historyColor = mix(reprojectedHistory, stableHistory, staticBlend);
     }
 
-    vec3 worldPos = ReconstructWorldPoss(uv, depth);
-    vec4 prevClip = prevViewProj * vec4(worldPos, 1.0);
-    if (prevClip.w <= 0.000001) {
-        return currentColor;
+    float historyWeight = TaaHistoryWeight(motionUV, filteredCurrent, historyColor);
+    if (!validPrevUv) {
+        historyWeight *= 0.85;
     }
 
-    vec2 prevUV = (prevClip.xy / prevClip.w) * 0.5 + 0.5;
-    // Compensate jitter mismatch between frames.
-    prevUV += (taaData.xy - taaData.zw) * 0.5;
+    vec2 jitterDeltaUv = JitterNdcToUv(taaData.xy - taaData.zw);
+    float jitterPixels = length(jitterDeltaUv * resolution.xy);
+    float staticTrust = 1.0 - smoothstep(0.05, 0.35, length(motionUV * resolution.xy));
+    historyWeight = max(historyWeight, staticTrust * (1.0 - smoothstep(0.05, 0.45, jitterPixels)) * 0.96);
 
-    if (any(lessThan(prevUV, vec2(0.0))) || any(greaterThan(prevUV, vec2(1.0)))) {
-        return currentColor;
-    }
-
-    vec3 historyColor = texture(historySampler, vec3(prevUV, 0.0)).rgb;
-    historyColor = NeighborhoodClamp(historyColor, uv);
-
-    // Lower history weight when depth discontinuity is high.
-    float prevDepth = texture(depthSampler, vec3(prevUV, 0.0)).r;
-    float dz = abs(prevDepth - depth);
-    float historyWeight = mix(0.90, 0.65, smoothstep(0.0005, 0.02, dz));
-
-    return mix(currentColor, historyColor, historyWeight);
+    return mix(filteredCurrent, historyColor, clamp(historyWeight, 0.0, 0.96));
 }
 void main() {
   vec2 uv = texcoord;
   vec3 ro, rd;
   getRay(ro, rd);
-
-  vec2 rayBox = rayBoxDst(vec3(-0.5,-0.5,-0.5), vec3(0.5), ro, 1.0 / rd);
+  vec3 brushRo, brushRd;
+  getRayNoJitter(brushRo, brushRd);
+  vec2 rayBox = rayBoxDst(vec3(-0.5,-0.5,-0.5), vec3(0.5), brushRo, 1.0 / brushRd);
 
   float sceneDepth = texture(depthSampler, vec3(uv, 0.)).r;
-  vec3 n = NormalFromDepth(uv);
-  float linearDepth = linearDepthFromBuffer(sceneDepth);
+  bool hasSceneDepth = (sceneDepth < 0.99999);
   outColor = texture(texSampler, vec3(uv, 0.));
+  if (!hasSceneDepth) {
+      outColor.a = 1.0;
+  }
+
+  vec3 worldPos = vec3(0.0);
+  vec3 n = vec3(0.0, 1.0, 0.0);
+  if (hasSceneDepth) {
+      worldPos = ReconstructWorldPoss(uv, sceneDepth);
+      n = normalize(NormalFromDepth(uv));
+  }
+  vec3 lightDir = normalize(vec3(0.,1.,0.));
+  vec3 light = lightDir;
+  float dif = max(dot(n, lightDir), 0.0);
+  //outColor = vec4(vec3(dif), 1.0);
+ // return;
+ 
+  float linearDepth = hasSceneDepth ? linearDepthFromBuffer(sceneDepth) : farPlane;
+  const float floorCenterY = -0.3578125;
+  bool isFloorReceiver = hasSceneDepth && abs(worldPos.y - floorCenterY) < 0.03 && n.y > 0.9;
+
+  // Temporal AA with previous-frame reprojection on the base shaded scene.
+  outColor.rgb = ApplyTAA(uv, sceneDepth, outColor.rgb);
 
   // Screen-space reflections from scene color + depth.
-  if (sceneDepth < 0.99999) {
-      vec3 worldPos = ReconstructWorldPoss(uv, sceneDepth);
+  if (hasSceneDepth) {
+      
       float ssrWeight = 0.0;
      // outColor.rgb = ComputeSSR(uv, worldPos, n, outColor.rgb, ssrWeight);
 
-      // Screen-space global illumination (diffuse bounce approximation).
-      vec3 giRaw = ComputeSSGI(uv, worldPos, n);
-      vec3 gi = DenoiseSSGI(uv, worldPos, n, giRaw);
-      outColor.rgb += gi * 0.22;
+      if (isFloorReceiver) {
+          outColor.rgb += ComputeFloorBlobBounce(worldPos, floorCenterY);
+      } else {
+          // Screen-space global illumination (diffuse bounce approximation).
+          vec3 giRaw = ComputeSSGI(uv, worldPos, n);
+          vec3 gi = DenoiseSSGI(uv, worldPos, n, giRaw);
+         // outColor.rgb += gi * 0.80;
+      }
   }
-
-  // Temporal AA with previous-frame reprojection.
-  outColor.rgb = ApplyTAA(uv, sceneDepth, outColor.rgb);
 
   // Always-visible 3D brush cursor in post-process, centered around actual brush position.
-  if (rayBox.y > 0.0) {
-      vec3 brushCenter = -brushData.xyz;
-      float brushRadius = max(brushData.w, 0.0005);
-      if (brushMeta.x < 0.5) {
-          brushRadius *= 1.15; // Match remove-mode effective radius.
-      }
-
-      float tMin = rayBox.x;
-      float tMax = min(rayBox.x + rayBox.y, linearDepth);
-      float tCenter = dot(brushCenter - ro, rd);
-      float tWindow = brushRadius * 2.5 + 0.03;
-      tMin = max(tMin, tCenter - tWindow);
-      tMax = min(tMax, tCenter + tWindow);
-
-      if (tMax > tMin) {
-          float tBrush = raymarchBrushCursor(ro, rd, tMin, tMax);
-          if (tBrush > 0.0) {
-              vec3 pHit = ro + rd * tBrush;
-              vec3 nBrush = brushNormal(pHit);
-              vec3 lightDir = normalize(vec3(0.4, 0.8, 0.2));
-              float ndl = max(dot(nBrush, lightDir), 0.0);
-              int shapeMode = int(floor(brushMeta.y + 0.5));
-              vec3 shapeCol = (shapeMode == 1) ? vec3(0.45, 0.9, 1.0) : ((shapeMode == 2) ? vec3(1.0, 0.65, 0.3) : vec3(0.95, 0.95, 0.2));
-              vec3 baseCol = (brushMeta.x < 0.5) ? vec3(1.0, 0.35, 0.35) : shapeCol;
-              vec3 brushCol = baseCol * (0.35 + 0.65 * ndl);
-              outColor.rgb = mix(outColor.rgb, brushCol, 0.78);
-              outColor.a = 1.0;
-          }
-      }
-  }
  //outColor = linearDepth*vec4(1.);
 // outColor.rgb = abs(ReconstructWorldPos(sceneDepth,uv));
-  if(linearDepth<5.0){
+  if(linearDepth<50.0){
   //outColor = vec4( n,1.);
 
+ //  outColor.rgb = mix(vec3(0.,1.,0.),vec3(0.,0.,1.),clamp(sin(length(worldPos)*200.0),0.,1.));
   
-  vec3 light = vec3(10.,-10.,10.);
 
       float dif = clamp(dot(normalize(light),n),0.,1.);
 
@@ -868,6 +1050,39 @@ void main() {
   }else{
   //  outColor = vec4(0.2,0.,0.,1.);
   }
+
+  // Keep the interactive brush cursor responsive by compositing it after TAA.
+  if (rayBox.y > 0.0) {
+      vec3 brushCenter = -brushData.xyz;
+      float brushRadius = max(brushData.w, 0.0005);
+      if (brushMeta.x < 0.5) {
+          brushRadius *= 1.15; // Match remove-mode effective radius.
+      }
+
+      float tMin = rayBox.x;
+      float tMax = min(rayBox.x + rayBox.y, linearDepth);
+      float tCenter = dot(brushCenter - brushRo, brushRd);
+      float tWindow = brushRadius * 2.5 + 0.03;
+      tMin = max(tMin, tCenter - tWindow);
+      tMax = min(tMax, tCenter + tWindow);
+
+      if (tMax > tMin) {
+          float tBrush = raymarchBrushCursor(brushRo, brushRd, tMin, tMax);
+          if (tBrush > 0.0) {
+              vec3 pHit = brushRo + brushRd * tBrush;
+              vec3 nBrush = brushNormal(pHit);
+              vec3 lightDir = normalize(vec3(0.4, 0.8, 0.2));
+              float ndl = max(dot(nBrush, lightDir), 0.0);
+              int shapeMode = int(floor(brushMeta.y + 0.5));
+              vec3 shapeCol = (shapeMode == 1) ? vec3(0.45, 0.9, 1.0) : ((shapeMode == 2) ? vec3(1.0, 0.65, 0.3) : vec3(0.95, 0.95, 0.2));
+              vec3 baseCol = (brushMeta.x < 0.5) ? vec3(1.0, 0.35, 0.35) : shapeCol;
+              vec3 brushCol = baseCol * (0.35 + 0.65 * ndl);
+              outColor.rgb = mix(outColor.rgb, brushCol, 0.78);
+              outColor.a = 1.0;
+          }
+      }
+  }
+
  // vec3 n = NormalFromDepth(uv);
   //outColor.rgb = normalize(n);
   /*

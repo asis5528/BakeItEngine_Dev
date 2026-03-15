@@ -31,6 +31,7 @@ void Framebuffer::recreate() {
     createFrameBuffer();
 }
 void Framebuffer::createRenderPass() {
+      
     /*
     VkAttachmentDescription colorAttachment{};
     colorAttachment.format = colorFormat;
@@ -153,7 +154,7 @@ void Framebuffer::createRenderPass() {
         throw std::runtime_error("failed to create render pass!");
     }
     */
-      VkAttachmentDescription2 colorAttachment{}; 
+    VkAttachmentDescription2 colorAttachment{}; 
     colorAttachment.sType = VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2;
     colorAttachment.format = colorFormat;
     colorAttachment.samples = msaaSamples;
@@ -368,7 +369,7 @@ void Framebuffer::beginRenderPass(VkCommandBuffer commandBuffer) {
     renderPassInfo.renderArea.extent = resolution;
 
     std::array<VkClearValue, 2> clearValues{};
-    clearValues[0].color = { {0.8f, 0.8f, 0.8f, 1.8f} };
+    clearValues[0].color = { {0.2f, 0.2f, 0.2f, 1.f} };
     clearValues[1].depthStencil = { 1.0f, 0 };
 
 

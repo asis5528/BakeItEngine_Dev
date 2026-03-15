@@ -4,6 +4,59 @@
 #include "../Imgui/imgui_impl_glfw.h"
 #include "../Imgui/imgui_impl_vulkan.h"
 #include "../Imgui/imgui_internal.h"
+#include <cstdio>
+
+namespace
+{
+void DrawSdfAtlasUsageBar(const char* label, float fraction, int usedBricks, int capacityBricks)
+{
+    fraction = ImClamp(fraction, 0.0f, 1.0f);
+
+    ImGui::Text("%s", label);
+    ImVec2 pos = ImGui::GetCursorScreenPos();
+    float width = ImGui::GetContentRegionAvail().x;
+    float height = 20.0f;
+    ImVec2 size(width, height);
+
+    ImDrawList* drawList = ImGui::GetWindowDrawList();
+    const ImU32 bgColor = IM_COL32(52, 52, 52, 255);
+    const ImU32 borderColor = IM_COL32(96, 96, 96, 255);
+    const ImVec4 lowColor = ImVec4(0.19f, 0.49f, 0.95f, 1.0f);
+    const ImVec4 highColor = ImVec4(0.88f, 0.20f, 0.16f, 1.0f);
+    const ImVec4 mixColor = ImLerp(lowColor, highColor, fraction);
+    const ImU32 fillColor = ImGui::ColorConvertFloat4ToU32(mixColor);
+    const float rounding = height * 0.5f;
+
+    drawList->AddRectFilled(pos, ImVec2(pos.x + size.x, pos.y + size.y), bgColor, rounding);
+
+    float fillWidth = size.x * fraction;
+    if (fillWidth > 0.0f) {
+        drawList->AddRectFilled(
+            pos,
+            ImVec2(pos.x + fillWidth, pos.y + size.y),
+            fillColor,
+            rounding);
+    }
+
+    drawList->AddRect(pos, ImVec2(pos.x + size.x, pos.y + size.y), borderColor, rounding, 0, 1.0f);
+
+    char overlay[128];
+    std::snprintf(
+        overlay,
+        sizeof(overlay),
+        "%d / %d bricks  (%.1f%%)",
+        usedBricks,
+        capacityBricks,
+        fraction * 100.0f);
+    ImVec2 textSize = ImGui::CalcTextSize(overlay);
+    ImVec2 textPos(
+        pos.x + (size.x - textSize.x) * 0.5f,
+        pos.y + (size.y - textSize.y) * 0.5f);
+    drawList->AddText(textPos, IM_COL32(255, 255, 255, 255), overlay);
+
+    ImGui::Dummy(size);
+}
+}
 
 
  EditorGui::EditorGui(Scene *scene,VulkanBase *base)
@@ -184,6 +237,18 @@
      ImGui::Text("Action  : %s", (m_scene->brushAction < 0.5f) ? "Remove (RMB)" : "Add (LMB)");
      ImGui::Text("Emissive Paint: %s (I)", m_scene->emissiveMode ? "On" : "Off");
      ImGui::Text("Dirty Blocks: %d", m_scene->dirtyBlockCount);
+     DrawSdfAtlasUsageBar(
+         "SDF Atlas",
+         m_scene->sdfAtlasUsage,
+         m_scene->sdfAtlasUsedBricks,
+         m_scene->sdfAtlasCapacityBricks);
+     const int atlasLeftBricks =
+         (m_scene->sdfAtlasCapacityBricks > m_scene->sdfAtlasUsedBricks)
+         ? (m_scene->sdfAtlasCapacityBricks - m_scene->sdfAtlasUsedBricks)
+         : 0;
+     ImGui::Text("Atlas Left: %d bricks", atlasLeftBricks);
+     ImGui::Text("Atlas Tail: %d bricks", m_scene->sdfAtlasTailBricks);
+     ImGui::Text("Free Stack: %d bricks", m_scene->sdfAtlasFreeBricks);
      ImGui::Text("Mode: %s (MMB toggle)", m_scene->cameraMoveMode ? "Camera" : "Edit");
      ImGui::Text("Shift+LMB: Recolor existing blocks");
      ImGui::End();

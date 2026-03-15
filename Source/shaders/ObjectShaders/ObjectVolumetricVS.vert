@@ -12,6 +12,9 @@ layout( std430,binding = 4) readonly buffer BlockBuffer {
 layout( std430,binding = 6) readonly buffer BlockColorBuffer {
     vec4 blockColors[];
 };
+layout( std430,binding = 7) readonly buffer BlockSpatialBuffer {
+    vec4 blockSpatial[];
+};
 // Bind your compute-written blocks[] here (same underlying VkBuffer, different pipeline)
 
 
@@ -32,17 +35,6 @@ layout(location = 8) flat out vec3 blockColor;
 
 const int BLOCK_EMISSIVE_FLAG = (1 << 30);
 const int BLOCK_INDEX_MASK = BLOCK_EMISSIVE_FLAG - 1;
-
-const uint BLOCKS_PER_AXIS = 64u;
-
-uvec3 unflatten64(uint idx)
-{
-    // idx in [0 .. 64^3-1]
-    uint x =  idx        & 63u;
-    uint y = (idx >> 6)  & 63u;
-    uint z = (idx >> 12);
-    return uvec3(x, y, z);
-}
 
 void main()
 {
@@ -67,26 +59,22 @@ if(blockIdx>0) {
     // If you ALSO want to draw packed-band blocks, change condition to:
     // if (bb.blocks[blockIdx] == -999999) ...
     
-    // Debug cube size/spacing in world units
-    float blockSizeWS = 1./64.;
-
-    uvec3 b = unflatten64(blockIdx);
-
-    // Place cube at block center
-    vec3 centerWS = (vec3(b) - vec3(1.5)) * blockSizeWS ;
-    vec3 centerWS2 = (vec3(b) - vec3(1.5)) * blockSizeWS ;
+    vec4 spatial = blockSpatial[blockIdx];
+    float blockSizeWS = spatial.w;
+    vec3 centerWS = spatial.xyz;
+    vec3 centerWorld = (ubo.model * vec4(centerWS, 1.0)).xyz;
     // Scale unit cube to block size and translate to center
     vec3 vertWS = centerWS + v * blockSizeWS;
-    vertWS-=0.5;
-  
-    worldPosition = (centerWS2 + v * blockSizeWS)-(0.5);
+    vertWS = (ubo.model * vec4(vertWS, 1.0)).xyz;
+
+    worldPosition = vertWS;
    // worldPosition += 0.001;
    // vertWS.xy+=0.0078;
     //vertWs-=0.0078;
     //worldPosition = vertWS;
     mat4 invView = inverse(ubo.view[gl_ViewIndex]);
        cameraPos = vec3(invView[3]);
-   camLocal = (cameraPos + 0.5 - centerWS) / blockSizeWS;
+   camLocal = (cameraPos - centerWorld) / blockSizeWS;
 
     vec3 cpos =  worldPosition+vec3(0.5+0.00);
 vec3 ppos = cpos;
@@ -110,7 +98,6 @@ ivec3 ires = ivec3(blockPerAxis,blockPerAxis,blockPerAxis);
 
     gl_Position = ubo.proj[gl_ViewIndex] *
                   ubo.view[gl_ViewIndex] *
-                // ubo.model*
                   vec4(vertWS, 1.0);
 //worldPosition = inPosition.xyz;
     // If you actually want camera world position, compute it like this:

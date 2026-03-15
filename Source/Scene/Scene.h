@@ -7,12 +7,14 @@
 #include "ScenePipelines.h"
 #include "../PostProcessing/PostProcessingManager.h"
 #include "../PGEResourceTypes.h"
+#include <array>
 
 
 class Scene
 {
 	
 public:
+	static constexpr int MaxFloorBlobShadows = 64;
 	std::vector<GraphicsPipeline*> pipelines;
 	//std::vector<VulkanTexture> textures;
 	std::vector<PGEResourceTypes::Texture> ptextures;
@@ -34,8 +36,10 @@ public:
 	VulkanBase* base;
 	ScenePipelines *scenePipelines;
 	 glm::mat4 proj[2];
+	 glm::mat4 projNoJitter[2];
 	 glm::mat4 view[2];
 	 glm::vec2 taaJitter = glm::vec2(0.0f);
+	 float camFovDegrees = 45.0f;
 	 float camNearPlane = 0.001f;
 	float camFarPlane = 100.0f;
 	glm::vec3 camPos;
@@ -63,6 +67,14 @@ public:
 	 float brushAction = 1.0f; // 1.0 add (LMB), 0.0 remove (RMB)
 	 bool emissiveMode = false; // toggled with I
 	 int dirtyBlockCount = 0;
+	 int sdfAtlasUsedBricks = 0;
+	 int sdfAtlasCapacityBricks = 0;
+	 int sdfAtlasTailBricks = 0;
+	 int sdfAtlasFreeBricks = 0;
+	 float sdfAtlasUsage = 0.0f;
+	 std::array<glm::vec4, MaxFloorBlobShadows> floorBlobShadows{};
+	 std::array<glm::vec4, MaxFloorBlobShadows> floorBlobBounceColors{};
+	 int floorBlobShadowCount = 0;
 	 float fps = 0.0;
 	Scene(VulkanBase *vbase);
 	void init();

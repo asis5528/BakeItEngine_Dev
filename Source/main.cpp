@@ -235,9 +235,11 @@ private:
       //   scene->computeTexture = ct;
 
 
-         //scene->textures.push_back(clines->ct3D);
+        //scene->textures.push_back(clines->ct3D);
         scene->objects[0].shader[0].graphicsPipeline = scene->pipelines[4];
-        //scene->objects[0].ModelMatrix = glm::translate(scene->objects[0].ModelMatrix, glm::vec3(0., 1., 0.));
+        scene->objects[0].ModelMatrix = glm::mat4(1.0f);
+        scene->objects[0].finalMatrix = glm::mat4(1.0f);
+        scene->ptextures.push_back(base->vbuffer->createTexture3DGeneral(1, 1, 1));
         Material material;
         material.type = TexturedMaterial;
         MaterialTexturedData* matData = new MaterialTexturedData();
@@ -250,8 +252,10 @@ private:
             scene->SBOs[0][0],
             scene->SBOs[0][1],
             scene->SBOs[0][2],
-            scene->SBOs[0][3]
+            scene->SBOs[0][3],
+            scene->SBOs[0][5]
         };
+        clines->createStaticFloorObject();
         scene->postprocessingManager->volumeRendering->quads[0]->shader.sbos = {
             scene->SBOs[0][0],
             scene->SBOs[0][1],

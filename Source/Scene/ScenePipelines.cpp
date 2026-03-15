@@ -66,6 +66,7 @@ ScenePipelines::ScenePipelines(VulkanBase *base,VkRenderPass renderPass) {
 } ,descriptorTypes{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,VK_SHADER_STAGE_ALL_GRAPHICS,
 },descriptorTypes{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,VK_SHADER_STAGE_FRAGMENT_BIT,
 },descriptorTypes{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,VK_SHADER_STAGE_ALL_GRAPHICS,
+},descriptorTypes{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,VK_SHADER_STAGE_VERTEX_BIT,
 } };
     pipelines[4]->bufferSize = { sizeof(UniformBufferObject),sizeof(BasicUbo) };
     

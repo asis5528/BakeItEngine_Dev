@@ -8,8 +8,11 @@ struct alignas(16) voulUBO {
 struct  CameraUBO {
     alignas(16)glm::mat4 invView;
     alignas(16)glm::mat4 invProj;
+    alignas(16)glm::mat4 invProjNoJitter;
     alignas(16)glm::mat4 currViewProj;
     alignas(16)glm::mat4 prevViewProj;
+    alignas(16)glm::mat4 currViewProjNoJitter;
+    alignas(16)glm::mat4 prevViewProjNoJitter;
     alignas(16) glm::vec3 camPos;
     alignas(16)glm::vec2 resolution;
    float nearPlane;
@@ -18,6 +21,9 @@ struct  CameraUBO {
    alignas(16) glm::vec4 brushMeta; // x: action, y: shape mode (0 cube,1 sphere,2 plane)
    alignas(16) glm::vec4 taaData;   // x,y current jitter, z,w previous jitter
    alignas(16) glm::vec4 taaState;  // x: history valid (0/1)
+   alignas(16) glm::vec4 floorBlobShadows[Scene::MaxFloorBlobShadows];
+   alignas(16) glm::vec4 floorBlobBounceColors[Scene::MaxFloorBlobShadows];
+   alignas(16) glm::vec4 floorBlobMeta; // x: count
     
 };
 
@@ -80,7 +86,13 @@ VolumeRendering::VolumeRendering(VulkanBase* base,Scene *scene, Framebuffer* pre
     copyQuad->textures.push_back(copySrcTex);
     quads.push_back(copyQuad);
 
-    prevViewProj = scene->proj[0] * scene->view[0];
+    glm::mat4 renderProj = scene->proj[0];
+    renderProj[1][1] *= -1.0f;
+    glm::mat4 renderProjNoJitter = scene->projNoJitter[0];
+    renderProjNoJitter[1][1] *= -1.0f;
+    prevViewProj = renderProj * scene->view[0];
+    prevViewProjNoJitter = renderProjNoJitter * scene->view[0];
+    prevJitter = scene->taaJitter;
 
 }
 void VolumeRendering::createDescriptors() {
@@ -91,24 +103,36 @@ void VolumeRendering::createDescriptors() {
 void VolumeRendering::update() {
     static float val = 0.0f;
 	CameraUBO camubo;
+    glm::mat4 renderProj = scene->proj[0];
+    renderProj[1][1] *= -1.0f;
+    glm::mat4 renderProjNoJitter = scene->projNoJitter[0];
+    renderProjNoJitter[1][1] *= -1.0f;
     
     camubo.invView = glm::inverse(scene->view[0]);
-    camubo.invProj = glm::inverse(scene->proj[0]);
-    camubo.currViewProj = scene->proj[0] * scene->view[0];
+    camubo.invProj = glm::inverse(renderProj);
+    camubo.invProjNoJitter = glm::inverse(scene->projNoJitter[0]);
+    camubo.currViewProj = renderProj * scene->view[0];
     camubo.prevViewProj = prevViewProj;
+    camubo.currViewProjNoJitter = renderProjNoJitter * scene->view[0];
+    camubo.prevViewProjNoJitter = prevViewProjNoJitter;
     camubo.camPos = scene->camPos;
     camubo.resolution = glm::vec2(scene->viewport_resolution.x, scene->viewport_resolution.y);
     camubo.nearPlane = scene->camNearPlane;
 	camubo.farPlane = scene->camFarPlane;
     camubo.brushData = scene->brushData;
     camubo.brushMeta = glm::vec4(scene->brushAction, float(scene->brushShapeMode), 0.0f, 0.0f);
-    static glm::vec2 prevJitter(0.0f);
     camubo.taaData = glm::vec4(scene->taaJitter, prevJitter);
-    camubo.taaState = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f); // Force TAA off.
+    camubo.taaState = glm::vec4(hasTaaHistory ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
+    for (int i = 0; i < Scene::MaxFloorBlobShadows; ++i) {
+        camubo.floorBlobShadows[i] = scene->floorBlobShadows[i];
+        camubo.floorBlobBounceColors[i] = scene->floorBlobBounceColors[i];
+    }
+    camubo.floorBlobMeta = glm::vec4(float(scene->floorBlobShadowCount), 0.0f, 0.0f, 0.0f);
     prevJitter = scene->taaJitter;
 	volumeUBO[0].map(base->device, sizeof(CameraUBO), &camubo);
     prevViewProj = camubo.currViewProj;
-    hasTaaHistory = false;
+    prevViewProjNoJitter = camubo.currViewProjNoJitter;
+    hasTaaHistory = true;
 	//volumeUBO[0].map(base->device, sizeof(CameraUBO), &scene->camera->cameraUBOData);
     //val += 0.0001f;
    // voulUBO vubo;
@@ -152,6 +176,13 @@ void VolumeRendering::recreate(VkExtent2D ex)
         quads[1]->textures[0].imageView = framebuffers[0]->MultisampledColorImage->imageView;
     }
     hasTaaHistory = false;
+    prevJitter = glm::vec2(0.0f);
+    glm::mat4 renderProj = scene->proj[0];
+    renderProj[1][1] *= -1.0f;
+    glm::mat4 renderProjNoJitter = scene->projNoJitter[0];
+    renderProjNoJitter[1][1] *= -1.0f;
+    prevViewProj = renderProj * scene->view[0];
+    prevViewProjNoJitter = renderProjNoJitter * scene->view[0];
 }
 
 VolumeRendering::~VolumeRendering()
