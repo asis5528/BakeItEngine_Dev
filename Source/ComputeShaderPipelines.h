@@ -29,6 +29,7 @@ public:
     ComputeShaderPipelines(VulkanBase* base, Scene* scene);
     ~ComputeShaderPipelines();
     void update(float time);
+    void createLodObjects();
     void createStaticFloorObject();
 
 

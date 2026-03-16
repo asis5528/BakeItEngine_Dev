@@ -11,8 +11,12 @@ layout(location = 0) in vec3 fragColor;
 layout(location = 1) in vec2 fragTexCoord;
 
 layout(location = 0) out vec4 outColor;
+layout(location = 1) out vec4 outWorldPos;
+layout(location = 2) out vec4 outMotion;
 
 void main() {
+   outWorldPos = vec4(0.0);
+   outMotion = vec4(0.0);
    // outColor = mix(vec4(fragColor,1.),texture(texSampler, fragTexCoord),0.99)*(sin(uboo.time1*5.));
     outColor = pow(texture(texSampler, fragTexCoord),vec4(1./2.2))*vec4(1.,0.7,0.7,1.);
     vec3 normals = normalize(fragColor);

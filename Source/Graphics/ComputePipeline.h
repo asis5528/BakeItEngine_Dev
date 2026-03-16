@@ -31,5 +31,6 @@ public:
      void setupDescriptors(std::vector <UBO> ubos, std::vector<VulkanTexture> textures,std::vector<SBO> sbos);
      void dispatch(uint32_t group_x, uint32_t group_y, uint32_t group_z);
      void submit();
+     void submit(uint32_t group_x, uint32_t group_y, uint32_t group_z);
 };
 

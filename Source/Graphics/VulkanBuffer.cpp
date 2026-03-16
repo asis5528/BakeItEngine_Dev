@@ -337,7 +337,7 @@ PGEResourceTypes::Texture3D VBuffer::createTexture3DGeneral(int w, int h, int d)
 
 }
 
-void VBuffer::transitionImageLayout(VkImage image, VkImageAspectFlags aspectMask, VkImageLayout oldLayout, VkImageLayout newLayout, uint32_t mipLevels) {
+void VBuffer::transitionImageLayout(VkImage image, VkImageAspectFlags aspectMask, VkImageLayout oldLayout, VkImageLayout newLayout, uint32_t mipLevels, uint32_t layerCount) {
     VkCommandBuffer commandBuffer = vulkandevice->beginSingleTimeCommands();
 
     VkImageMemoryBarrier barrier{};
@@ -351,7 +351,7 @@ void VBuffer::transitionImageLayout(VkImage image, VkImageAspectFlags aspectMask
     barrier.subresourceRange.baseMipLevel = 0;
     barrier.subresourceRange.levelCount = mipLevels;
     barrier.subresourceRange.baseArrayLayer = 0;
-    barrier.subresourceRange.layerCount = 1;
+    barrier.subresourceRange.layerCount = layerCount;
 
     VkPipelineStageFlags sourceStage;
     VkPipelineStageFlags destinationStage;

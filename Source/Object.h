@@ -14,6 +14,7 @@ public:
 	glm::vec3 scale;
 	glm::vec3 rotation;
 	glm::mat4 ModelMatrix;
+	glm::mat4 PreviousModelMatrix = glm::mat4(1.0f);
 	glm::mat4 finalMatrix;
 	bool hasMesh;
 	std::string name;

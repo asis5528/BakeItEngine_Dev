@@ -16,9 +16,10 @@ ComputeShaderPipelines::ComputeShaderPipelines(VulkanBase* base,Scene *scene) {
     this->scene = scene;
     meshtosdf = new MeshToSdf(base, scene);
     fluidSim = new GaussianFluidSim(base,scene, meshtosdf->computeTexture); 
-    pottery = new Pottery(base, scene);
+	pottery = new Pottery(base, scene);
   //  ct3D = fluidSim->computeTexture;
 	scene->SBOs.push_back(pottery->computeSBO);
+	scene->SBOs.push_back(pottery->lod1SBO);
    // scene->ptextures.push_back(fluidSim->computeTexture);
 }
 ComputeShaderPipelines::~ComputeShaderPipelines() {
@@ -38,4 +39,8 @@ void ComputeShaderPipelines::update(float time) {
 
 void ComputeShaderPipelines::createStaticFloorObject() {
     pottery->createStaticFloorObject();
+}
+
+void ComputeShaderPipelines::createLodObjects() {
+    pottery->createLodObjects();
 }

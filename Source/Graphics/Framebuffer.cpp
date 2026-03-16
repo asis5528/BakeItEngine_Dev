@@ -20,8 +20,12 @@ Framebuffer::~Framebuffer()
 }
 void Framebuffer::clean() {
     ColorImage->destroy();
+    AuxColorImage->destroy();
+    MotionVectorImage->destroy();
     DepthImage->destroy();
     MultisampledColorImage->destroy();
+    MultisampledAuxColorImage->destroy();
+    MultisampledMotionVectorImage->destroy();
     MultisampledDepthImage->destroy();
     vkDestroyFramebuffer(vulkandevice->device, framebuffer, nullptr);
     vkDestroyRenderPass(vulkandevice->device, renderPass, nullptr);
@@ -167,6 +171,30 @@ void Framebuffer::createRenderPass() {
     colorAttachment.pNext = nullptr;
     
 
+    VkAttachmentDescription2 auxColorAttachment{};
+    auxColorAttachment.sType = VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2;
+    auxColorAttachment.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    auxColorAttachment.samples = msaaSamples;
+    auxColorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    auxColorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    auxColorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    auxColorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    auxColorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    auxColorAttachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    auxColorAttachment.pNext = nullptr;
+
+    VkAttachmentDescription2 motionAttachment{};
+    motionAttachment.sType = VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2;
+    motionAttachment.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    motionAttachment.samples = msaaSamples;
+    motionAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    motionAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    motionAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    motionAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    motionAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    motionAttachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    motionAttachment.pNext = nullptr;
+
     VkAttachmentDescription2 depthAttachment{}; 
     depthAttachment.sType = VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2;
     depthAttachment.format = depthFormat;
@@ -191,6 +219,30 @@ void Framebuffer::createRenderPass() {
     colorAttachmentResolve.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     colorAttachmentResolve.pNext = nullptr;
 
+    VkAttachmentDescription2 auxColorAttachmentResolve{};
+    auxColorAttachmentResolve.sType = VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2;
+    auxColorAttachmentResolve.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    auxColorAttachmentResolve.samples = VK_SAMPLE_COUNT_1_BIT;
+    auxColorAttachmentResolve.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    auxColorAttachmentResolve.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    auxColorAttachmentResolve.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    auxColorAttachmentResolve.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    auxColorAttachmentResolve.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    auxColorAttachmentResolve.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    auxColorAttachmentResolve.pNext = nullptr;
+
+    VkAttachmentDescription2 motionAttachmentResolve{};
+    motionAttachmentResolve.sType = VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2;
+    motionAttachmentResolve.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    motionAttachmentResolve.samples = VK_SAMPLE_COUNT_1_BIT;
+    motionAttachmentResolve.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    motionAttachmentResolve.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    motionAttachmentResolve.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    motionAttachmentResolve.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    motionAttachmentResolve.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    motionAttachmentResolve.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    motionAttachmentResolve.pNext = nullptr;
+
     VkAttachmentDescription2 depthAttachmentResolve{};
     depthAttachmentResolve.sType = VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2;
     depthAttachmentResolve.format = depthFormat;
@@ -209,21 +261,45 @@ void Framebuffer::createRenderPass() {
     colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     colorAttachmentRef.pNext = nullptr;
 
+    VkAttachmentReference2 auxColorAttachmentRef{};
+    auxColorAttachmentRef.sType = VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2;
+    auxColorAttachmentRef.attachment = 1;
+    auxColorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    auxColorAttachmentRef.pNext = nullptr;
+
+    VkAttachmentReference2 motionAttachmentRef{};
+    motionAttachmentRef.sType = VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2;
+    motionAttachmentRef.attachment = 2;
+    motionAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    motionAttachmentRef.pNext = nullptr;
+
     VkAttachmentReference2 depthAttachmentRef{};
     depthAttachmentRef.sType = VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2;
-    depthAttachmentRef.attachment = 1;
+    depthAttachmentRef.attachment = 3;
     depthAttachmentRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
     depthAttachmentRef.pNext = nullptr;
 
     VkAttachmentReference2 colorAttachmentResolveRef{};
     colorAttachmentResolveRef.sType = VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2;
-    colorAttachmentResolveRef.attachment = 2;
+    colorAttachmentResolveRef.attachment = 4;
     colorAttachmentResolveRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     colorAttachmentResolveRef.pNext = nullptr;
 
+    VkAttachmentReference2 auxColorAttachmentResolveRef{};
+    auxColorAttachmentResolveRef.sType = VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2;
+    auxColorAttachmentResolveRef.attachment = 5;
+    auxColorAttachmentResolveRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    auxColorAttachmentResolveRef.pNext = nullptr;
+
+    VkAttachmentReference2 motionAttachmentResolveRef{};
+    motionAttachmentResolveRef.sType = VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2;
+    motionAttachmentResolveRef.attachment = 6;
+    motionAttachmentResolveRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    motionAttachmentResolveRef.pNext = nullptr;
+
     VkAttachmentReference2 depthAttachmentResolveRef{};
     depthAttachmentResolveRef.sType = VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2;
-    depthAttachmentResolveRef.attachment = 3;
+    depthAttachmentResolveRef.attachment = 7;
     depthAttachmentResolveRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
     depthAttachmentResolveRef.pNext = nullptr;
 
@@ -232,10 +308,12 @@ void Framebuffer::createRenderPass() {
     VkSubpassDescription2 subpass{};
     subpass.sType = VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_2;
     subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    subpass.colorAttachmentCount = 1;
-    subpass.pColorAttachments = &colorAttachmentRef;
+    std::array<VkAttachmentReference2, 3> colorAttachments = { colorAttachmentRef, auxColorAttachmentRef, motionAttachmentRef };
+    std::array<VkAttachmentReference2, 3> colorResolveAttachments = { colorAttachmentResolveRef, auxColorAttachmentResolveRef, motionAttachmentResolveRef };
+    subpass.colorAttachmentCount = static_cast<uint32_t>(colorAttachments.size());
+    subpass.pColorAttachments = colorAttachments.data();
     subpass.pDepthStencilAttachment = &depthAttachmentRef;
-    subpass.pResolveAttachments = &colorAttachmentResolveRef;
+    subpass.pResolveAttachments = colorResolveAttachments.data();
     subpass.pInputAttachments = nullptr;
     subpass.preserveAttachmentCount = 0;
     subpass.inputAttachmentCount = 0;
@@ -275,7 +353,16 @@ void Framebuffer::createRenderPass() {
     dependencies[1].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
     dependencies[1].viewOffset = 0;
 
-    std::array<VkAttachmentDescription2, 4> attachments = { colorAttachment, depthAttachment, colorAttachmentResolve ,depthAttachmentResolve};
+    std::array<VkAttachmentDescription2, 8> attachments = {
+        colorAttachment,
+        auxColorAttachment,
+        motionAttachment,
+        depthAttachment,
+        colorAttachmentResolve,
+        auxColorAttachmentResolve,
+        motionAttachmentResolve,
+        depthAttachmentResolve
+    };
    
     VkRenderPassCreateInfo2 renderPassInfo{};
     renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2;
@@ -301,10 +388,7 @@ void Framebuffer::createRenderPass() {
     renderPassMultiviewCI.pViewMasks = &viewMask;
     renderPassMultiviewCI.correlationMaskCount = 1;
     renderPassMultiviewCI.pCorrelationMasks = &correlationMask;
-    //renderPassInfo.pCorrelatedViewMasks = &correlationMask;
-  //  renderPassInfo.correlatedViewMaskCount = 1;
-
-    //   renderPassInfo.pNext = &renderPassMultiviewCI;
+    renderPassInfo.pNext = &renderPassMultiviewCI;
     }
     if (vkCreateRenderPass2(vulkandevice->device, &renderPassInfo, nullptr, &renderPass) != VK_SUCCESS) {
         throw std::runtime_error("failed to create render pass!");
@@ -328,9 +412,25 @@ void Framebuffer::createFrameBuffer() {
     ColorImage->createImage(width, height,1, VK_IMAGE_TYPE_2D,1, this->msaaSamples, colorFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT , VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, multiLayerView);
     ColorImage->createImageView(colorFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1, viewType, multiLayerView);
 
+    AuxColorImage = new VulkanImage(vulkandevice->device, vulkandevice->physicalDevice);
+    AuxColorImage->createImage(width, height, 1, VK_IMAGE_TYPE_2D, 1, this->msaaSamples, VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, multiLayerView);
+    AuxColorImage->createImageView(VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, 1, viewType, multiLayerView);
+
+    MotionVectorImage = new VulkanImage(vulkandevice->device, vulkandevice->physicalDevice);
+    MotionVectorImage->createImage(width, height, 1, VK_IMAGE_TYPE_2D, 1, this->msaaSamples, VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, multiLayerView);
+    MotionVectorImage->createImageView(VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, 1, viewType, multiLayerView);
+
     MultisampledColorImage = new VulkanImage(vulkandevice->device, vulkandevice->physicalDevice);
     MultisampledColorImage->createImage(width, height,1, VK_IMAGE_TYPE_2D, 1, VK_SAMPLE_COUNT_1_BIT, colorFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT , VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, multiLayerView);
     MultisampledColorImage->createImageView(colorFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1, viewType, multiLayerView);
+
+    MultisampledAuxColorImage = new VulkanImage(vulkandevice->device, vulkandevice->physicalDevice);
+    MultisampledAuxColorImage->createImage(width, height, 1, VK_IMAGE_TYPE_2D, 1, VK_SAMPLE_COUNT_1_BIT, VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, multiLayerView);
+    MultisampledAuxColorImage->createImageView(VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, 1, viewType, multiLayerView);
+
+    MultisampledMotionVectorImage = new VulkanImage(vulkandevice->device, vulkandevice->physicalDevice);
+    MultisampledMotionVectorImage->createImage(width, height, 1, VK_IMAGE_TYPE_2D, 1, VK_SAMPLE_COUNT_1_BIT, VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, multiLayerView);
+    MultisampledMotionVectorImage->createImageView(VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, 1, viewType, multiLayerView);
     
     DepthImage = new VulkanImage(vulkandevice->device, vulkandevice->physicalDevice);
     DepthImage->createImage(width, height,1, VK_IMAGE_TYPE_2D, 1,this->msaaSamples, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, multiLayerView);
@@ -340,7 +440,16 @@ void Framebuffer::createFrameBuffer() {
     MultisampledDepthImage->createImage(width, height, 1, VK_IMAGE_TYPE_2D, 1, VK_SAMPLE_COUNT_1_BIT, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, multiLayerView);
     MultisampledDepthImage->createImageView(depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT, 1, viewType, multiLayerView);
 
-    std::array<VkImageView, 4>attachments = { ColorImage->imageView,DepthImage->imageView,MultisampledColorImage->imageView,MultisampledDepthImage->imageView };
+    std::array<VkImageView, 8>attachments = {
+        ColorImage->imageView,
+        AuxColorImage->imageView,
+        MotionVectorImage->imageView,
+        DepthImage->imageView,
+        MultisampledColorImage->imageView,
+        MultisampledAuxColorImage->imageView,
+        MultisampledMotionVectorImage->imageView,
+        MultisampledDepthImage->imageView
+    };
     VkFramebufferCreateInfo framebufferInfo{};
     framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
     framebufferInfo.renderPass = renderPass;
@@ -348,7 +457,7 @@ void Framebuffer::createFrameBuffer() {
     framebufferInfo.pAttachments = attachments.data();
     framebufferInfo.width = width;
     framebufferInfo.height = height;
-    framebufferInfo.layers = 1;
+    framebufferInfo.layers = multiLayerView;
 
     if (vkCreateFramebuffer(vulkandevice->device, &framebufferInfo, nullptr, &framebuffer) != VK_SUCCESS) {
         throw std::runtime_error("failed to create framebuffer!");
@@ -368,9 +477,11 @@ void Framebuffer::beginRenderPass(VkCommandBuffer commandBuffer) {
     resolution.height = height;
     renderPassInfo.renderArea.extent = resolution;
 
-    std::array<VkClearValue, 2> clearValues{};
-    clearValues[0].color = { {0.2f, 0.2f, 0.2f, 1.f} };
-    clearValues[1].depthStencil = { 1.0f, 0 };
+    std::array<VkClearValue, 4> clearValues{};
+    clearValues[0].color = { {1.f, 1.f, 1.f, 1.f} };
+    clearValues[1].color = { {0.f, 0.f, 0.f, 0.f} };
+    clearValues[2].color = { {0.f, 0.f, 0.f, 0.f} };
+    clearValues[3].depthStencil = { 1.0f, 0 };
 
 
     renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());

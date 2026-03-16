@@ -13,6 +13,7 @@ set GLSLC=glslc.exe
 %GLSLC% "shaders/ComputeShaders/sdfCompute2.comp" -o "shaders/ComputeShaders/sdfCompute2.spv"
 %GLSLC% "shaders/ComputeShaders/GaussianFluidSim.comp" -o "shaders/ComputeShaders/GaussianFluidSim.spv"
 %GLSLC% "shaders/ComputeShaders/sdfCompute _pottery.comp" -o "shaders/ComputeShaders/sdfCompute _pottery.spv"
+%GLSLC% "shaders/ComputeShaders/sdfCompute_lod1.comp" -o "shaders/ComputeShaders/sdfCompute_lod1.spv"
 
 %GLSLC% "shaders/PostProcessing/VolumePassVS.vert" -o "shaders/PostProcessing/VolumePassVS.spv"
 %GLSLC% "shaders/PostProcessing/VolumePassFS.frag" -o "shaders/PostProcessing/VolumePassFS.spv"

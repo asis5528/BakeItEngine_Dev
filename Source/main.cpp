@@ -255,6 +255,8 @@ private:
             scene->SBOs[0][3],
             scene->SBOs[0][5]
         };
+        base->vbuffer->updateInstanceIdBuffer(scene->meshes[scene->objects[0].meshID[0]], {});
+        clines->createLodObjects();
         clines->createStaticFloorObject();
         scene->postprocessingManager->volumeRendering->quads[0]->shader.sbos = {
             scene->SBOs[0][0],

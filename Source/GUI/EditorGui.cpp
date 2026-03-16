@@ -8,6 +8,40 @@
 
 namespace
 {
+const Mesh* FindFirstVolumetricMesh(const Scene* scene, int* outMeshId = nullptr)
+{
+    if (!scene || scene->pipelines.size() <= 4) {
+        return nullptr;
+    }
+
+    for (const Object& obj : scene->objects) {
+        if (!obj.hasMesh) {
+            continue;
+        }
+
+        for (size_t i = 0; i < obj.meshID.size(); ++i) {
+            if (i >= obj.shader.size()) {
+                continue;
+            }
+            if (obj.shader[i].graphicsPipeline != scene->pipelines[4]) {
+                continue;
+            }
+
+            const int meshId = obj.meshID[i];
+            if (meshId < 0 || meshId >= static_cast<int>(scene->meshes.size())) {
+                continue;
+            }
+
+            if (outMeshId) {
+                *outMeshId = meshId;
+            }
+            return &scene->meshes[meshId];
+        }
+    }
+
+    return nullptr;
+}
+
 void DrawSdfAtlasUsageBar(const char* label, float fraction, int usedBricks, int capacityBricks)
 {
     fraction = ImClamp(fraction, 0.0f, 1.0f);
@@ -225,6 +259,7 @@ void DrawSdfAtlasUsageBar(const char* label, float fraction, int usedBricks, int
      if (ImGui::Button("MeshToSDF Dispatch")) {
          m_scene->dispatch = true;
      }
+     ImGui::Checkbox("Enable TAA", &m_scene->taaEnabled);
      ImGui::Separator();
      ImGui::Text("Brush");
      const char* brushShapeName = "Cube";
@@ -232,6 +267,7 @@ void DrawSdfAtlasUsageBar(const char* label, float fraction, int usedBricks, int
      else if (m_scene->brushShapeMode == 2) brushShapeName = "Plane";
      ImGui::Text("Shape   : %s (U to toggle)", brushShapeName);
      ImGui::Text("Radius  : %.4f (A/D)", m_scene->brushRadius);
+     ImGui::Text("Smooth  : %.4f (Q/E)", m_scene->brushSmoothness);
      ImGui::ColorEdit3("Color", &m_scene->brushColor.x);
      ImGui::Text("Z Offset: %.4f (W/S)", m_scene->brushZAxis);
      ImGui::Text("Action  : %s", (m_scene->brushAction < 0.5f) ? "Remove (RMB)" : "Add (LMB)");
@@ -249,6 +285,13 @@ void DrawSdfAtlasUsageBar(const char* label, float fraction, int usedBricks, int
      ImGui::Text("Atlas Left: %d bricks", atlasLeftBricks);
      ImGui::Text("Atlas Tail: %d bricks", m_scene->sdfAtlasTailBricks);
      ImGui::Text("Free Stack: %d bricks", m_scene->sdfAtlasFreeBricks);
+     int volumetricMeshId = -1;
+     if (const Mesh* volumetricMesh = FindFirstVolumetricMesh(m_scene, &volumetricMeshId)) {
+         ImGui::Separator();
+         ImGui::Text("Vol Mesh ID: %d", volumetricMeshId);
+         ImGui::Text("Vol Indices: %d", static_cast<int>(volumetricMesh->indices.size()));
+         ImGui::Text("Vol Instances: %u / %u", volumetricMesh->instanceCount, volumetricMesh->instanceCapacity);
+     }
      ImGui::Text("Mode: %s (MMB toggle)", m_scene->cameraMoveMode ? "Camera" : "Edit");
      ImGui::Text("Shift+LMB: Recolor existing blocks");
      ImGui::End();

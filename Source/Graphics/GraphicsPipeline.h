@@ -23,6 +23,7 @@
         VkDevice device;
         bool skinned = false;
         bool useInstanceIdAttribute = false;
+        uint32_t colorAttachmentCount = 1;
       //  VkPipelineCache pipelineCache;
         std::vector<descriptorTypes> descriptorTypes;
 
@@ -44,6 +45,7 @@
         VkPipelineMultisampleStateCreateInfo multisampling{};
         VkPipelineDepthStencilStateCreateInfo depthStencil{};
         VkPipelineColorBlendAttachmentState colorBlendAttachment{};
+        std::vector<VkPipelineColorBlendAttachmentState> colorBlendAttachments;
         VkPipelineColorBlendStateCreateInfo colorBlending{};
 
     };

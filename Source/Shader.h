@@ -48,14 +48,24 @@ struct VulkanShader {
 
 struct UniformBufferObject {
 	alignas(16) glm::mat4 model;
+	alignas(16) glm::mat4 prevModel;
 	alignas(16) glm::mat4 view[2];
 	alignas(16) glm::mat4 proj[2];
+	alignas(16) glm::mat4 prevProj[2];
+	alignas(16) glm::mat4 projNoJitter[2];
+	alignas(16) glm::mat4 prevView[2];
+	alignas(16) glm::mat4 prevProjNoJitter[2];
 };
 
 struct SkinnedUniformBufferObject {
 	alignas(16) glm::mat4 model;
+	alignas(16) glm::mat4 prevModel;
 	alignas(16) glm::mat4 view[2];
 	alignas(16) glm::mat4 proj[2];
+	alignas(16) glm::mat4 prevProj[2];
+	alignas(16) glm::mat4 projNoJitter[2];
+	alignas(16) glm::mat4 prevView[2];
+	alignas(16) glm::mat4 prevProjNoJitter[2];
 	glm::mat4 boneMatrices[100] = { glm::mat4(1.0) };
 
 };

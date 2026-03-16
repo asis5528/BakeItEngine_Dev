@@ -3,8 +3,13 @@
 
 layout(binding = 0) uniform UniformBufferObject {
     mat4 model;
+    mat4 prevModel;
     mat4 view[2];
     mat4 proj[2];
+    mat4 prevProj[2];
+    mat4 projNoJitter[2];
+    mat4 prevView[2];
+    mat4 prevProjNoJitter[2];
 } ubo;
 layout( std430,binding = 4) readonly buffer BlockBuffer {
     int blocks[];   // single int
@@ -32,6 +37,8 @@ layout(location = 5) flat out int brickIndex;
 layout(location = 6) out vec3 camLocal;
 layout(location = 7) flat out float blockEmissive;
 layout(location = 8) flat out vec3 blockColor;
+layout(location = 9) flat out float blockSizeWSOut;
+layout(location = 10) flat out vec3 blockCenterObject;
 
 const int BLOCK_EMISSIVE_FLAG = (1 << 30);
 const int BLOCK_INDEX_MASK = BLOCK_EMISSIVE_FLAG - 1;
@@ -44,10 +51,19 @@ void main()
     uint blockIdx = uint(max(inBlockID, 0));
     int blockRaw = blocks[blockIdx];
     if (blockRaw < 0) {
-        //gl_Position = vec4(2e9, 2e9, 2e9, 1.0); // push off-screen
-      //  return;
-    }// gl_Position = vec4(2e9, 2e9, 2e9, 1.0); // push off-screen
-       // return;
+        gl_Position = vec4(2e9, 2e9, 2e9, 1.0);
+        brickIndex = 0;
+        blockEmissive = 0.0;
+        blockColor = vec3(0.0);
+        fragColor = vec3(0.0);
+        fragTexCoord = inTexCoord;
+        localCoord = v;
+        cameraPos = vec3(0.0);
+        worldPosition = vec3(0.0);
+        camLocal = vec3(0.0);
+        blockSizeWSOut = 1.0 / 64.0;
+        return;
+    }
     brickIndex = (blockRaw & BLOCK_INDEX_MASK);
     blockEmissive = ((blockRaw & BLOCK_EMISSIVE_FLAG) != 0) ? 1.0 : 0.0;
     blockColor = blockColors[blockIdx].rgb;
@@ -61,7 +77,9 @@ if(blockIdx>0) {
     
     vec4 spatial = blockSpatial[blockIdx];
     float blockSizeWS = spatial.w;
+    blockSizeWSOut = blockSizeWS;
     vec3 centerWS = spatial.xyz;
+    blockCenterObject = centerWS;
     vec3 centerWorld = (ubo.model * vec4(centerWS, 1.0)).xyz;
     // Scale unit cube to block size and translate to center
     vec3 vertWS = centerWS + v * blockSizeWS;

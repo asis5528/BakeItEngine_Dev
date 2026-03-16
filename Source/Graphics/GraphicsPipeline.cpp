@@ -106,7 +106,7 @@ void GraphicsPipeline::setupPipeline(PipelineInput  pipelineInput) {
 
     //static VkPipelineRasterizationStateCreateInfo rasterizer{};
     infoLocal.rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    infoLocal.rasterizer.depthClampEnable = VK_TRUE;
+    infoLocal.rasterizer.depthClampEnable = VK_FALSE;
     infoLocal.rasterizer.rasterizerDiscardEnable = VK_FALSE;
     infoLocal.rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
     infoLocal.rasterizer.lineWidth = 1.0f;
@@ -141,11 +141,12 @@ void GraphicsPipeline::setupPipeline(PipelineInput  pipelineInput) {
     infoLocal.colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
 
     //static VkPipelineColorBlendStateCreateInfo colorBlending{};
+    infoLocal.colorBlendAttachments.assign(pipelineInput.colorAttachmentCount, infoLocal.colorBlendAttachment);
     infoLocal.colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
     infoLocal.colorBlending.logicOpEnable = VK_FALSE;
     infoLocal.colorBlending.logicOp = VK_LOGIC_OP_COPY;
-    infoLocal.colorBlending.attachmentCount = 1;
-    infoLocal.colorBlending.pAttachments = &infoLocal.colorBlendAttachment;
+    infoLocal.colorBlending.attachmentCount = static_cast<uint32_t>(infoLocal.colorBlendAttachments.size());
+    infoLocal.colorBlending.pAttachments = infoLocal.colorBlendAttachments.data();
     infoLocal.colorBlending.blendConstants[0] = 0.0f;
     infoLocal.colorBlending.blendConstants[1] = 0.0f;
     infoLocal.colorBlending.blendConstants[2] = 0.0f;
@@ -198,7 +199,8 @@ void GraphicsPipeline::createGraphicsPipeline() {
     pipelineInfo.pRasterizationState = &infoLocal.rasterizer;
     pipelineInfo.pMultisampleState = &infoLocal.multisampling;
     pipelineInfo.pDepthStencilState = &infoLocal.depthStencil;
-    infoLocal.colorBlending.pAttachments = &infoLocal.colorBlendAttachment;
+    infoLocal.colorBlending.attachmentCount = static_cast<uint32_t>(infoLocal.colorBlendAttachments.size());
+    infoLocal.colorBlending.pAttachments = infoLocal.colorBlendAttachments.data();
     pipelineInfo.pColorBlendState = &infoLocal.colorBlending;
     
    

@@ -19,6 +19,7 @@ void Quad::createGraphicsPipeline(std::string vshaderpath, std::string fshaderpa
     input.renderPass = this->fr->renderPass;
     input.msaaSamples = base->msaaSamples;
     input.viewportExtent = base->swapChain->swapChainExtent;
+    input.colorAttachmentCount = 3;
     input.descriptorTypes = descriptorTypes;
     graphicsPipeline->setupPipeline(input);
     VkPipelineVertexInputStateCreateInfo vi{};

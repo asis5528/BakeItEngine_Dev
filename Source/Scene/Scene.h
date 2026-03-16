@@ -38,6 +38,10 @@ public:
 	 glm::mat4 proj[2];
 	 glm::mat4 projNoJitter[2];
 	 glm::mat4 view[2];
+	 glm::mat4 prevProjForMotion[2] = { glm::mat4(1.0f), glm::mat4(1.0f) };
+	 glm::mat4 prevViewForMotion[2] = { glm::mat4(1.0f), glm::mat4(1.0f) };
+	 glm::mat4 prevProjNoJitterForMotion[2] = { glm::mat4(1.0f), glm::mat4(1.0f) };
+	 bool motionHistoryValid = false;
 	 glm::vec2 taaJitter = glm::vec2(0.0f);
 	 float camFovDegrees = 45.0f;
 	 float camNearPlane = 0.001f;
@@ -63,9 +67,11 @@ public:
 	 bool brushUseSphere = false;
 	 int brushShapeMode = 0; // 0 cube, 1 sphere, 2 plane
 	 float brushRadius = 0.01f;
+	 float brushSmoothness = 0.001f;
 	 float brushZAxis = 0.2f;
 	 float brushAction = 1.0f; // 1.0 add (LMB), 0.0 remove (RMB)
 	 bool emissiveMode = false; // toggled with I
+	 bool taaEnabled = true;
 	 int dirtyBlockCount = 0;
 	 int sdfAtlasUsedBricks = 0;
 	 int sdfAtlasCapacityBricks = 0;

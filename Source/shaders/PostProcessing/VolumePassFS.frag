@@ -25,10 +25,12 @@ layout(std140, binding = 0) uniform CameraUBO {
 layout(binding = 1) uniform sampler2DArray texSampler;
 layout(binding = 2) uniform sampler2DArray depthSampler;
 layout(binding = 3) uniform sampler2DArray historySampler;
-layout(binding = 4) readonly buffer BrickBuffer {
+layout(binding = 4) uniform sampler2DArray worldPosSampler;
+layout(binding = 5) uniform sampler2DArray motionSampler;
+layout(binding = 6) readonly buffer BrickBuffer {
   float bricks[];  // single int
 };
-layout(std430, binding = 5) readonly buffer BlockBuffer {
+layout(std430, binding = 7) readonly buffer BlockBuffer {
   int blocks[];  // single int
 };
 
@@ -38,6 +40,13 @@ vec2 UVToNDC(vec2 uv) {
   vec2 ndc = uv * 2.0 - 1.0;
   ndc.y = -ndc.y;
   return ndc;
+}
+
+ivec2 PixelCoordFromUv(vec2 uv)
+{
+    ivec2 size = textureSize(texSampler, 0).xy;
+    vec2 pixel = uv * vec2(size);
+    return clamp(ivec2(pixel), ivec2(0), size - ivec2(1));
 }
 
 vec2 NDCToUV(vec2 ndc) {
@@ -356,6 +365,57 @@ vec3 ReconstructWorldPoss(vec2 uv, float depth01)
     vec3 viewPos = ReconstructViewPos(uv, depth01, invProj);
     vec4 worldH = invView * vec4(viewPos, 1.0);
     return worldH.xyz;
+}
+
+vec3 NormalFromWorldPosBuffer(vec2 uv)
+{
+    vec2 texel = 1.0 / resolution.xy;
+    ivec2 centerPx = PixelCoordFromUv(uv);
+    ivec2 size = textureSize(worldPosSampler, 0).xy;
+
+    vec4 center = texelFetch(worldPosSampler, ivec3(centerPx, 0), 0);
+    vec3 Pc = center.rgb;
+    vec3 Pr = texelFetch(worldPosSampler, ivec3(min(centerPx + ivec2(1, 0), size - ivec2(1)), 0), 0).rgb;
+    vec3 Pl = texelFetch(worldPosSampler, ivec3(max(centerPx - ivec2(1, 0), ivec2(0)), 0), 0).rgb;
+    vec3 Pu = texelFetch(worldPosSampler, ivec3(min(centerPx + ivec2(0, 1), size - ivec2(1)), 0), 0).rgb;
+    vec3 Pd = texelFetch(worldPosSampler, ivec3(max(centerPx - ivec2(0, 1), ivec2(0)), 0), 0).rgb;
+
+    vec3 dxR = Pr - Pc;
+    vec3 dxL = Pc - Pl;
+    vec3 dyU = Pu - Pc;
+    vec3 dyD = Pc - Pd;
+
+    vec3 dPdx = (length(dxR) < length(dxL)) ? dxR : dxL;
+    vec3 dPdy = (length(dyU) < length(dyD)) ? dyU : dyD;
+
+    vec3 N = normalize(cross(dPdx, dPdy));
+    vec3 viewDir = normalize(camPos - Pc);
+    if (dot(N, viewDir) < 0.0) {
+        N = -N;
+    }
+    return N;
+}
+
+bool TryGetWorldPosFromAux(vec2 uv, out vec3 worldPos)
+{
+    vec4 aux = texelFetch(worldPosSampler, ivec3(PixelCoordFromUv(uv), 0), 0);
+    if (aux.a > 0.5) {
+        worldPos = aux.rgb;
+        return true;
+    }
+    worldPos = vec3(0.0);
+    return false;
+}
+
+bool TryGetMotionVectorFromAux(vec2 uv, out vec2 motionUV)
+{
+    vec4 aux = texelFetch(motionSampler, ivec3(PixelCoordFromUv(uv), 0), 0);
+    if (aux.a > 0.5) {
+        motionUV = aux.xy;
+        return true;
+    }
+    motionUV = vec2(0.0);
+    return false;
 }
 
 vec3 NormalFromWorldGradient(vec3 worldPos)
@@ -903,38 +963,41 @@ float TaaHistoryWeight(vec2 motionUV, vec3 currentColor, vec3 historyColor)
     return clamp(historyWeight, 0.0, 0.92);
 }
 
-vec2 JitterNdcToUv(vec2 jitterNdc)
-{
-    return vec2(jitterNdc.x, -jitterNdc.y) * 0.5;
-}
-
 bool ComputeMotionVector(vec2 uv, float depth, out vec2 prevUV, out vec2 motionUV)
 {
     prevUV = uv;
     motionUV = vec2(0.0);
 
-    if (depth >= 0.99999) {
-        prevUV = uv;
+    if (TryGetMotionVectorFromAux(uv, motionUV)) {
+        prevUV = uv - motionUV;
         return true;
     }
 
-    vec3 worldPos = ReconstructWorldPoss(uv, depth);
-    vec4 prevClip = prevViewProj * vec4(worldPos, 1.0);
-    if (prevClip.w <= 0.000001) {
-        return false;
-    }
-
-    prevUV = NDCToUV(prevClip.xy / prevClip.w);
-
-    vec4 currNoJitterClip = currViewProjNoJitter * vec4(worldPos, 1.0);
-    vec4 prevNoJitterClip = prevViewProjNoJitter * vec4(worldPos, 1.0);
-    if (currNoJitterClip.w > 0.000001 && prevNoJitterClip.w > 0.000001) {
-        vec2 currNoJitterUV = NDCToUV(currNoJitterClip.xy / currNoJitterClip.w);
-        vec2 prevNoJitterUV = NDCToUV(prevNoJitterClip.xy / prevNoJitterClip.w);
-        motionUV = currNoJitterUV - prevNoJitterUV;
-    }
+   
 
     return true;
+}
+
+vec3 CurrentColorAt(ivec2 px)
+{
+    ivec2 size = textureSize(texSampler, 0).xy;
+    px = clamp(px, ivec2(0), size - ivec2(1));
+    return texelFetch(texSampler, ivec3(px, 0), 0).rgb;
+}
+
+vec3 ClampHistoryToNeighborhood(vec2 uv, vec3 historyColor)
+{
+    ivec2 centerPx = PixelCoordFromUv(uv);
+
+    vec3 c  = CurrentColorAt(centerPx);
+    vec3 l  = CurrentColorAt(centerPx + ivec2(-1,  0));
+    vec3 r  = CurrentColorAt(centerPx + ivec2( 1,  0));
+    vec3 u  = CurrentColorAt(centerPx + ivec2( 0,  1));
+    vec3 d  = CurrentColorAt(centerPx + ivec2( 0, -1));
+
+    vec3 minC = min(c, min(min(l, r), min(u, d)));
+    vec3 maxC = max(c, max(max(l, r), max(u, d)));
+    return clamp(historyColor, minC, maxC);
 }
 
 vec3 ApplyTAA(vec2 uv, float depth, vec3 currentColor)
@@ -943,10 +1006,6 @@ vec3 ApplyTAA(vec2 uv, float depth, vec3 currentColor)
         return currentColor;
     }
 
-    vec3 filteredCurrent = mix(currentColor, NeighborhoodAverage(uv), 0.35);
-    vec3 stableHistoryRaw = texture(historySampler, vec3(uv, 0.0)).rgb;
-    vec3 stableHistory = NeighborhoodClamp(stableHistoryRaw, uv);
-
     vec2 prevUV;
     vec2 motionUV;
     bool hasReprojection = ComputeMotionVector(uv, depth, prevUV, motionUV);
@@ -954,29 +1013,14 @@ vec3 ApplyTAA(vec2 uv, float depth, vec3 currentColor)
         all(greaterThanEqual(prevUV, vec2(0.0))) &&
         all(lessThanEqual(prevUV, vec2(1.0)));
 
-    vec3 historyRaw = stableHistoryRaw;
-    vec3 historyColor = stableHistory;
-
-    if (validPrevUv && depth < 0.99999) {
-        vec3 reprojectedHistoryRaw = texture(historySampler, vec3(prevUV, 0.0)).rgb;
-        vec3 reprojectedHistory = NeighborhoodClamp(reprojectedHistoryRaw, uv);
-        float motionPixels = length(motionUV * resolution.xy);
-        float staticBlend = 1.0 - smoothstep(0.05, 0.45, motionPixels);
-        historyRaw = mix(reprojectedHistoryRaw, stableHistoryRaw, staticBlend);
-        historyColor = mix(reprojectedHistory, stableHistory, staticBlend);
+    if (!validPrevUv || depth >= 0.99999) {
+        return currentColor;
     }
 
-    float historyWeight = TaaHistoryWeight(motionUV, filteredCurrent, historyColor);
-    if (!validPrevUv) {
-        historyWeight *= 0.85;
-    }
+    vec3 historyColor = texture(historySampler, vec3(prevUV, 0.0)).rgb;
+    historyColor = ClampHistoryToNeighborhood(uv, historyColor);
 
-    vec2 jitterDeltaUv = JitterNdcToUv(taaData.xy - taaData.zw);
-    float jitterPixels = length(jitterDeltaUv * resolution.xy);
-    float staticTrust = 1.0 - smoothstep(0.05, 0.35, length(motionUV * resolution.xy));
-    historyWeight = max(historyWeight, staticTrust * (1.0 - smoothstep(0.05, 0.45, jitterPixels)) * 0.96);
-
-    return mix(filteredCurrent, historyColor, clamp(historyWeight, 0.0, 0.96));
+    return mix(currentColor, historyColor, 0.8);
 }
 void main() {
   vec2 uv = texcoord;
@@ -986,71 +1030,16 @@ void main() {
   getRayNoJitter(brushRo, brushRd);
   vec2 rayBox = rayBoxDst(vec3(-0.5,-0.5,-0.5), vec3(0.5), brushRo, 1.0 / brushRd);
 
+  ivec2 pixelCoord = PixelCoordFromUv(uv);
   float sceneDepth = texture(depthSampler, vec3(uv, 0.)).r;
   bool hasSceneDepth = (sceneDepth < 0.99999);
-  outColor = texture(texSampler, vec3(uv, 0.));
+  outColor = vec4(CurrentColorAt(pixelCoord), 1.0);
   if (!hasSceneDepth) {
       outColor.a = 1.0;
   }
-
-  vec3 worldPos = vec3(0.0);
-  vec3 n = vec3(0.0, 1.0, 0.0);
-  if (hasSceneDepth) {
-      worldPos = ReconstructWorldPoss(uv, sceneDepth);
-      n = normalize(NormalFromDepth(uv));
-  }
-  vec3 lightDir = normalize(vec3(0.,1.,0.));
-  vec3 light = lightDir;
-  float dif = max(dot(n, lightDir), 0.0);
-  //outColor = vec4(vec3(dif), 1.0);
- // return;
- 
   float linearDepth = hasSceneDepth ? linearDepthFromBuffer(sceneDepth) : farPlane;
-  const float floorCenterY = -0.3578125;
-  bool isFloorReceiver = hasSceneDepth && abs(worldPos.y - floorCenterY) < 0.03 && n.y > 0.9;
-
-  // Temporal AA with previous-frame reprojection on the base shaded scene.
   outColor.rgb = ApplyTAA(uv, sceneDepth, outColor.rgb);
-
-  // Screen-space reflections from scene color + depth.
-  if (hasSceneDepth) {
-      
-      float ssrWeight = 0.0;
-     // outColor.rgb = ComputeSSR(uv, worldPos, n, outColor.rgb, ssrWeight);
-
-      if (isFloorReceiver) {
-          outColor.rgb += ComputeFloorBlobBounce(worldPos, floorCenterY);
-      } else {
-          // Screen-space global illumination (diffuse bounce approximation).
-          vec3 giRaw = ComputeSSGI(uv, worldPos, n);
-          vec3 gi = DenoiseSSGI(uv, worldPos, n, giRaw);
-         // outColor.rgb += gi * 0.80;
-      }
-  }
-
-  // Always-visible 3D brush cursor in post-process, centered around actual brush position.
- //outColor = linearDepth*vec4(1.);
-// outColor.rgb = abs(ReconstructWorldPos(sceneDepth,uv));
-  if(linearDepth<50.0){
-  //outColor = vec4( n,1.);
-
- //  outColor.rgb = mix(vec3(0.,1.,0.),vec3(0.,0.,1.),clamp(sin(length(worldPos)*200.0),0.,1.));
-  
-
-      float dif = clamp(dot(normalize(light),n),0.,1.);
-
-       vec3 reflectDir = reflect(normalize(light), n);
-       float spec = pow(max(dot(rd, reflectDir), 0.0), 32.);
-       //dif = 1.0;
-       //spec = 1.0;
-    //    outColor.rgb = vec3(sin(linearDepth*500.));
-      // outColor.rgb = vec3(0.7,0.5,0.2)*dif*0.7+0.1+clamp(dot(rd,n)+1.,0.,1.)*0.5*vec3(1.,1.,1.)+spec*0.5;
-
-//  outColor = vec4(1.)*sin(linearDepth*200.0);
-  }else{
-  //  outColor = vec4(0.2,0.,0.,1.);
-  }
-
+ // outColor.rgb = vec3(texture(motionSampler,vec3(uv,0.0)).rg,0.);
   // Keep the interactive brush cursor responsive by compositing it after TAA.
   if (rayBox.y > 0.0) {
       vec3 brushCenter = -brushData.xyz;

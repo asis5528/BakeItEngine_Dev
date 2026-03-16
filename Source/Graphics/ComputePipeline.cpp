@@ -1,6 +1,34 @@
 #include "ComputePipeline.h"
 #include "VulkanUtils.h"
 
+namespace
+{
+void RecordComputeDispatch(
+    VkCommandBuffer commandBuffer,
+    VkPipeline pipeline,
+    VkPipelineLayout pipelineLayout,
+    VkDescriptorSet descriptorSet,
+    uint32_t x,
+    uint32_t y,
+    uint32_t z)
+{
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+
+    if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
+        throw std::runtime_error("failed to begin recording command buffer!");
+    }
+
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
+    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, &descriptorSet, 0, 0);
+    vkCmdDispatch(commandBuffer, x, y, z);
+
+    if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
+        throw std::runtime_error("failed to record command buffer!");
+    }
+}
+}
+
 
 ComputePipeline::ComputePipeline(VulkanBase *base, ComputeInput input)
 {
@@ -257,22 +285,7 @@ void ComputePipeline::dispatch(uint32_t x, uint32_t y, uint32_t z)
         throw std::runtime_error("failed to create compute fence!");
     }
 
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-
-    if (vkBeginCommandBuffer(computeCommandBuffer, &beginInfo) != VK_SUCCESS) {
-        throw std::runtime_error("failed to begin recording command buffer!");
-    }
-    vkCmdBindPipeline(computeCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline);
-    vkCmdBindDescriptorSets(computeCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, &descriptorSet, 0, 0);
-
-    vkCmdDispatch(computeCommandBuffer,x, y, z);
-    
-
-    if (vkEndCommandBuffer(computeCommandBuffer) != VK_SUCCESS) {
-        throw std::runtime_error("failed to record command buffer!");
-    }
-    float k = 0.;
+    RecordComputeDispatch(computeCommandBuffer, computePipeline, pipelineLayout, descriptorSet, x, y, z);
 }
 
 void ComputePipeline::submit()
@@ -297,6 +310,28 @@ void ComputePipeline::submit()
     }
 
 }
+
+void ComputePipeline::submit(uint32_t x, uint32_t y, uint32_t z)
+{
+    vkWaitForFences(base->device, 1, &computeFence, VK_TRUE, UINT64_MAX);
+    vkResetFences(base->device, 1, &computeFence);
+
+    if (vkResetCommandBuffer(computeCommandBuffer, 0) != VK_SUCCESS) {
+        throw std::runtime_error("failed to reset compute command buffer!");
+    }
+
+    RecordComputeDispatch(computeCommandBuffer, computePipeline, pipelineLayout, descriptorSet, x, y, z);
+
+    VkSubmitInfo computeSubmitInfo{};
+    computeSubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    computeSubmitInfo.commandBufferCount = 1;
+    computeSubmitInfo.pCommandBuffers = &computeCommandBuffer;
+
+    if (vkQueueSubmit(base->queue, 1, &computeSubmitInfo, computeFence) != VK_SUCCESS) {
+        throw std::runtime_error("failed to sumbit queue!");
+    }
+}
+
 ComputePipeline::~ComputePipeline() {
     vkDestroyShaderModule(base->device, shaderModule, nullptr);
     vkDestroyDescriptorPool(base->device, computeDescriptorPool, nullptr);

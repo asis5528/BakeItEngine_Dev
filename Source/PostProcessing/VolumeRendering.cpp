@@ -33,14 +33,16 @@ VolumeRendering::VolumeRendering(VulkanBase* base,Scene *scene, Framebuffer* pre
     this->scene = scene;
     this->previousFB = previousFB;
     // [0] final postprocess output, [1] TAA history buffer.
-    Framebuffer* frameBuffer_quad = new Framebuffer(base->vulkandevice, base->swapChain->swapChainExtent.width, base->swapChain->swapChainExtent.height, base->vulkandevice->getMaxUsableSampleCount(), base->swapChain->swapChainImageFormat, utils::findDepthFormat(base->vulkandevice->physicalDevice));
-    Framebuffer* frameBuffer_history = new Framebuffer(base->vulkandevice, base->swapChain->swapChainExtent.width, base->swapChain->swapChainExtent.height, base->vulkandevice->getMaxUsableSampleCount(), base->swapChain->swapChainImageFormat, utils::findDepthFormat(base->vulkandevice->physicalDevice));
+    Framebuffer* frameBuffer_quad = new Framebuffer(base->vulkandevice, base->swapChain->swapChainExtent.width, base->swapChain->swapChainExtent.height, base->vulkandevice->getMaxUsableSampleCount(), base->swapChain->swapChainImageFormat, utils::findDepthFormat(base->vulkandevice->physicalDevice), previousFB->multiLayerView);
+    Framebuffer* frameBuffer_history = new Framebuffer(base->vulkandevice, base->swapChain->swapChainExtent.width, base->swapChain->swapChainExtent.height, base->vulkandevice->getMaxUsableSampleCount(), base->swapChain->swapChainImageFormat, utils::findDepthFormat(base->vulkandevice->physicalDevice), previousFB->multiLayerView);
     framebuffers.push_back(frameBuffer_quad);
     framebuffers.push_back(frameBuffer_history);
     Quad* quad = new Quad(base, framebuffers[0]);
     std::vector<descriptorTypes> VolumeDescriptorTypes = { 
         descriptorTypes{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_SHADER_STAGE_FRAGMENT_BIT},
         descriptorTypes{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,VK_SHADER_STAGE_FRAGMENT_BIT },
+        descriptorTypes{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,VK_SHADER_STAGE_FRAGMENT_BIT } ,
+        descriptorTypes{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,VK_SHADER_STAGE_FRAGMENT_BIT } ,
         descriptorTypes{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,VK_SHADER_STAGE_FRAGMENT_BIT } ,
         descriptorTypes{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,VK_SHADER_STAGE_FRAGMENT_BIT } ,
     
@@ -68,6 +70,16 @@ VolumeRendering::VolumeRendering(VulkanBase* base,Scene *scene, Framebuffer* pre
     historyTex.imageSampler = base->vbuffer->createTextureSampler(1);
     historyTex.imageViewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
     quad->textures.push_back(historyTex);
+    VulkanTexture auxWorldPosTex;
+    auxWorldPosTex.imageView = previousFB->MultisampledAuxColorImage->imageView;
+    auxWorldPosTex.imageSampler = base->vbuffer->createTextureSampler(1);
+    auxWorldPosTex.imageViewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+    quad->textures.push_back(auxWorldPosTex);
+    VulkanTexture motionTex;
+    motionTex.imageView = previousFB->MultisampledMotionVectorImage->imageView;
+    motionTex.imageSampler = base->vbuffer->createTextureSampler(1);
+    motionTex.imageViewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+    quad->textures.push_back(motionTex);
 
     quad->shader.ubos = volumeUBO;
    // quad->createdescriptors();
@@ -93,6 +105,13 @@ VolumeRendering::VolumeRendering(VulkanBase* base,Scene *scene, Framebuffer* pre
     prevViewProj = renderProj * scene->view[0];
     prevViewProjNoJitter = renderProjNoJitter * scene->view[0];
     prevJitter = scene->taaJitter;
+    base->vbuffer->transitionImageLayout(
+        framebuffers[1]->MultisampledColorImage->image,
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        1,
+        previousFB->multiLayerView);
 
 }
 void VolumeRendering::createDescriptors() {
@@ -122,7 +141,11 @@ void VolumeRendering::update() {
     camubo.brushData = scene->brushData;
     camubo.brushMeta = glm::vec4(scene->brushAction, float(scene->brushShapeMode), 0.0f, 0.0f);
     camubo.taaData = glm::vec4(scene->taaJitter, prevJitter);
-    camubo.taaState = glm::vec4(hasTaaHistory ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
+    camubo.taaState = glm::vec4(
+        hasTaaHistory ? 1.0f : 0.0f,
+        scene->taaEnabled ? 1.0f : 0.0f,
+        0.0f,
+        0.0f);
     for (int i = 0; i < Scene::MaxFloorBlobShadows; ++i) {
         camubo.floorBlobShadows[i] = scene->floorBlobShadows[i];
         camubo.floorBlobBounceColors[i] = scene->floorBlobBounceColors[i];
@@ -132,7 +155,6 @@ void VolumeRendering::update() {
 	volumeUBO[0].map(base->device, sizeof(CameraUBO), &camubo);
     prevViewProj = camubo.currViewProj;
     prevViewProjNoJitter = camubo.currViewProjNoJitter;
-    hasTaaHistory = true;
 	//volumeUBO[0].map(base->device, sizeof(CameraUBO), &scene->camera->cameraUBOData);
     //val += 0.0001f;
    // voulUBO vubo;
@@ -148,6 +170,9 @@ void VolumeRendering::renderPass(VkCommandBuffer commandBuffer)
     framebuffers[1]->beginRenderPass(commandBuffer);
     quads[1]->draw(commandBuffer);
     vkCmdEndRenderPass(commandBuffer);
+    if (!hasTaaHistory) {
+        hasTaaHistory = true;
+    }
 }
 
 void VolumeRendering::recreate(VkExtent2D ex)
@@ -170,6 +195,8 @@ void VolumeRendering::recreate(VkExtent2D ex)
         quads[0]->textures[0].imageView = previousFB->MultisampledColorImage->imageView;
         quads[0]->textures[1].imageView = previousFB->MultisampledDepthImage->imageView;
         quads[0]->textures[2].imageView = framebuffers[1]->MultisampledColorImage->imageView;
+        quads[0]->textures[3].imageView = previousFB->MultisampledAuxColorImage->imageView;
+        quads[0]->textures[4].imageView = previousFB->MultisampledMotionVectorImage->imageView;
     }
     if (quads.size() > 1) {
         // Copy pass source texture
@@ -183,6 +210,13 @@ void VolumeRendering::recreate(VkExtent2D ex)
     renderProjNoJitter[1][1] *= -1.0f;
     prevViewProj = renderProj * scene->view[0];
     prevViewProjNoJitter = renderProjNoJitter * scene->view[0];
+    base->vbuffer->transitionImageLayout(
+        framebuffers[1]->MultisampledColorImage->image,
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        1,
+        previousFB->multiLayerView);
 }
 
 VolumeRendering::~VolumeRendering()

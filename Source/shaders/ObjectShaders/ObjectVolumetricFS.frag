@@ -4,8 +4,13 @@
 
 layout(binding = 0) uniform UniformBufferObject {
     mat4 model;
+    mat4 prevModel;
     mat4 view[2];
     mat4 proj[2];
+    mat4 prevProj[2];
+    mat4 projNoJitter[2];
+    mat4 prevView[2];
+    mat4 prevProjNoJitter[2];
 } ubo;
 
 layout(binding = 2) uniform sampler3D texSampler;
@@ -30,10 +35,19 @@ layout(location=5 ) flat in int brickIndex2;
 layout(location=6) in vec3 camLocal;
 layout(location=7) flat in float blockEmissive;
 layout(location=8) flat in vec3 blockColor;
+layout(location=9) flat in float blockSizeWSIn;
+layout(location=10) flat in vec3 blockCenterObject;
 layout(location = 0) out vec4 outColor;
+layout(location = 1) out vec4 outWorldPos;
+layout(location = 2) out vec4 outMotion;
 
 const int BLOCK_EMISSIVE_FLAG = (1 << 30);
 const int BLOCK_INDEX_MASK = BLOCK_EMISSIVE_FLAG - 1;
+
+float localDistanceScale()
+{
+    return 1.0 / max(blockSizeWSIn, 1e-6);
+}
 
 
 vec4 rndC(vec3 u) {
@@ -167,15 +181,17 @@ vec4 textureTrilinear(sampler3D sam, vec3 uv)
     return mix(slice0, slice1, w.z);
 }
 float fetchBricks(int brickIndex,ivec3 p){
-
-
- p = clamp(p, ivec3(0), ivec3(8) );
+ if (any(lessThan(p, ivec3(0))) || any(greaterThan(p, ivec3(8)))) {
+    return 100.01;
+ }
 
 int localIndex = p.x + p.y*9 + p.z*9*9;
 
     return bricks[brickIndex+localIndex];
 
 }
+
+vec2 sampleBrickTrilinear(vec3 pos, out vec3 grad);
 
 vec2 map(vec3 p,int brickks){
 float k = 1./64.;
@@ -290,47 +306,7 @@ if(eraser<d&&time>0.){
 }
 return vec2(d,mat);
 }
-
-vec2 map2(vec3 p){
-float mat = 0.0;
-p = vec3(p.x,p.y,p.z);
-//p = max(p,-0.5);
-//p = clamp(p,-0.5,0.5);
-ivec3 localGrid = ivec3(floor((p+0.50)*8.));
-
-   ivec3 w = localGrid;
-  // w = abs(w);
-  vec3 pp = (p+0.5)*8.;
-   vec3 fw = fract(pp);
-   fw = clamp(fw, vec3(0.0), vec3(1.0));
-   int brickIndex = brickIndex2;
-    float a = fetchBricks(brickIndex,w + ivec3(0,0,0));
-    float b = fetchBricks(brickIndex,w + ivec3(1,0,0));
-    float c = fetchBricks(brickIndex,w + ivec3(0,1,0));
-    float d = fetchBricks(brickIndex,w + ivec3(1,1,0));
-
-    float e = fetchBricks(brickIndex,w + ivec3(0,0,1));
-    float f = fetchBricks(brickIndex,w + ivec3(1,0,1));
-    float g = fetchBricks(brickIndex,w + ivec3(0,1,1));
-    float k = fetchBricks(brickIndex,w + ivec3(1,1,1));
-
-    float slice0 = mix(mix(a, b, fw.x), mix(c, d, fw.x), fw.y);
-    float slice1 = mix(mix(e, f, fw.x), mix(g, k, fw.x), fw.y);
-    float hn =  mix(slice0,slice1 , fw.z);
-
-
-   float h = fetchBricks(brickIndex,w + ivec3(0,0,0));// bricks[blockIndex] ;
-   bool np = false;
-
-
-   h = hn;
-   if(np) h = hn;
-
-
-return vec2( h*64., mat);
-}
-
-vec2 sampleBrickTrilinear(vec3 pos, out vec3 grad)
+vec2 sampleBrickTrilinear2(vec3 pos, out vec3 grad)
 {
    vec3 grid = clamp((pos + 0.5) * 8.0, vec3(0.0), vec3(7.9999));
    ivec3 cell = ivec3(floor(grid));
@@ -364,8 +340,54 @@ vec2 sampleBrickTrilinear(vec3 pos, out vec3 grad)
        fracPart.y);
 
    // Convert from cell-space derivative to local cube-space derivative.
-   grad = vec3(dfdx, dfdy, dfdz) * 8. * 64.0;
-   return vec2(value * 64.0, 0.0);
+   float sdfScale = localDistanceScale();
+   grad = vec3(dfdx, dfdy, dfdz) * 8.0 * sdfScale;
+   return vec2(value * sdfScale, 0.0);
+}
+vec2 map2(vec3 p){
+    vec3 gradDummy;
+    return sampleBrickTrilinear2(p, gradDummy);
+}
+
+
+vec2 sampleBrickTrilinear(vec3 pos, out vec3 grad)
+{
+   vec3 grid = clamp((pos + 0.5) * 8.0, vec3(0.0), vec3(7.9999));
+   ivec3 cell = ivec3(floor(grid));
+   vec3 fracPart = fract(grid);
+   int brickIndex = brickIndex2;
+  // fracPart = vec3(0.5);
+
+   float v000 = fetchBricks(brickIndex, cell + ivec3(0,0,0));
+   float v100 = fetchBricks(brickIndex, cell + ivec3(1,0,0));
+   float v010 = fetchBricks(brickIndex, cell + ivec3(0,1,0));
+   float v110 = fetchBricks(brickIndex, cell + ivec3(1,1,0));
+   float v001 = fetchBricks(brickIndex, cell + ivec3(0,0,1));
+   float v101 = fetchBricks(brickIndex, cell + ivec3(1,0,1));
+   float v011 = fetchBricks(brickIndex, cell + ivec3(0,1,1));
+   float v111 = fetchBricks(brickIndex, cell + ivec3(1,1,1));
+
+   float slice0 = mix(mix(v000, v100, fracPart.x), mix(v010, v110, fracPart.x), fracPart.y);
+   float slice1 = mix(mix(v001, v101, fracPart.x), mix(v011, v111, fracPart.x), fracPart.y);
+   float value = mix(slice0, slice1, fracPart.z);
+
+   float dfdx = mix(
+       mix(v100 - v000, v110 - v010, fracPart.y),
+       mix(v101 - v001, v111 - v011, fracPart.y),
+       fracPart.z);
+   float dfdy = mix(
+       mix(v010 - v000, v110 - v100, fracPart.x),
+       mix(v011 - v001, v111 - v101, fracPart.x),
+       fracPart.z);
+   float dfdz = mix(
+       mix(v001 - v000, v101 - v100, fracPart.x),
+       mix(v011 - v010, v111 - v110, fracPart.x),
+       fracPart.y);
+
+   // Convert from cell-space derivative to local cube-space derivative.
+   float sdfScale = localDistanceScale();
+   grad = vec3(dfdx, dfdy, dfdz) * 8.0 * sdfScale;
+   return vec2(value * sdfScale, 0.0);
 }
 
 
@@ -414,13 +436,68 @@ vec3 calcNormal2(vec3 pos) {
     vec3 grad;
     sampleBrickTrilinear(pos, grad);
     if (dot(grad, grad) <= 1e-10) {
-       // return vec3(0.0, 1.0, 0.0);
+       return vec3(0.0, 1.0, 0.0);
+    }
+    return normalize(grad);
+}
+
+vec3 calcNormalSmooth(vec3 pos) {
+    float e = 1.0 / 16.0; // half a stored voxel in local brick space
+    vec3 ex = vec3(e, 0.0, 0.0);
+    vec3 ey = vec3(0.0, e, 0.0);
+    vec3 ez = vec3(0.0, 0.0, e);
+
+    float c = map2(pos).x;
+
+    float dx;
+    if (pos.x <= (-0.5 + e)) {
+        float f1 = map2(pos + ex).x;
+        float f2 = map2(pos + ex * 2.0).x;
+        dx = -3.0 * c + 4.0 * f1 - f2;
+    } else if (pos.x >= (0.5 - e)) {
+        float b1 = map2(pos - ex).x;
+        float b2 = map2(pos - ex * 2.0).x;
+        dx = 3.0 * c - 4.0 * b1 + b2;
+    } else {
+        dx = map2(pos + ex).x - map2(pos - ex).x;
+    }
+
+    float dy;
+    if (pos.y <= (-0.5 + e)) {
+        float f1 = map2(pos + ey).x;
+        float f2 = map2(pos + ey * 2.0).x;
+        dy = -3.0 * c + 4.0 * f1 - f2;
+    } else if (pos.y >= (0.5 - e)) {
+        float b1 = map2(pos - ey).x;
+        float b2 = map2(pos - ey * 2.0).x;
+        dy = 3.0 * c - 4.0 * b1 + b2;
+    } else {
+        dy = map2(pos + ey).x - map2(pos - ey).x;
+    }
+
+    float dz;
+    if (pos.z <= (-0.5 + e)) {
+        float f1 = map2(pos + ez).x;
+        float f2 = map2(pos + ez * 2.0).x;
+        dz = -3.0 * c + 4.0 * f1 - f2;
+    } else if (pos.z >= (0.5 - e)) {
+        float b1 = map2(pos - ez).x;
+        float b2 = map2(pos - ez * 2.0).x;
+        dz = 3.0 * c - 4.0 * b1 + b2;
+    } else {
+        dz = map2(pos + ez).x - map2(pos - ez).x;
+    }
+
+    vec3 grad = vec3(dx, dy, dz);
+
+    if (dot(grad, grad) <= 1e-10) {
+        return calcNormal2(pos);
     }
     return normalize(grad);
 }
 
 vec3 calcNormal3(vec3 pos) {
-    float e = 1.0 / 8.0;
+    float e = 1.0 / 16.0;
     vec3 ex = vec3(e, 0.0, 0.0);
     vec3 ey = vec3(0.0, e, 0.0);
     vec3 ez = vec3(0.0, 0.0, e);
@@ -470,7 +547,7 @@ vec3 calcNormal3(vec3 pos) {
 }
 
 vec3 calcNormal4(vec3 pos) {
-    float e = 1.0 / 8.0;
+    float e = 1.0 / 64.0;
     vec3 eps = vec3(e, 0.0, 0.0);
 
     return normalize(vec3(
@@ -576,6 +653,8 @@ vec3 voxelNormalInterp(vec3 pos, ivec3 dims) {
 const vec3 sundir = vec3(-0.7071,1.0,1.7071);
 
 void main() {
+  outWorldPos = vec4(0.0);
+  outMotion = vec4(0.0);
    // outColor = mix(vec4(fragColor,1.),texture(texSampler, fragTexCoord),0.99)*(sin(uboo.time1*5.));
    /*
    vec3 CamPos = cameraPos;
@@ -802,9 +881,12 @@ outColor.a = 1.0;
     float minStep = 0.001;
 float maxStep = 0.05;
 float dis = length(worldPosition-cameraPos.xyz);
-int siz = 64;
+int siz = 192;
 float tPrev = 0.0;
 float dPrev = 1e9;      // previous distance sample
+float voxelStepLocal = 1.0 / 8.0;
+float minMarchStep = voxelStepLocal * 0.2;
+float maxMarchStep = voxelStepLocal;
 
 for (int i = 0; i < siz; i++)
 {
@@ -838,8 +920,8 @@ for (int i = 0; i < siz; i++)
     tPrev = t;
     dPrev = d;
 
-    // advance (your original scaling)
-    t += max(d, 0.0005);
+    // Clamp to the local voxel size so coarse blocks do not skip thin features.
+    t += clamp(d, minMarchStep, maxMarchStep);
 }
 
     /*
@@ -906,11 +988,13 @@ ivec3 ires = ivec3(blockPerAxis,blockPerAxis,blockPerAxis);
   //outColor.a = sum;
   //outColor.rgb*=outColor.a;
   float border = float(abs(localCoord.x)>0.45 && abs(localCoord.x)<0.49) +float(abs(localCoord.y)>0.45&& abs(localCoord.y)<0.49)+float(abs(localCoord.z)>0.45&& abs(localCoord.z)<0.49);
- border = 0.0;
  //border = 0.0;
- if(hit){
+ //border = 0.0;
+if(hit){
 // t=  tn;
   vec3 hitLocalPos = localCoord + dirLocal * t;
+  vec3 hitObjectPos = blockCenterObject + hitLocalPos * blockSizeWSIn;
+  vec3 hitWorldPos = (ubo.model * vec4(hitObjectPos, 1.0)).xyz;
   vec3 cpos =  vpos+dir*t+vec3(0.5);
 vec3 ppos = cpos;
 
@@ -934,7 +1018,12 @@ ivec3 ires = ivec3(blockPerAxis,blockPerAxis,blockPerAxis);
 
 //vec3 n = normalFromDerivatives(t/64., worldPosition+dir*(t/64.));
 //n = calcNormalTetra( localCoord+dirLocal*t,brickIndexx,1./(8.));
-  vec3 n = normalize(calcNormal3(hitLocalPos));
+  vec3 sdfNormal = calcNormal2(hitLocalPos);
+  vec3 borderNormal = calcNormal3(hitLocalPos);
+  float borderDistance = 0.5 - max(abs(hitLocalPos.x), max(abs(hitLocalPos.y), abs(hitLocalPos.z)));
+  float borderBoost = 1.0 - smoothstep(0.015, 0.075, borderDistance);
+  float normalMix = mix(0.14, 0.38, borderBoost);
+  vec3 n = borderNormal;
 
   vec3 light = vec3(10.,10.,10.);
 
@@ -954,8 +1043,21 @@ ivec3 ires = ivec3(blockPerAxis,blockPerAxis,blockPerAxis);
            outColor.rgb = baseColor * dif * 0.7 + 0.1 + clamp(dot(dir, n) + 1., 0., 1.) * 0.5 * vec3(1.) + spec * 0.5;
        }
        if (blockEmissive > 0.5) {
-           // Per-block emissive shading: only blocks created in emissive mode glow.
-           outColor.rgb = baseColor * (1.8 + 0.2 * dif);
+       outColor.rgb = baseColor * (1.8 + 0.2 * dif);
+       }
+       outWorldPos = vec4(hitWorldPos, 1.0);
+       vec4 currClip = ubo.projNoJitter[gl_ViewIndex] *
+                       ubo.view[gl_ViewIndex] *
+                       ubo.model *
+                       vec4(hitObjectPos, 1.0);
+       vec4 prevClip = ubo.prevProjNoJitter[gl_ViewIndex] *
+                       ubo.prevView[gl_ViewIndex] *
+                       ubo.prevModel *
+                       vec4(hitObjectPos, 1.0);
+       if (currClip.w > 0.000001 && prevClip.w > 0.000001) {
+           vec2 currUv = vec2(currClip.x / currClip.w, -(currClip.y / currClip.w)) * 0.5 + 0.5;
+           vec2 prevUv = vec2(prevClip.x / prevClip.w, -(prevClip.y / prevClip.w)) * 0.5 + 0.5;
+           outMotion = vec4(currUv - prevUv, 0.0, 1.0);
        }
       //  outColor.rgb = n;
         //outColor.rgb = vec3(1.,0.1,0.1);
@@ -978,7 +1080,7 @@ float nt = length((localCoord+dirLocal*t));
   
     vec4 clip = ubo.proj[gl_ViewIndex] *
                   ubo.view[gl_ViewIndex] *
-                  vec4(worldPosition + dir * (t / (64.0) * 1.0), 1.0);
+                  vec4(hitWorldPos, 1.0);
   // gl_FragDepth = gl_FragCoord.z;
    gl_FragDepth =(clip.z/clip.w);
   //gl_FragDepth = gl_FragCoord.z;

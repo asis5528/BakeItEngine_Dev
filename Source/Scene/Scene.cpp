@@ -40,8 +40,8 @@ glm::vec2 NextTaaJitter(uint32_t frameIndex, float width, float height)
 
 void ApplyProjectionJitter(glm::mat4& projection, const glm::vec2& jitterNdc)
 {
-    projection[2][0] += jitterNdc.x*17.;
-    projection[2][1] += jitterNdc.y*17.;
+    projection[2][0] += jitterNdc.x*10.;
+    projection[2][1] += jitterNdc.y*10.;
 }
 }
 
@@ -372,10 +372,20 @@ void Scene::update(float iTime) {
     ubo.view[0] = view[0];
     ubo.proj[0] = proj[0];
     ubo.proj[0][1][1] *= -1;
+    ubo.prevProj[0] = motionHistoryValid ? prevProjForMotion[0] : ubo.proj[0];
+    ubo.projNoJitter[0] = projNoJitter[0];
+    ubo.projNoJitter[0][1][1] *= -1;
+    ubo.prevView[0] = motionHistoryValid ? prevViewForMotion[0] : view[0];
+    ubo.prevProjNoJitter[0] = motionHistoryValid ? prevProjNoJitterForMotion[0] : ubo.projNoJitter[0];
 
     ubo.view[1] = view[1];
     ubo.proj[1] = proj[1];
     ubo.proj[1][1][1] *= -1;
+    ubo.prevProj[1] = motionHistoryValid ? prevProjForMotion[1] : ubo.proj[1];
+    ubo.projNoJitter[1] = projNoJitter[1];
+    ubo.projNoJitter[1][1][1] *= -1;
+    ubo.prevView[1] = motionHistoryValid ? prevViewForMotion[1] : view[1];
+    ubo.prevProjNoJitter[1] = motionHistoryValid ? prevProjNoJitterForMotion[1] : ubo.projNoJitter[1];
 
     
 
@@ -403,11 +413,20 @@ void Scene::update(float iTime) {
                     SkinnedUniformBufferObject subo{};
                     subo.view[0] = ubo.view[0];
                     subo.proj[0] = ubo.proj[0];
+                    subo.prevProj[0] = ubo.prevProj[0];
+                    subo.projNoJitter[0] = ubo.projNoJitter[0];
+                    subo.prevView[0] = ubo.prevView[0];
+                    subo.prevProjNoJitter[0] = ubo.prevProjNoJitter[0];
 
                     subo.view[1] = ubo.view[1];
                     subo.proj[1] = ubo.proj[1];
+                    subo.prevProj[1] = ubo.prevProj[1];
+                    subo.projNoJitter[1] = ubo.projNoJitter[1];
+                    subo.prevView[1] = ubo.prevView[1];
+                    subo.prevProjNoJitter[1] = ubo.prevProjNoJitter[1];
                     
                     subo.model = object.finalMatrix;
+                    subo.prevModel = object.PreviousModelMatrix;
                     
                     Animation* animation = &animations[object.animationID];
                     unsigned int meshBoneIndex = 0;
@@ -450,6 +469,7 @@ void Scene::update(float iTime) {
                 //for (int meshID = 0; meshID < object.meshID.size(); meshID++) {
                    
                     ubo.model = object.ModelMatrix;
+                    ubo.prevModel = object.PreviousModelMatrix;
 
                     for (int i = 0; i < object.meshID.size(); i++) {
                         Mesh* mesh = &meshes[object.meshID[i]];
@@ -501,6 +521,16 @@ void Scene::update(float iTime) {
     }
 
 	postprocessingManager->update();
+    for (Object& object : objects) {
+        object.PreviousModelMatrix = object.ModelMatrix;
+    }
+    prevViewForMotion[0] = view[0];
+    prevViewForMotion[1] = view[1];
+    prevProjForMotion[0] = ubo.proj[0];
+    prevProjForMotion[1] = ubo.proj[1];
+    prevProjNoJitterForMotion[0] = ubo.projNoJitter[0];
+    prevProjNoJitterForMotion[1] = ubo.projNoJitter[1];
+    motionHistoryValid = true;
 
 }
 

@@ -17,8 +17,12 @@ class Framebuffer
 		VkFormat colorFormat;
 		VkFormat depthFormat;
 		VulkanImage* ColorImage;
+		VulkanImage* AuxColorImage;
+		VulkanImage* MotionVectorImage;
 		VulkanImage* DepthImage;
 		VulkanImage* MultisampledColorImage;
+		VulkanImage* MultisampledAuxColorImage;
+		VulkanImage* MultisampledMotionVectorImage;
 		VulkanImage* MultisampledDepthImage;
 		VkFramebuffer framebuffer;
 		int multiLayerView;

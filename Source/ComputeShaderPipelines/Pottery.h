@@ -22,7 +22,9 @@ public:
 
 	std::vector<UBO> computeUBO;
 	std::vector<SBO> computeSBO;
+	std::vector<SBO> lod1SBO;
 	ComputePipeline* comp;
+	ComputePipeline* lod1Builder;
 	VulkanBase* base;
 	Scene* scene;
 	glm::vec3 chunkTranslationWS = glm::vec3(0.0f);
@@ -30,14 +32,28 @@ public:
 	uint32_t chunkBlocksPerAxis = 64u;
 	uint32_t chunkBlockDim = 8u;
 	float chunkBlockSizeWS = 1.0f / 64.0f;
+	uint32_t lod1BlocksPerAxis = 32u;
+	float lod1BlockSizeWS = 2.0f / 64.0f;
 	bool wasBrushEditing = false;
+	bool wasBrushPointerDown = false;
+	bool pendingEditableSync = true;
+	uint32_t liveEditRefreshCounter = 0;
+	glm::dvec2 previousBrushCursorPos = glm::dvec2(0.0);
 	std::vector<int32_t> cachedEditableBlockState;
+	std::vector<int32_t> fineActiveIds;
+	std::vector<int32_t> lod1ActiveIds;
+	int lod1ObjectIndex = -1;
+	int lod1MeshIndex = -1;
+	bool coarseLodSelected = false;
 	std::vector<SnapshotChunk> snapshotChunks;
 	std::vector<std::vector<SBO>> snapshotChunkSBOs;
 	Pottery(VulkanBase* base, Scene* scene);
 	~Pottery();
 	void update(float time);
 	void uploadChunkSpatialData();
+	void createLodObjects();
+	void rebuildLod1();
+	void updateLodSelection();
 	void createStaticFloorObject();
 	void finalizeStrokeChunk(float time);
 	void updateSnapshotChunks(float time);
