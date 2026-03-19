@@ -99,8 +99,23 @@ void DrawSdfAtlasUsageBar(const char* label, float fraction, int usedBricks, int
 	//this->scene = scene;
 }
  void EditorGui::createdescriptor(VulkanTexture &tex) {
-     ds.push_back(ImGui_ImplVulkan_AddTexture(tex.imageSampler,tex.imageView,tex.imageLayout));
+     updateViewportDescriptor(tex.imageSampler, tex.imageView, tex.imageLayout);
 
+ }
+ void EditorGui::updateViewportDescriptor(VkSampler sampler, VkImageView imageView, VkImageLayout imageLayout) {
+     VkDescriptorSet descriptor = ImGui_ImplVulkan_AddTexture(sampler, imageView, imageLayout);
+     if (ds.empty()) {
+         ds.push_back(descriptor);
+     }
+     else {
+         ds[0] = descriptor;
+     }
+ }
+ VkDescriptorSet EditorGui::getViewportDescriptor() const {
+     if (ds.empty()) {
+         return VK_NULL_HANDLE;
+     }
+     return ds[0];
  }
  void EditorGui::run() {
 	 setupStyle();
@@ -219,7 +234,10 @@ void DrawSdfAtlasUsageBar(const char* label, float fraction, int usedBricks, int
          vkDeviceWaitIdle(m_base->device);
          m_scene->recreate();
          m_scene->renderPass();
-         ds[0] = ImGui_ImplVulkan_AddTexture(m_scene->standardSampler, m_scene->postprocessingManager->framebuffers[m_scene->postprocessingManager->bufferSize-1]->MultisampledColorImage->imageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+         updateViewportDescriptor(
+             m_scene->standardSampler,
+             m_scene->postprocessingManager->framebuffers[m_scene->postprocessingManager->bufferSize - 1]->GetSampledColorImage()->imageView,
+             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
          //  vkDeviceWaitIdle(base->device);
            //cleanCommandBuffers();
          //  scene->framebuffers[0]->clean();
@@ -241,7 +259,10 @@ void DrawSdfAtlasUsageBar(const char* label, float fraction, int usedBricks, int
      ImVec2 viewportPanelSize = ImGui::GetContentRegionAvail();
      //ImGui_ImplVulkan_AddTexture
   //   ImGui::Image(m_scene->quads[0]->descriptorSet, ImVec2{ viewportPanelSize.x, viewportPanelSize.y });
-     ImGui::Image(ds[0], ImVec2{ viewportPanelSize.x, viewportPanelSize.y });
+     VkDescriptorSet viewportDescriptor = getViewportDescriptor();
+     if (viewportDescriptor != VK_NULL_HANDLE) {
+         ImGui::Image(viewportDescriptor, ImVec2{ viewportPanelSize.x, viewportPanelSize.y });
+     }
      ImGui::End();
 
    
@@ -260,11 +281,11 @@ void DrawSdfAtlasUsageBar(const char* label, float fraction, int usedBricks, int
          m_scene->dispatch = true;
      }
      ImGui::Checkbox("Enable TAA", &m_scene->taaEnabled);
+     ImGui::Checkbox("Show Brick Wireframe", &m_scene->showBrickWireframe);
      ImGui::Separator();
      ImGui::Text("Brush");
      const char* brushShapeName = "Cube";
      if (m_scene->brushShapeMode == 1) brushShapeName = "Sphere";
-     else if (m_scene->brushShapeMode == 2) brushShapeName = "Plane";
      ImGui::Text("Shape   : %s (U to toggle)", brushShapeName);
      ImGui::Text("Radius  : %.4f (A/D)", m_scene->brushRadius);
      ImGui::Text("Smooth  : %.4f (Q/E)", m_scene->brushSmoothness);
@@ -285,6 +306,27 @@ void DrawSdfAtlasUsageBar(const char* label, float fraction, int usedBricks, int
      ImGui::Text("Atlas Left: %d bricks", atlasLeftBricks);
      ImGui::Text("Atlas Tail: %d bricks", m_scene->sdfAtlasTailBricks);
      ImGui::Text("Free Stack: %d bricks", m_scene->sdfAtlasFreeBricks);
+     ImGui::Text("LOD: %s", m_scene->lodCoarseActive ? "Coarse" : "Fine");
+     ImGui::Text("LOD Screen Radius: %.1f px", m_scene->lodProjectedRadiusPx);
+     ImGui::Separator();
+     ImGui::Text("CSG Ops: %d", static_cast<int>(m_scene->csgOperations.size()));
+     ImGui::Text("Undo: Ctrl+Z");
+     const int csgPreviewCount = 8;
+     const int csgStart = (m_scene->csgOperations.size() > static_cast<size_t>(csgPreviewCount))
+         ? static_cast<int>(m_scene->csgOperations.size()) - csgPreviewCount
+         : 0;
+     for (int i = csgStart; i < static_cast<int>(m_scene->csgOperations.size()); ++i) {
+         const CsgOperationDebug& op = m_scene->csgOperations[static_cast<size_t>(i)];
+         const char* actionName = (op.action == 0) ? "Remove" : "Add";
+        const char* shapeNameShort = (op.shape == 1) ? "Sphere" : "Cube";
+         ImGui::Text(
+             "#%d %s %s  r=%.4f  s=%.4f",
+             i,
+             actionName,
+             shapeNameShort,
+             op.radius,
+             op.smoothness);
+     }
      int volumetricMeshId = -1;
      if (const Mesh* volumetricMesh = FindFirstVolumetricMesh(m_scene, &volumetricMeshId)) {
          ImGui::Separator();

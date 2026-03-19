@@ -10,6 +10,8 @@ public:
 	VkSampler texturesamp;
 	EditorGui(Scene *scene, VulkanBase* base);
 	void createdescriptor(VulkanTexture& tex);
+	void updateViewportDescriptor(VkSampler sampler, VkImageView imageView, VkImageLayout imageLayout);
+	VkDescriptorSet getViewportDescriptor() const;
 	void run();
 
 	void tree(Node& node);

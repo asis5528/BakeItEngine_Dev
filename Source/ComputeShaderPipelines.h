@@ -30,7 +30,6 @@ public:
     ~ComputeShaderPipelines();
     void update(float time);
     void createLodObjects();
-    void createStaticFloorObject();
 
 
 

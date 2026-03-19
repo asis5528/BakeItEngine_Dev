@@ -37,10 +37,6 @@ void ComputeShaderPipelines::update(float time) {
    // }
 }
 
-void ComputeShaderPipelines::createStaticFloorObject() {
-    pottery->createStaticFloorObject();
-}
-
 void ComputeShaderPipelines::createLodObjects() {
     pottery->createLodObjects();
 }

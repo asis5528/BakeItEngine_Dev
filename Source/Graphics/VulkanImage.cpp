@@ -6,19 +6,40 @@
  VulkanImage::VulkanImage(VkDevice device, VkPhysicalDevice physicalDevice) {
     this->device = device;
     this->physicalDevice = physicalDevice;
+    this->image = VK_NULL_HANDLE;
+    this->imageView = VK_NULL_HANDLE;
+    this->imageMemory = VK_NULL_HANDLE;
 }
  void VulkanTexture::destroy(VkDevice device)
  {
-     vkDestroyImageView(device, imageView, nullptr);
-     vkDestroyImage(device, image, nullptr);
-     vkFreeMemory(device, imageMemory, nullptr);
+     if (imageView != VK_NULL_HANDLE) {
+         vkDestroyImageView(device, imageView, nullptr);
+         imageView = VK_NULL_HANDLE;
+     }
+     if (image != VK_NULL_HANDLE) {
+         vkDestroyImage(device, image, nullptr);
+         image = VK_NULL_HANDLE;
+     }
+     if (imageMemory != VK_NULL_HANDLE) {
+         vkFreeMemory(device, imageMemory, nullptr);
+         imageMemory = VK_NULL_HANDLE;
+     }
  }
 
  void VulkanImage::destroy()
  {
-     vkDestroyImageView(device, imageView, nullptr);
-     vkDestroyImage(device, image, nullptr);
-     vkFreeMemory(device, imageMemory, nullptr);
+     if (imageView != VK_NULL_HANDLE) {
+         vkDestroyImageView(device, imageView, nullptr);
+         imageView = VK_NULL_HANDLE;
+     }
+     if (image != VK_NULL_HANDLE) {
+         vkDestroyImage(device, image, nullptr);
+         image = VK_NULL_HANDLE;
+     }
+     if (imageMemory != VK_NULL_HANDLE) {
+         vkFreeMemory(device, imageMemory, nullptr);
+         imageMemory = VK_NULL_HANDLE;
+     }
  }
  void VulkanImage::createImage(uint32_t width, uint32_t height, uint32_t depth,VkImageType type ,uint32_t mipLevels, VkSampleCountFlagBits numSamples, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties,uint32_t arrayCount) {
      VkImageCreateInfo imageInfo{};

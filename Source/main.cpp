@@ -248,7 +248,7 @@ private:
         scene->materials.push_back(material);
         scene->meshes[scene->objects[0].meshID[0]].matID = scene->materials.size() - 1;
 
-        scene->objects[0].shader[scene->objects[0].meshID[0]].sbos = {
+        scene->objects[0].shader[0].sbos = {
             scene->SBOs[0][0],
             scene->SBOs[0][1],
             scene->SBOs[0][2],
@@ -257,7 +257,6 @@ private:
         };
         base->vbuffer->updateInstanceIdBuffer(scene->meshes[scene->objects[0].meshID[0]], {});
         clines->createLodObjects();
-        clines->createStaticFloorObject();
         scene->postprocessingManager->volumeRendering->quads[0]->shader.sbos = {
             scene->SBOs[0][0],
             scene->SBOs[0][1],
@@ -290,7 +289,7 @@ private:
 
         VulkanTexture guitex;
         guitex.imageSampler = scene->standardSampler;
-        guitex.imageView = scene->postprocessingManager->framebuffers[scene->postprocessingManager->bufferSize - 1]->MultisampledColorImage->imageView;
+    guitex.imageView = scene->postprocessingManager->framebuffers[scene->postprocessingManager->bufferSize - 1]->GetSampledColorImage()->imageView;
         guitex.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         editorGui->createdescriptor(guitex);
         glfwSetScrollCallback(window, scroll_callback);
@@ -678,7 +677,7 @@ private:
     void renderVR() {
         vr::VRVulkanTextureArrayData_t vData;
 
-        vData.m_nImage = (uint64_t)scene->framebuffers[0]->MultisampledColorImage->image;
+    vData.m_nImage = (uint64_t)scene->framebuffers[0]->GetSampledColorImage()->image;
         vData.m_pDevice = (VkDevice_T*)base->device;
         vData.m_pPhysicalDevice = (VkPhysicalDevice_T*)base->vulkandevice->physicalDevice;
         vData.m_pInstance = (VkInstance_T*)base->vkinstance;
@@ -693,7 +692,7 @@ private:
 
         /*
         vr::VRVulkanTextureData_t vulkanData;
-        vulkanData.m_nImage = (uint64_t)scene->framebuffers[0]->MultisampledColorImage->image;
+    vulkanData.m_nImage = (uint64_t)scene->framebuffers[0]->GetSampledColorImage()->image;
         vulkanData.m_pDevice = (VkDevice_T*)base->device;
         vulkanData.m_pPhysicalDevice = (VkPhysicalDevice_T*)base->vulkandevice->physicalDevice;
         vulkanData.m_pInstance = (VkInstance_T*)base->vkinstance;
@@ -722,7 +721,7 @@ private:
 
         vr::VRVulkanTextureArrayData_t vData_right;
 
-        vData_right.m_nImage = (uint64_t)scene->framebuffers[0]->MultisampledColorImage->image;
+    vData_right.m_nImage = (uint64_t)scene->framebuffers[0]->GetSampledColorImage()->image;
         vData_right.m_pDevice = (VkDevice_T*)base->device;
         vData_right.m_pPhysicalDevice = (VkPhysicalDevice_T*)base->vulkandevice->physicalDevice;
         vData_right.m_pInstance = (VkInstance_T*)base->vkinstance;
@@ -825,7 +824,10 @@ private:
         if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebufferResized) {
             framebufferResized = false;
             recreateSwapChain();
-            editorGui->ds[0] = ImGui_ImplVulkan_AddTexture(scene->standardSampler, scene->postprocessingManager->framebuffers[scene->postprocessingManager->bufferSize - 1]->MultisampledColorImage->imageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    editorGui->updateViewportDescriptor(
+        scene->standardSampler,
+        scene->postprocessingManager->framebuffers[scene->postprocessingManager->bufferSize - 1]->GetSampledColorImage()->imageView,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         }
         else if (result != VK_SUCCESS) {
             throw std::runtime_error("failed to present swap chain image!");

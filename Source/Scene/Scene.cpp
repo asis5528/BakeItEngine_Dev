@@ -40,8 +40,8 @@ glm::vec2 NextTaaJitter(uint32_t frameIndex, float width, float height)
 
 void ApplyProjectionJitter(glm::mat4& projection, const glm::vec2& jitterNdc)
 {
-    projection[2][0] += jitterNdc.x*10.;
-    projection[2][1] += jitterNdc.y*10.;
+    projection[2][0] += jitterNdc.x;
+    projection[2][1] += jitterNdc.y;
 }
 }
 
@@ -72,7 +72,7 @@ void Scene::init()
     quad->createGraphicsPipeline("shaders/quadvert.spv", "shaders/quadfrag.spv");
     VulkanTexture quadtex;
     // quadtex.imageView = base->offscreenbuffer->MultisampledColorImage->imageView;
-    quadtex.imageView = framebuffers[0]->MultisampledColorImage->imageView;
+    quadtex.imageView = framebuffers[0]->GetSampledColorImage()->imageView;
     quadtex.imageSampler = base->vbuffer->createTextureSampler(1);
     quadtex.imageViewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
     quad->textures.push_back(quadtex);
@@ -185,12 +185,13 @@ void Scene::renderPass() {
 
         for (unsigned int j = 0; j < objects.size(); j++) {
             if (objects[j].hasMesh) {
-                for (int meshI = 0; meshI < objects[j].meshID.size(); meshI++) {
-                    Mesh mesh = meshes[objects[j].meshID[meshI]];
-                    vkCmdBindPipeline(base->commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, objects[j].shader[meshI].graphicsPipeline->graphicsPipeline);
-                    vkCmdBindDescriptorSets(base->commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, objects[j].shader[meshI].graphicsPipeline->pipelineLayout, 0, 1, &objects[j].shader[meshI].descriptorSet, 0, nullptr);
-                    mesh.draw(base->commandBuffers[i]);
-                }
+                const size_t meshCount = glm::min(objects[j].meshID.size(), objects[j].shader.size());
+                for (size_t meshI = 0; meshI < meshCount; meshI++) {
+                     Mesh mesh = meshes[objects[j].meshID[meshI]];
+                     vkCmdBindPipeline(base->commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, objects[j].shader[meshI].graphicsPipeline->graphicsPipeline);
+                     vkCmdBindDescriptorSets(base->commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, objects[j].shader[meshI].graphicsPipeline->pipelineLayout, 0, 1, &objects[j].shader[meshI].descriptorSet, 0, nullptr);
+                     mesh.draw(base->commandBuffers[i]);
+                 }
 
 
             }
@@ -404,7 +405,8 @@ void Scene::update(float iTime) {
         if(object.hasMesh){
             if (object.hasAnimation) {
 
-                for (int meshID = 0; meshID < object.meshID.size(); meshID++) {
+                const size_t meshCount = glm::min(object.meshID.size(), object.shader.size());
+                for (size_t meshID = 0; meshID < meshCount; meshID++) {
 
 
                     Mesh* mesh = &meshes[object.meshID[meshID]];
@@ -471,7 +473,8 @@ void Scene::update(float iTime) {
                     ubo.model = object.ModelMatrix;
                     ubo.prevModel = object.PreviousModelMatrix;
 
-                    for (int i = 0; i < object.meshID.size(); i++) {
+                    const size_t meshCount = glm::min(object.meshID.size(), object.shader.size());
+                    for (size_t i = 0; i < meshCount; i++) {
                         Mesh* mesh = &meshes[object.meshID[i]];
                         if (object.shader[i].graphicsPipeline != pipelines[4]) {
                             if (mesh->vertices.size() > 100.) {
@@ -490,6 +493,7 @@ void Scene::update(float iTime) {
                             if (object.shader[i].graphicsPipeline == pipelines[4]) {
                                 // Volumetric object base color; per-block emissive comes from block metadata.
                                 bubo.color = glm::vec4(1.0f, 0.35f, 0.75f, iTime);
+                                bubo.debug.x = showBrickWireframe ? 1.0f : 0.0f;
                             } else {
                                 // Legacy behavior for non-volumetric basic materials.
                                 bubo.color = glm::inverse(ubo.model) * glm::vec4(camPos, 1.);
@@ -542,7 +546,13 @@ void Scene::createSceneDescriptor()
             objectWithMeshSize -=1;
         }
         else {
-            objectWithMeshSize += object.meshID.size()-1;
+            const size_t meshCount = glm::min(object.meshID.size(), object.shader.size());
+            if (meshCount == 0) {
+                objectWithMeshSize -= 1;
+            }
+            else {
+                objectWithMeshSize += static_cast<unsigned int>(meshCount - 1);
+            }
         }
     }
     base->vulkandescriptor->createDescriptorPool(objectWithMeshSize,
@@ -562,7 +572,8 @@ void Scene::createSceneDescriptor()
     std::vector<VkDescriptorSetLayout> layouts;
     for (int i = 0; i < objects.size(); i++) {
         if(objects[i].hasMesh){
-            for (int meshID = 0; meshID < objects[i].meshID.size(); meshID++) {
+            const size_t meshCount = glm::min(objects[i].meshID.size(), objects[i].shader.size());
+            for (size_t meshID = 0; meshID < meshCount; meshID++) {
                 layouts.push_back(objects[i].shader[meshID].graphicsPipeline->descriptorSetLayout);
             }
             
@@ -573,7 +584,8 @@ void Scene::createSceneDescriptor()
     int j = 0;
     for (int i = 0; i < objects.size(); i++) {
         if (objects[i].hasMesh) {
-            for (int meshID = 0; meshID < objects[i].meshID.size(); meshID++) {
+            const size_t meshCount = glm::min(objects[i].meshID.size(), objects[i].shader.size());
+            for (size_t meshID = 0; meshID < meshCount; meshID++) {
                 objects[i].shader[meshID].descriptorSet = descriptorSets[j];
                 j += 1;
             }
@@ -587,7 +599,8 @@ void Scene::createSceneDescriptor()
             VulkanTexture tex;
          
           
-           for (int meshID = 0; meshID < objects[i].meshID.size(); meshID++) {
+           const size_t meshCount = glm::min(objects[i].meshID.size(), objects[i].shader.size());
+           for (size_t meshID = 0; meshID < meshCount; meshID++) {
 
              //  int texID = meshes[object->meshID[meshID]].texID;
         
@@ -611,8 +624,9 @@ void Scene::createSceneDescriptor()
 void Scene::cleanUniforms()
 {
     for (size_t i = 0; i < objects.size(); i++) {
-        for (int meshID = 0; meshID < objects[i].meshID.size(); meshID++) {
-            for (int j = 0; j < objects[i].shader[meshID].ubos.size(); j++)
+        const size_t meshCount = glm::min(objects[i].meshID.size(), objects[i].shader.size());
+        for (size_t meshID = 0; meshID < meshCount; meshID++) {
+            for (size_t j = 0; j < objects[i].shader[meshID].ubos.size(); j++)
             {
                 vkDestroyBuffer(base->device, objects[i].shader[meshID].ubos[j].buffer, nullptr);
                 vkFreeMemory(base->device, objects[i].shader[meshID].ubos[j].bufferMemory, nullptr);
@@ -711,7 +725,7 @@ void Scene::recreate()
    // quads[0]->textures[0].imageView = quads[0]->fr2->MultisampledColorImage->imageView;
     /*
     for (Quad* &quad : quads) {
-        quad->textures[0].imageView = quad->fr2->MultisampledColorImage->imageView;
+    quad->textures[0].imageView = quad->fr2->GetSampledColorImage()->imageView;
         quad->graphicsPipeline->clean();
         quad->recreateGraphicsPipeline(ex);
         quad->cleandescriptors();

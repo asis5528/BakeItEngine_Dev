@@ -33,5 +33,9 @@ class Framebuffer
 		void createRenderPass();
 		void createFrameBuffer();
 		void beginRenderPass(VkCommandBuffer commandBuffer);
+		VulkanImage* GetSampledColorImage() const;
+		VulkanImage* GetSampledAuxColorImage() const;
+		VulkanImage* GetSampledMotionVectorImage() const;
+		VulkanImage* GetSampledDepthImage() const;
 };
 

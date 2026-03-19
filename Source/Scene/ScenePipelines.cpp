@@ -74,6 +74,7 @@ ScenePipelines::ScenePipelines(VulkanBase *base,VkRenderPass renderPass) {
     pipelines[4]->setupPipeline(input);
     //pipelines[4]->infoLocal.depthStencil.depthWriteEnable = false;
     pipelines[4]->createGraphicsPipeline();
+
 }
 void ScenePipelines::recreate(VkRenderPass renderPass, VkExtent2D extent)
 {

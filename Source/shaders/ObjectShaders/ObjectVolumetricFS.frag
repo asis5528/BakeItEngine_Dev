@@ -16,6 +16,7 @@ layout(binding = 0) uniform UniformBufferObject {
 layout(binding = 2) uniform sampler3D texSampler;
 layout(binding = 1) uniform BasicUbo {
    vec4 color;
+   vec4 debug;
 } ubo2;
 
 layout( binding = 3) readonly buffer BrickBuffer {
@@ -386,7 +387,7 @@ vec2 sampleBrickTrilinear(vec3 pos, out vec3 grad)
 
    // Convert from cell-space derivative to local cube-space derivative.
    float sdfScale = localDistanceScale();
-   grad = vec3(dfdx, dfdy, dfdz) * 8.0 * sdfScale;
+   grad = vec3(dfdx, dfdy, dfdz) * 64.0 * sdfScale;
    return vec2(value * sdfScale, 0.0);
 }
 
@@ -417,6 +418,8 @@ vec3 calcNormal(vec3 pos,int bricksInd) {
         map(pos + eps.yxy,bricksInd).x - map(pos - eps.yxy,bricksInd).x,
         map(pos + eps.yyx,bricksInd).x - map(pos - eps.yyx,bricksInd).x
     ));
+
+
 }
 
 vec3 normalFromDerivatives(float dist, vec3 pos)
@@ -440,7 +443,26 @@ vec3 calcNormal2(vec3 pos) {
     }
     return normalize(grad);
 }
+vec3 calcNormall(vec3 pos) {
+    float e = 1.0 / 8.0;
+    vec3 eps = vec3(e, 0.0, 0.0);
+    return normalize(vec3(
+        map2(pos + eps.xyy).x - map2(pos - eps.xyy).x,
+        map2(pos + eps.yxy).x - map2(pos - eps.yxy).x,
+        map2(pos + eps.yyx).x - map2(pos - eps.yyx).x
+    ));
 
+
+}
+vec3 gradNormall(vec3 pos) {
+    float e = 1.0 / 8.0;
+    vec3 eps = vec3(e, 0.0, 0.0);
+    return vec3(
+        map2(pos + eps.xyy).x - map2(pos - eps.xyy).x,
+        map2(pos + eps.yxy).x - map2(pos - eps.yxy).x,
+        map2(pos + eps.yyx).x - map2(pos - eps.yyx).x
+    );
+}
 vec3 calcNormalSmooth(vec3 pos) {
     float e = 1.0 / 16.0; // half a stored voxel in local brick space
     vec3 ex = vec3(e, 0.0, 0.0);
@@ -496,8 +518,8 @@ vec3 calcNormalSmooth(vec3 pos) {
     return normalize(grad);
 }
 
-vec3 calcNormal3(vec3 pos) {
-    float e = 1.0 / 16.0;
+vec3 calcNormal3(vec3 pos,float d) {
+    float e = 1.0 / 8.0;
     vec3 ex = vec3(e, 0.0, 0.0);
     vec3 ey = vec3(0.0, e, 0.0);
     vec3 ez = vec3(0.0, 0.0, e);
@@ -546,8 +568,70 @@ vec3 calcNormal3(vec3 pos) {
     return normalize(vec3(dx, dy, dz));
 }
 
+vec3 gradNormal3(vec3 pos) {
+    float e = 1.0 / 8.0;
+    vec3 ex = vec3(e, 0.0, 0.0);
+    vec3 ey = vec3(0.0, e, 0.0);
+    vec3 ez = vec3(0.0, 0.0, e);
+
+    float c = map2(pos).x;
+
+    float dx;
+    if (pos.x <= (-0.5 + e)) {
+        float f1 = map2(pos + ex).x;
+        float f2 = map2(pos + ex * 2.0).x;
+        dx = -3.0 * c + 4.0 * f1 - f2;
+    } else if (pos.x >= (0.5 - e)) {
+        float b1 = map2(pos - ex).x;
+        float b2 = map2(pos - ex * 2.0).x;
+        dx = 3.0 * c - 4.0 * b1 + b2;
+    } else {
+        dx = map2(pos + ex).x - map2(pos - ex).x;
+    }
+
+    float dy;
+    if (pos.y <= (-0.5 + e)) {
+        float f1 = map2(pos + ey).x;
+        float f2 = map2(pos + ey * 2.0).x;
+        dy = -3.0 * c + 4.0 * f1 - f2;
+    } else if (pos.y >= (0.5 - e)) {
+        float b1 = map2(pos - ey).x;
+        float b2 = map2(pos - ey * 2.0).x;
+        dy = 3.0 * c - 4.0 * b1 + b2;
+    } else {
+        dy = map2(pos + ey).x - map2(pos - ey).x;
+    }
+
+    float dz;
+    if (pos.z <= (-0.5 + e)) {
+        float f1 = map2(pos + ez).x;
+        float f2 = map2(pos + ez * 2.0).x;
+        dz = -3.0 * c + 4.0 * f1 - f2;
+    } else if (pos.z >= (0.5 - e)) {
+        float b1 = map2(pos - ez).x;
+        float b2 = map2(pos - ez * 2.0).x;
+        dz = 3.0 * c - 4.0 * b1 + b2;
+    } else {
+        dz = map2(pos + ez).x - map2(pos - ez).x;
+    }
+
+    return vec3(dx, dy, dz);
+}
+
+vec3 calcNormalHybrid(vec3 pos) {
+    vec3 gInterior = gradNormall(pos);
+    vec3 gBorder = gradNormal3(pos);
+    float maxAxis = max(abs(pos.x), max(abs(pos.y), abs(pos.z)));
+    float borderMix = smoothstep(0.36, 0.46, maxAxis);
+    vec3 g = mix(gInterior, gBorder, borderMix);
+    if (dot(g, g) <= 1e-10) {
+        return calcNormal2(pos);
+    }
+    return normalize(g);
+}
+
 vec3 calcNormal4(vec3 pos) {
-    float e = 1.0 / 64.0;
+    float e = 1.0 / 8.0;
     vec3 eps = vec3(e, 0.0, 0.0);
 
     return normalize(vec3(
@@ -653,6 +737,7 @@ vec3 voxelNormalInterp(vec3 pos, ivec3 dims) {
 const vec3 sundir = vec3(-0.7071,1.0,1.7071);
 
 void main() {
+  bool showBrickWireframe = (ubo2.debug.x > 0.5);
   outWorldPos = vec4(0.0);
   outMotion = vec4(0.0);
    // outColor = mix(vec4(fragColor,1.),texture(texSampler, fragTexCoord),0.99)*(sin(uboo.time1*5.));
@@ -988,13 +1073,15 @@ ivec3 ires = ivec3(blockPerAxis,blockPerAxis,blockPerAxis);
   //outColor.a = sum;
   //outColor.rgb*=outColor.a;
   float border = float(abs(localCoord.x)>0.45 && abs(localCoord.x)<0.49) +float(abs(localCoord.y)>0.45&& abs(localCoord.y)<0.49)+float(abs(localCoord.z)>0.45&& abs(localCoord.z)<0.49);
- //border = 0.0;
+// border = 0.0;
+border = showBrickWireframe?border:0.0;
  //border = 0.0;
 if(hit){
 // t=  tn;
   vec3 hitLocalPos = localCoord + dirLocal * t;
   vec3 hitObjectPos = blockCenterObject + hitLocalPos * blockSizeWSIn;
   vec3 hitWorldPos = (ubo.model * vec4(hitObjectPos, 1.0)).xyz;
+  vec3 viewDir = normalize(cameraPos - hitWorldPos);
   vec3 cpos =  vpos+dir*t+vec3(0.5);
 vec3 ppos = cpos;
 
@@ -1018,19 +1105,14 @@ ivec3 ires = ivec3(blockPerAxis,blockPerAxis,blockPerAxis);
 
 //vec3 n = normalFromDerivatives(t/64., worldPosition+dir*(t/64.));
 //n = calcNormalTetra( localCoord+dirLocal*t,brickIndexx,1./(8.));
-  vec3 sdfNormal = calcNormal2(hitLocalPos);
-  vec3 borderNormal = calcNormal3(hitLocalPos);
-  float borderDistance = 0.5 - max(abs(hitLocalPos.x), max(abs(hitLocalPos.y), abs(hitLocalPos.z)));
-  float borderBoost = 1.0 - smoothstep(0.015, 0.075, borderDistance);
-  float normalMix = mix(0.14, 0.38, borderBoost);
-  vec3 n = borderNormal;
+  vec3 n = calcNormal3(hitLocalPos,t);
 
   vec3 light = vec3(10.,10.,10.);
 
       float dif = clamp(dot(normalize(light),n),0.,1.);
 
        vec3 reflectDir = reflect(normalize(light), n);
-       float spec = pow(max(dot(dir, reflectDir), 0.0), 32.);
+       float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32.);
        //dif = 1.0;
        //spec = 1.0;
        vec3 baseColor = blockColor;
@@ -1040,7 +1122,7 @@ ivec3 ires = ivec3(blockPerAxis,blockPerAxis,blockPerAxis);
        if (matteFloorLike) {
            outColor.rgb = baseColor * (0.18 + 0.82 * dif);
        } else {
-           outColor.rgb = baseColor * dif * 0.7 + 0.1 + clamp(dot(dir, n) + 1., 0., 1.) * 0.5 * vec3(1.) + spec * 0.5;
+           outColor.rgb = baseColor * dif * 0.7 + 0.1 + clamp(dot(viewDir, n) + 1., 0., 1.) * 0.5 * vec3(1.) + spec * 0.5;
        }
        if (blockEmissive > 0.5) {
        outColor.rgb = baseColor * (1.8 + 0.2 * dif);
@@ -1059,7 +1141,7 @@ ivec3 ires = ivec3(blockPerAxis,blockPerAxis,blockPerAxis);
            vec2 prevUv = vec2(prevClip.x / prevClip.w, -(prevClip.y / prevClip.w)) * 0.5 + 0.5;
            outMotion = vec4(currUv - prevUv, 0.0, 1.0);
        }
-      //  outColor.rgb = n;
+        outColor.rgb = n;
         //outColor.rgb = vec3(1.,0.1,0.1);
 //outColor.rgb = normalize(n);
 float nt = length((localCoord+dirLocal*t));
@@ -1075,6 +1157,7 @@ float nt = length((localCoord+dirLocal*t));
      //gl_FragDepth = gl_FragDepth;
 //   outColor.a = float(min(sum*20.,1.0));
    outColor.a = 1.0;
+  // outColor.rgb = n;
   // outColor.rgb*=outColor.a;
   // gl_FragDepth = gl_FragCoord.z;
   
@@ -1096,7 +1179,7 @@ if(border<=0.0){
 discard;
 //outColor.a = 0.0;
 } //discard;
- gl_FragDepth = gl_FragCoord.z;
+ gl_FragDepth = 0.0;
 
 
 //outColor.a = 0.0;
@@ -1109,7 +1192,7 @@ discard;
  // outColor.rgb = vec3(iter);
  //  outColor.rgb  = vec3(dir);
   // outColor.rgb  = localCoord;
-  outColor.rgb = vec3(0.,0.,0.);
+  outColor.rgb = vec3(gl_FragCoord.z);
   // outColor.rgb = vec3(1.,0.1,0.1);
   outColor.rgb*=outColor.a;
   }

@@ -9,6 +9,17 @@
 #include "../PGEResourceTypes.h"
 #include <array>
 
+struct CsgOperationDebug
+{
+	glm::vec3 centerLocal = glm::vec3(0.0f);
+	float radius = 0.0f;
+	glm::vec4 color = glm::vec4(1.0f);
+	float smoothness = 0.0f;
+	int action = 1; // 1 add, 0 remove
+	int shape = 0;  // 0 cube, 1 sphere
+	bool emissive = false;
+	bool recolor = false;
+};
 
 class Scene
 {
@@ -65,19 +76,23 @@ public:
 	 glm::vec4 brushData = glm::vec4(0.0f, 0.0f, 0.2f, 0.01f);
 	 glm::vec4 brushColor = glm::vec4(1.0f, 0.35f, 0.75f, 1.0f);
 	 bool brushUseSphere = false;
-	 int brushShapeMode = 0; // 0 cube, 1 sphere, 2 plane
+	 int brushShapeMode = 0; // 0 cube, 1 sphere
 	 float brushRadius = 0.01f;
 	 float brushSmoothness = 0.001f;
 	 float brushZAxis = 0.2f;
 	 float brushAction = 1.0f; // 1.0 add (LMB), 0.0 remove (RMB)
 	 bool emissiveMode = false; // toggled with I
 	 bool taaEnabled = true;
+	 bool showBrickWireframe = false;
+	 bool lodCoarseActive = false;
+	 float lodProjectedRadiusPx = 0.0f;
 	 int dirtyBlockCount = 0;
 	 int sdfAtlasUsedBricks = 0;
 	 int sdfAtlasCapacityBricks = 0;
 	 int sdfAtlasTailBricks = 0;
 	 int sdfAtlasFreeBricks = 0;
 	 float sdfAtlasUsage = 0.0f;
+	 std::vector<CsgOperationDebug> csgOperations;
 	 std::array<glm::vec4, MaxFloorBlobShadows> floorBlobShadows{};
 	 std::array<glm::vec4, MaxFloorBlobShadows> floorBlobBounceColors{};
 	 int floorBlobShadowCount = 0;

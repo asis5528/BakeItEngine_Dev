@@ -18,7 +18,7 @@ struct  CameraUBO {
    float nearPlane;
    float farPlane;
    alignas(16) glm::vec4 brushData;
-   alignas(16) glm::vec4 brushMeta; // x: action, y: shape mode (0 cube,1 sphere,2 plane)
+   alignas(16) glm::vec4 brushMeta; // x: action, y: shape mode (0 cube,1 sphere)
    alignas(16) glm::vec4 taaData;   // x,y current jitter, z,w previous jitter
    alignas(16) glm::vec4 taaState;  // x: history valid (0/1)
    alignas(16) glm::vec4 floorBlobShadows[Scene::MaxFloorBlobShadows];
@@ -56,27 +56,27 @@ VolumeRendering::VolumeRendering(VulkanBase* base,Scene *scene, Framebuffer* pre
 
     quad->createGraphicsPipeline("shaders/PostProcessing/VolumePassVS.spv", "shaders/PostProcessing/VolumePassFS.spv",VolumeDescriptorTypes);
     VulkanTexture quadtex;
-    quadtex.imageView = previousFB->MultisampledColorImage->imageView;
+    quadtex.imageView = previousFB->GetSampledColorImage()->imageView;
     quadtex.imageSampler = base->vbuffer->createTextureSampler(1);
     quadtex.imageViewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
     quad->textures.push_back(quadtex);
     VulkanTexture quadtex2;
-    quadtex2.imageView = previousFB->MultisampledDepthImage->imageView;
+    quadtex2.imageView = previousFB->GetSampledDepthImage()->imageView;
     quadtex2.imageSampler = base->vbuffer->createTextureSampler(1);
     quadtex2.imageViewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
     quad->textures.push_back(quadtex2);
     VulkanTexture historyTex;
-    historyTex.imageView = framebuffers[1]->MultisampledColorImage->imageView;
+    historyTex.imageView = framebuffers[1]->GetSampledColorImage()->imageView;
     historyTex.imageSampler = base->vbuffer->createTextureSampler(1);
     historyTex.imageViewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
     quad->textures.push_back(historyTex);
     VulkanTexture auxWorldPosTex;
-    auxWorldPosTex.imageView = previousFB->MultisampledAuxColorImage->imageView;
+    auxWorldPosTex.imageView = previousFB->GetSampledAuxColorImage()->imageView;
     auxWorldPosTex.imageSampler = base->vbuffer->createTextureSampler(1);
     auxWorldPosTex.imageViewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
     quad->textures.push_back(auxWorldPosTex);
     VulkanTexture motionTex;
-    motionTex.imageView = previousFB->MultisampledMotionVectorImage->imageView;
+    motionTex.imageView = previousFB->GetSampledMotionVectorImage()->imageView;
     motionTex.imageSampler = base->vbuffer->createTextureSampler(1);
     motionTex.imageViewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
     quad->textures.push_back(motionTex);
@@ -92,7 +92,7 @@ VolumeRendering::VolumeRendering(VulkanBase* base,Scene *scene, Framebuffer* pre
     };
     copyQuad->createGraphicsPipeline("shaders/PostProcessing/VolumePassVS.spv", "shaders/PostProcessing/TaaHistoryCopyFS.spv", copyDescTypes);
     VulkanTexture copySrcTex;
-    copySrcTex.imageView = framebuffers[0]->MultisampledColorImage->imageView;
+    copySrcTex.imageView = framebuffers[0]->GetSampledColorImage()->imageView;
     copySrcTex.imageSampler = base->vbuffer->createTextureSampler(1);
     copySrcTex.imageViewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
     copyQuad->textures.push_back(copySrcTex);
@@ -106,7 +106,7 @@ VolumeRendering::VolumeRendering(VulkanBase* base,Scene *scene, Framebuffer* pre
     prevViewProjNoJitter = renderProjNoJitter * scene->view[0];
     prevJitter = scene->taaJitter;
     base->vbuffer->transitionImageLayout(
-        framebuffers[1]->MultisampledColorImage->image,
+        framebuffers[1]->GetSampledColorImage()->image,
         VK_IMAGE_ASPECT_COLOR_BIT,
         VK_IMAGE_LAYOUT_UNDEFINED,
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
@@ -192,15 +192,15 @@ void VolumeRendering::recreate(VkExtent2D ex)
     }
     if (!quads.empty()) {
         // Main TAA pass textures
-        quads[0]->textures[0].imageView = previousFB->MultisampledColorImage->imageView;
-        quads[0]->textures[1].imageView = previousFB->MultisampledDepthImage->imageView;
-        quads[0]->textures[2].imageView = framebuffers[1]->MultisampledColorImage->imageView;
-        quads[0]->textures[3].imageView = previousFB->MultisampledAuxColorImage->imageView;
-        quads[0]->textures[4].imageView = previousFB->MultisampledMotionVectorImage->imageView;
+        quads[0]->textures[0].imageView = previousFB->GetSampledColorImage()->imageView;
+        quads[0]->textures[1].imageView = previousFB->GetSampledDepthImage()->imageView;
+        quads[0]->textures[2].imageView = framebuffers[1]->GetSampledColorImage()->imageView;
+        quads[0]->textures[3].imageView = previousFB->GetSampledAuxColorImage()->imageView;
+        quads[0]->textures[4].imageView = previousFB->GetSampledMotionVectorImage()->imageView;
     }
     if (quads.size() > 1) {
         // Copy pass source texture
-        quads[1]->textures[0].imageView = framebuffers[0]->MultisampledColorImage->imageView;
+        quads[1]->textures[0].imageView = framebuffers[0]->GetSampledColorImage()->imageView;
     }
     hasTaaHistory = false;
     prevJitter = glm::vec2(0.0f);
@@ -211,7 +211,7 @@ void VolumeRendering::recreate(VkExtent2D ex)
     prevViewProj = renderProj * scene->view[0];
     prevViewProjNoJitter = renderProjNoJitter * scene->view[0];
     base->vbuffer->transitionImageLayout(
-        framebuffers[1]->MultisampledColorImage->image,
+        framebuffers[1]->GetSampledColorImage()->image,
         VK_IMAGE_ASPECT_COLOR_BIT,
         VK_IMAGE_LAYOUT_UNDEFINED,
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,

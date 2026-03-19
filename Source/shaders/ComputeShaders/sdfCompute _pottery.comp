@@ -8,9 +8,13 @@ layout(binding = 0) uniform computeUbo {
     vec4  BrushColor;
     float BrushAction;  // 1.0 add, 0.0 remove
     float time;
-    float BrushShape;   // 0.0 cube, 1.0 sphere, 2.0 plane
+    float BrushShape;   // 0.0 cube, 1.0 sphere
+    float BrushSmoothness;
     float BrushEmissive; // 1.0 emissive paint mode, 0.0 default
     float BrushRecolor;  // 1.0 recolor existing touched blocks
+    float _pad0;
+    float _pad1;
+    ivec4 DispatchMeta;
 } ubo;
 
 layout(binding = 1) buffer BrickBuffer {
@@ -40,17 +44,34 @@ layout(binding = 7) buffer FreeBrickStack {
     int freeBrickStack[];
 };
 
+struct CsgOperation {
+    vec4 centerRadius;
+    vec4 color;
+    vec4 meta; // x action, y shape, z smoothness, w flags
+};
+
+layout(binding = 8) readonly buffer CsgOperationBuffer {
+    CsgOperation csgOps[];
+};
+
 // -------- shared variables MUST be at global scope --------
 shared uint  sGotHit;
 shared uint  sInsideBand;
+shared uint  sHasNegative;
+shared uint  sHasPositive;
 shared uint  sTouched;
+shared uint  sHasEmissive;
 shared float sInsideBandDis;
 shared float hShared[9 * 9 * 9];
+shared vec4 colorShared[9 * 9 * 9];
 // ----------------------------------------------------------
 
 const int BLOCK_EMISSIVE_FLAG = (1 << 30);
 const int BLOCK_INDEX_MASK = BLOCK_EMISSIVE_FLAG - 1;
 const int BRICK_STRIDE = 9 * 9 * 9;
+const int CSG_FLAG_EMISSIVE = 1;
+const int CSG_FLAG_RECOLOR = 2;
+const uint MIN_NEAR_SURFACE_SAMPLES = 6u;
 
 int AllocateBrickBase()
 {
@@ -75,6 +96,11 @@ float smin(float a, float b, float k) {
     float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
     return mix(b, a, h) - k * h * (1.0 - h);
 }
+
+float smax(float a, float b, float k) {
+    float h = clamp(0.5 - 0.5 * (b - a) / k, 0.0, 1.0);
+    return mix(b, a, h) + k * h * (1.0 - h);
+}
 float sdfBox(vec3 p, vec3 halfExtents) {
     vec3 q = abs(p) - halfExtents;
     return length(max(q, vec3(0.0))) + min(max(q.x, max(q.y, q.z)), 0.0);
@@ -84,11 +110,6 @@ float sdfSphere(vec3 p, float radius) {
     return length(p) - radius;
 }
 
-float sdfPlanePatch(vec3 p, float radius, float halfThickness) {
-    // Finite flat plane brush: square on XZ with small Y thickness.
-    return sdfBox(p, vec3(radius, 0.001, radius));
-}
-
 void main()
 {
     const ivec3 dims = ivec3(64 * 8); // 512^3 editable domain
@@ -96,7 +117,7 @@ void main()
     const ivec3 blockDim = ivec3(8);        // 8x8x8 voxels per block
     ivec3 blocksPerAxis  = dims / blockDim; // 64/8 = 8
 
-    ivec3 blockId = ivec3(gl_WorkGroupID);
+    ivec3 blockId = ubo.DispatchMeta.xyz + ivec3(gl_WorkGroupID);
     
    // blockId = gl_BaseInstanceARB + blockId; // support multi-dispatch
     //what is gl_WorkGroupID?
@@ -183,7 +204,10 @@ void main()
     if (lid == 0u) {
         sGotHit        = 0u;
         sInsideBand    = 0u;
+        sHasNegative   = 0u;
+        sHasPositive   = 0u;
         sTouched       = 0u;
+        sHasEmissive   = 0u;
         sInsideBandDis = 0.0;
     }
     barrier();
@@ -194,97 +218,110 @@ void main()
         any(greaterThanEqual(pos, dims))
     );
 
-    float h = 10.01; // default far value
+    float h = 100.01; // default far value
+    vec4 sampleColor = vec4(0.0);
 
     if (valid) {
         vec3 p = pos- (dims/2.0);
         p = p/dims;
 
-        // Base SDF from previous state
-        int blkRaw = blocks[index];
-        int blkBase = (blkRaw & BLOCK_INDEX_MASK);
-        if (blkRaw >= 0) {
-            h = bricks[blkBase
-                       + localOffset.x
-                       + localOffset.y * 9
-                       + localOffset.z * 9 * 9];
-        } else if (blkRaw == -999999) {
-            h = 100.01;
-        } else {
-            h = 100.01;
-        }
+        float maxSmoothness = 0.0;
+        bool sampleEmissive = false;
+        for (int opIndex = 0; opIndex < ubo.DispatchMeta.w; ++opIndex) {
+            CsgOperation op = csgOps[opIndex];
+            float action = op.meta.x;
+            int shapeMode = int(floor(op.meta.y + 0.5));
+            float smoothness = max(op.meta.z, 0.0001);
+            int flags = int(floor(op.meta.w + 0.5));
+            maxSmoothness = max(maxSmoothness, smoothness);
 
-       // p -= 0.5;
-       // p*=8.;
-        vec3 pq = p + ubo.BrushData.xyz-0.031;
-        float brushRadius = ubo.BrushData.w;
-        if (ubo.BrushAction < 0.5) {
-            brushRadius *= 1.15; // Remove is slightly larger than add.
-        }
+            vec3 pq = p - op.centerRadius.xyz;
+            float brushRadius = op.centerRadius.w;
+            if (action < 0.5) {
+                brushRadius *= 1.15;
+            }
 
-        int shapeMode = int(floor(ubo.BrushShape + 0.5));
-        float eraser = 0.0;
-        if (shapeMode == 1) {
-            eraser = sdfSphere(pq, brushRadius);
-        } else if (shapeMode == 2) {
-            eraser = sdfPlanePatch(pq, brushRadius, max(brushRadius * 0.08, 0.0005));
-        } else {
-            eraser = sdfBox(pq, vec3(brushRadius));
-        }
+            float primitive = (shapeMode == 1)
+                ? sdfSphere(pq, brushRadius)
+                : sdfBox(pq, vec3(brushRadius));
 
-        if (eraser < 0.0) {
-            atomicOr(sTouched, 1u);
-        }
+            if ((flags & CSG_FLAG_RECOLOR) != 0) {
+                if (primitive < 0.0 && h < 0.0) {
+                    sampleColor = vec4(op.color.rgb, 1.0);
+                    sampleEmissive = ((flags & CSG_FLAG_EMISSIVE) != 0);
+                }
+                continue;
+            }
 
-        if (ubo.BrushRecolor < 0.5) {
-            if (ubo.BrushAction < 0.5) {
-                h = max(-eraser, h);
+            if (action < 0.5) {
+                h = smax(-primitive, h, smoothness);
             } else {
-                h = smin(eraser, h,0.001);
+                h = smin(primitive, h, smoothness);
+                if (primitive <= smoothness * 4.0) {
+                    sampleColor = vec4(op.color.rgb, 1.0);
+                    sampleEmissive = ((flags & CSG_FLAG_EMISSIVE) != 0);
+                }
             }
         }
 
-        bool hit        = (h < -0.000  && h > -0.02);
-        bool insideBand = (h < -0.02);
+        float keepBand = max(maxSmoothness * 2.0, 2.0 / float(dims.x));
+        bool hit         = (abs(h) <= keepBand);
+        bool insideBand  = (h < -keepBand);
+        bool hasNegative = (h < 0.0);
+        bool hasPositive = (h > 0.0);
 
-        if (hit) {
-            atomicOr(sGotHit, 1u);
-        }
+        if (hit) atomicAdd(sGotHit, 1u);
         if (insideBand) {
             atomicOr(sInsideBand, 1u);
-            // "last wins" like your original code
             sInsideBandDis = h;
+        }
+        if (hasNegative) atomicOr(sHasNegative, 1u);
+        if (hasPositive) atomicOr(sHasPositive, 1u);
+        if ((hasNegative || hit) && sampleColor.a > 0.5) {
+            atomicOr(sTouched, 1u);
+            if (sampleEmissive) {
+                atomicOr(sHasEmissive, 1u);
+            }
         }
     }
 
     // Store per-thread value in shared array
     hShared[lid] = h;
+    colorShared[lid] = sampleColor;
 
     barrier();
 
-    bool groupGotHit = (sGotHit != 0u);
-    bool groupInside = (sInsideBand != 0u);
-    bool groupHasMaterial = groupGotHit || groupInside;
+    bool groupGotHit = (sGotHit >= MIN_NEAR_SURFACE_SAMPLES);
+    bool groupHasNegative = (sHasNegative != 0u);
+    bool groupHasPositive = (sHasPositive != 0u);
+    bool groupHasMaterial = (groupHasNegative && groupHasPositive) || (groupGotHit && groupHasNegative);
 
     // Block-level decision & brick allocation
     if (lid == 0u) {
         int blkRaw = blocks[index];
         int blkBase = (blkRaw & BLOCK_INDEX_MASK);
-        int blkFlags = (blkRaw & BLOCK_EMISSIVE_FLAG);
-        if (ubo.BrushRecolor > 0.5) {
-            if (sTouched != 0u && blkRaw >= 0) {
-                blockColors[index] = vec4(ubo.BrushColor.rgb, 1.0);
-            }
-            blocks[index] = blkRaw;
-        } else if (groupHasMaterial) {
+        int blkFlags = (sHasEmissive != 0u) ? BLOCK_EMISSIVE_FLAG : 0;
+        if (groupHasMaterial) {
             if (blkRaw < 0) {
                 blkBase = AllocateBrickBase();
-                // Emissive applies only to newly created blocks while mode is ON.
-                blkFlags = (ubo.BrushEmissive > 0.5 && ubo.BrushAction >= 0.5) ? BLOCK_EMISSIVE_FLAG : 0;
-                blockColors[index] = vec4(ubo.BrushColor.rgb, 1.0);
             }
+
+            vec3 colorAccum = vec3(0.0);
+            float colorCount = 0.0;
+            for (int i = 0; i < BRICK_STRIDE; ++i) {
+                if (colorShared[i].a > 0.5 && (hShared[i] < 0.0 || abs(hShared[i]) <= 0.04)) {
+                    colorAccum += colorShared[i].rgb;
+                    colorCount += 1.0;
+                }
+            }
+            blockColors[index] = (colorCount > 0.0)
+                ? vec4(colorAccum / colorCount, 1.0)
+                : blockColors[index];
             blocks[index] = blkBase | blkFlags;
         } else {
+            if (blkRaw >= 0) {
+                FreeBrickBase(blkBase);
+            }
             blocks[index] = -999999;
         }
         if (blocks[index] >= 0) {

@@ -8,6 +8,11 @@
 }
 
 void VBuffer::createVertexBuffer(Mesh& mesh) {
+    if (mesh.vertices.empty()) {
+        mesh.vertexBuffer = VK_NULL_HANDLE;
+        mesh.vertexBufferMemory = VK_NULL_HANDLE;
+        return;
+    }
     VkDeviceSize bufferSize = sizeof(mesh.vertices[0]) * mesh.vertices.size();
 
     VkBuffer stagingBuffer;
@@ -27,6 +32,11 @@ void VBuffer::createVertexBuffer(Mesh& mesh) {
     vkFreeMemory(vulkandevice->device, stagingBufferMemory, nullptr);
 }
 void VBuffer::createSkinnedVertexBuffer(Mesh& mesh) {
+    if (mesh.skinnedvertices.empty()) {
+        mesh.vertexBuffer = VK_NULL_HANDLE;
+        mesh.vertexBufferMemory = VK_NULL_HANDLE;
+        return;
+    }
     VkDeviceSize bufferSize = sizeof(mesh.skinnedvertices[0]) * mesh.skinnedvertices.size();
     for (int i = 0; i < mesh.skinnedvertices.size(); i++) {
         for(int j=0;j<4;j++){
@@ -53,6 +63,11 @@ void VBuffer::createSkinnedVertexBuffer(Mesh& mesh) {
 }
 
 void VBuffer::createIndexBuffer(Mesh& mesh) {
+    if (mesh.indices.empty()) {
+        mesh.indexBuffer = VK_NULL_HANDLE;
+        mesh.indexBufferMemory = VK_NULL_HANDLE;
+        return;
+    }
     VkDeviceSize bufferSize = sizeof(mesh.indices[0]) * mesh.indices.size();
 
     VkBuffer stagingBuffer;
@@ -159,6 +174,9 @@ std::vector<UBO> VBuffer::createUniformBuffers(std::vector<uint64_t> Buffersize)
 
     for (int i = 0; i < Buffersize.size(); i++) {
         VkDeviceSize bufferSize = Buffersize[i];
+        if (bufferSize == 0) {
+            bufferSize = sizeof(uint32_t);
+        }
         VkBuffer ubuffer;
         VkDeviceMemory uBuffersMemory;
         vulkandevice->createBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, ubuffer, uBuffersMemory);
@@ -190,6 +208,9 @@ std::vector<SBO> VBuffer::createStorageBuffers(std::vector<uint64_t> bufferSizes
 
     for (size_t i = 0; i < bufferSizes.size(); i++) {
         VkDeviceSize bufferSize = bufferSizes[i];
+        if (bufferSize == 0) {
+            bufferSize = sizeof(uint32_t);
+        }
 
         VkBuffer sBuffer;
         VkDeviceMemory sBufferMemory;
@@ -338,6 +359,9 @@ PGEResourceTypes::Texture3D VBuffer::createTexture3DGeneral(int w, int h, int d)
 }
 
 void VBuffer::transitionImageLayout(VkImage image, VkImageAspectFlags aspectMask, VkImageLayout oldLayout, VkImageLayout newLayout, uint32_t mipLevels, uint32_t layerCount) {
+    if (image == VK_NULL_HANDLE || mipLevels == 0 || layerCount == 0) {
+        return;
+    }
     VkCommandBuffer commandBuffer = vulkandevice->beginSingleTimeCommands();
 
     VkImageMemoryBarrier barrier{};
@@ -353,8 +377,8 @@ void VBuffer::transitionImageLayout(VkImage image, VkImageAspectFlags aspectMask
     barrier.subresourceRange.baseArrayLayer = 0;
     barrier.subresourceRange.layerCount = layerCount;
 
-    VkPipelineStageFlags sourceStage;
-    VkPipelineStageFlags destinationStage;
+    VkPipelineStageFlags sourceStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+    VkPipelineStageFlags destinationStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
 
 
     if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
@@ -377,6 +401,13 @@ void VBuffer::transitionImageLayout(VkImage image, VkImageAspectFlags aspectMask
 
         sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
         destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    }
+    else if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_GENERAL) {
+        barrier.srcAccessMask = 0;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+
+        sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        destinationStage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
     }
     else if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED) {
         barrier.srcAccessMask = 0;

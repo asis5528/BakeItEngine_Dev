@@ -77,5 +77,6 @@ struct ubo1 {
 
 struct BasicUbo {
 	glm::vec4 color;
+	glm::vec4 debug = glm::vec4(0.0f);
 };
 

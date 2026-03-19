@@ -4,6 +4,7 @@
 
 layout(binding = 1) uniform BasicUbo {
    vec4 color;
+   vec4 debug;
 } ubo;
 layout(location = 0) in vec3 fragColor;
 layout(location = 1) in vec2 fragTexCoord;

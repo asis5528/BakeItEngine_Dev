@@ -15,7 +15,7 @@ layout(std140, binding = 0) uniform CameraUBO {
   float nearPlane;
   float farPlane;
   vec4 brushData;
-  vec4 brushMeta; // x: action, y: shape mode (0 cube, 1 sphere, 2 plane)
+  vec4 brushMeta; // x: action, y: shape mode (0 cube, 1 sphere)
   vec4 taaData;   // x,y current jitter, z,w previous jitter
   vec4 taaState;  // x: history valid (0/1)
   vec4 floorBlobShadows[64];
@@ -121,10 +121,6 @@ float brushSdfSphere(vec3 p, float radius) {
     return length(p) - radius;
 }
 
-float brushSdfPlanePatch(vec3 p, float radius, float halfThickness) {
-    return brushSdfBox(p, vec3(radius, 0.001, radius));
-}
-
 float brushSdf(vec3 p) {
     float r = max(brushData.w, 0.0005);
     if (brushMeta.x < 0.5) {
@@ -135,9 +131,6 @@ float brushSdf(vec3 p) {
     int shapeMode = int(floor(brushMeta.y + 0.5));
     if (shapeMode == 1) {
         return brushSdfSphere(pq, r);
-    }
-    if (shapeMode == 2) {
-        return brushSdfPlanePatch(pq, r, max(r * 0.08, 0.0005));
     }
     return brushSdfBox(pq, vec3(r));
 }
@@ -973,9 +966,20 @@ bool ComputeMotionVector(vec2 uv, float depth, out vec2 prevUV, out vec2 motionU
         return true;
     }
 
-   
+    vec3 worldPos;
+    if (TryGetWorldPosFromAux(uv, worldPos)) {
+        vec4 currClip = currViewProjNoJitter * vec4(worldPos, 1.0);
+        vec4 prevClip = prevViewProjNoJitter * vec4(worldPos, 1.0);
+        if (currClip.w > 1e-6 && prevClip.w > 1e-6) {
+            vec2 currUv = vec2(currClip.x / currClip.w, -(currClip.y / currClip.w)) * 0.5 + 0.5;
+            vec2 reprojPrevUv = vec2(prevClip.x / prevClip.w, -(prevClip.y / prevClip.w)) * 0.5 + 0.5;
+            motionUV = currUv - reprojPrevUv;
+            prevUV = reprojPrevUv;
+            return true;
+        }
+    }
 
-    return true;
+    return false;
 }
 
 vec3 CurrentColorAt(ivec2 px)
@@ -983,6 +987,13 @@ vec3 CurrentColorAt(ivec2 px)
     ivec2 size = textureSize(texSampler, 0).xy;
     px = clamp(px, ivec2(0), size - ivec2(1));
     return texelFetch(texSampler, ivec3(px, 0), 0).rgb;
+}
+
+float CurrentDepthAt(ivec2 px)
+{
+    ivec2 size = textureSize(depthSampler, 0).xy;
+    px = clamp(px, ivec2(0), size - ivec2(1));
+    return texelFetch(depthSampler, ivec3(px, 0), 0).r;
 }
 
 vec3 ClampHistoryToNeighborhood(vec2 uv, vec3 historyColor)
@@ -1019,8 +1030,51 @@ vec3 ApplyTAA(vec2 uv, float depth, vec3 currentColor)
 
     vec3 historyColor = texture(historySampler, vec3(prevUV, 0.0)).rgb;
     historyColor = ClampHistoryToNeighborhood(uv, historyColor);
+    float historyWeight = TaaHistoryWeight(motionUV, currentColor, historyColor);
+    return mix(currentColor, historyColor, historyWeight);
+}
 
-    return mix(currentColor, historyColor, 0.8);
+vec3 ApplyEdgeAA(vec2 uv, vec3 color)
+{
+    ivec2 centerPx = PixelCoordFromUv(uv);
+    float dc = CurrentDepthAt(centerPx);
+    if (dc >= 0.99999) {
+        return color;
+    }
+
+    ivec2 pxL = centerPx + ivec2(-1, 0);
+    ivec2 pxR = centerPx + ivec2( 1, 0);
+    ivec2 pxU = centerPx + ivec2( 0, 1);
+    ivec2 pxD = centerPx + ivec2( 0,-1);
+
+    float dl = CurrentDepthAt(pxL);
+    float dr = CurrentDepthAt(pxR);
+    float du = CurrentDepthAt(pxU);
+    float dd = CurrentDepthAt(pxD);
+
+    float edgeDepth = max(max(abs(dl - dc), abs(dr - dc)), max(abs(du - dc), abs(dd - dc)));
+    float backgroundNeighbor = 0.0;
+    backgroundNeighbor = max(backgroundNeighbor, dl >= 0.99999 ? 1.0 : 0.0);
+    backgroundNeighbor = max(backgroundNeighbor, dr >= 0.99999 ? 1.0 : 0.0);
+    backgroundNeighbor = max(backgroundNeighbor, du >= 0.99999 ? 1.0 : 0.0);
+    backgroundNeighbor = max(backgroundNeighbor, dd >= 0.99999 ? 1.0 : 0.0);
+
+    float edgeWeight = max(
+        smoothstep(0.002, 0.02, edgeDepth),
+        backgroundNeighbor);
+
+    if (edgeWeight <= 0.001) {
+        return color;
+    }
+
+    vec3 avg = (
+        color * 2.0 +
+        CurrentColorAt(pxL) +
+        CurrentColorAt(pxR) +
+        CurrentColorAt(pxU) +
+        CurrentColorAt(pxD)) / 6.0;
+
+    return mix(color, avg, 0.35 * edgeWeight);
 }
 void main() {
   vec2 uv = texcoord;
@@ -1035,10 +1089,11 @@ void main() {
   bool hasSceneDepth = (sceneDepth < 0.99999);
   outColor = vec4(CurrentColorAt(pixelCoord), 1.0);
   if (!hasSceneDepth) {
+       outColor.rgb = vec3(0.2);
       outColor.a = 1.0;
   }
   float linearDepth = hasSceneDepth ? linearDepthFromBuffer(sceneDepth) : farPlane;
-  outColor.rgb = ApplyTAA(uv, sceneDepth, outColor.rgb);
+ 
  // outColor.rgb = vec3(texture(motionSampler,vec3(uv,0.0)).rg,0.);
   // Keep the interactive brush cursor responsive by compositing it after TAA.
   if (rayBox.y > 0.0) {
@@ -1072,6 +1127,11 @@ void main() {
       }
   }
 
+  vec3 worldPosition = texture(worldPosSampler,vec3(uv,0.0)).rgb;
+
+  //outColor.rgb += 0.25*(sin(length(worldPosition)*2920.0) *0.5+0.5); 
+   outColor.rgb = ApplyTAA(uv, sceneDepth, outColor.rgb);
+   outColor.rgb = ApplyEdgeAA(uv, outColor.rgb);
  // vec3 n = NormalFromDepth(uv);
   //outColor.rgb = normalize(n);
   /*
