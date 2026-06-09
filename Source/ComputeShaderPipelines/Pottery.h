@@ -36,10 +36,14 @@ public:
 	float lod1BlockSizeWS = 2.0f / 64.0f;
 	bool wasBrushEditing = false;
 	bool wasBrushPointerDown = false;
-	bool pendingEditableSync = true;
-	uint32_t liveEditRefreshCounter = 0;
 	glm::dvec2 previousBrushCursorPos = glm::dvec2(0.0);
-	std::vector<int32_t> cachedEditableBlockState;
+	bool pendingFullChunkResolve = true;
+	bool pendingStrictSurfaceScan = false;
+	bool pendingLod1Rebuild = false;
+	bool lod1RebuildSubmitted = false;
+	uint32_t strictSurfaceScanCursor = 0;
+	std::vector<int32_t> strictScanBlockState;
+	std::vector<int32_t> strictScanRenderableIds;
 	std::vector<int32_t> fineActiveIds;
 	std::vector<int32_t> lod1ActiveIds;
 	int lod1ObjectIndex = -1;

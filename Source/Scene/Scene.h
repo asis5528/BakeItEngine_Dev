@@ -72,6 +72,7 @@ public:
 	 float brushAction = 1.0f; // 1.0 add (LMB), 0.0 remove (RMB)
 	 bool emissiveMode = false; // toggled with I
 	 bool taaEnabled = true;
+	 bool renderPassDirty = true;
 	 int dirtyBlockCount = 0;
 	 int sdfAtlasUsedBricks = 0;
 	 int sdfAtlasCapacityBricks = 0;

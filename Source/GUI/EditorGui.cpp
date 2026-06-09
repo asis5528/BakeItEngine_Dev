@@ -247,7 +247,8 @@ void DrawSdfAtlasUsageBar(const char* label, float fraction, int usedBricks, int
    
      
      ImGui::Begin("scene");
-	 ImGui::Text("FPS : %.1f", ImGui::GetIO().Framerate);
+	 ImGui::Text("FPS  : %.1f  (%.2f ms avg)", ImGui::GetIO().Framerate, 1000.0f / ImGui::GetIO().Framerate);
+	 ImGui::Text("frame: %.2f ms", ImGui::GetIO().DeltaTime * 1000.0f);
      ImGui::Text("FPS2 : %.1f", m_scene->fps);
      tree(m_scene->rootNode);
 

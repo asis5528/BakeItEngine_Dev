@@ -275,6 +275,10 @@ void UpdateFreeCamera(
     outView = glm::lookAt(cam.pos, cam.pos + forward, up);
 }
 void Scene::update(float iTime) {
+    if (renderPassDirty) {
+        renderPass();
+        renderPassDirty = false;
+    }
    
 
     static float tmi = 0.0;

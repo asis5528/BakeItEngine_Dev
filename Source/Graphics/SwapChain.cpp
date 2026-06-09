@@ -1,6 +1,7 @@
 #include "SwapChain.h"
 #include <stdexcept>
 #include <algorithm>
+#include <iostream>
 #include "VulkanUtils.h"
 #include <array>
 SwapChain::SwapChain(VkPhysicalDevice &physicalDevice, VkDevice& device, VkSurfaceKHR &surface, GLFWwindow* &window, VkQueue& queue, VkSampleCountFlagBits msaaSamples) {
@@ -118,13 +119,31 @@ VkSurfaceFormatKHR SwapChain::chooseSwapSurfaceFormat(const std::vector<VkSurfac
 }
 
 VkPresentModeKHR SwapChain::chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes) {
-    for (const auto& availablePresentMode : availablePresentModes) {
-        if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
-            return availablePresentMode;
+    auto modeName = [](VkPresentModeKHR m) -> const char* {
+        switch (m) {
+            case VK_PRESENT_MODE_IMMEDIATE_KHR:    return "IMMEDIATE";
+            case VK_PRESENT_MODE_MAILBOX_KHR:      return "MAILBOX";
+            case VK_PRESENT_MODE_FIFO_KHR:         return "FIFO";
+            case VK_PRESENT_MODE_FIFO_RELAXED_KHR: return "FIFO_RELAXED";
+            default:                               return "UNKNOWN";
         }
-    }
+    };
 
-    return VK_PRESENT_MODE_FIFO_KHR;
+    std::cout << "[present] available modes:";
+    for (auto m : availablePresentModes) std::cout << " " << modeName(m);
+    std::cout << std::endl;
+
+    auto has = [&](VkPresentModeKHR want) {
+        for (auto m : availablePresentModes) if (m == want) return true;
+        return false;
+    };
+
+    VkPresentModeKHR chosen = VK_PRESENT_MODE_FIFO_KHR;
+    if (has(VK_PRESENT_MODE_MAILBOX_KHR))         chosen = VK_PRESENT_MODE_MAILBOX_KHR;
+    else if (has(VK_PRESENT_MODE_IMMEDIATE_KHR))  chosen = VK_PRESENT_MODE_IMMEDIATE_KHR;
+
+    std::cout << "[present] chosen: " << modeName(chosen) << std::endl;
+    return chosen;
 }
 
 VkExtent2D SwapChain::chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities) {

@@ -39,6 +39,7 @@ layout(location = 7) flat out float blockEmissive;
 layout(location = 8) flat out vec3 blockColor;
 layout(location = 9) flat out float blockSizeWSOut;
 layout(location = 10) flat out vec3 blockCenterObject;
+layout(location = 11) flat out ivec3 blockCoordOut;
 
 const int BLOCK_EMISSIVE_FLAG = (1 << 30);
 const int BLOCK_INDEX_MASK = BLOCK_EMISSIVE_FLAG - 1;
@@ -49,6 +50,8 @@ void main()
     vec3 v = inPosition * (1.0 / 4.0);
 
     uint blockIdx = uint(max(inBlockID, 0));
+    int linId = int(blockIdx);
+    blockCoordOut = ivec3(linId % 64, (linId / 64) % 64, linId / (64 * 64));
     int blockRaw = blocks[blockIdx];
     if (blockRaw < 0) {
         gl_Position = vec4(2e9, 2e9, 2e9, 1.0);

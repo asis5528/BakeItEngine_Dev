@@ -9,8 +9,12 @@ layout(binding = 0) uniform computeUbo {
     float BrushAction;  // 1.0 add, 0.0 remove
     float time;
     float BrushShape;   // 0.0 cube, 1.0 sphere, 2.0 plane
+    float BrushSmoothness;
     float BrushEmissive; // 1.0 emissive paint mode, 0.0 default
     float BrushRecolor;  // 1.0 recolor existing touched blocks
+    float _pad0;
+    float _pad1;
+    ivec4 DispatchBaseBlock;
 } ubo;
 
 layout(binding = 1) buffer BrickBuffer {
@@ -44,6 +48,9 @@ layout(binding = 7) buffer FreeBrickStack {
 shared uint  sGotHit;
 shared uint  sInsideBand;
 shared uint  sTouched;
+shared uint  sHasNegative;
+shared uint  sHasPositive;
+shared uint  sNearSurfaceCount;
 shared float sInsideBandDis;
 shared float hShared[9 * 9 * 9];
 // ----------------------------------------------------------
@@ -96,7 +103,7 @@ void main()
     const ivec3 blockDim = ivec3(8);        // 8x8x8 voxels per block
     ivec3 blocksPerAxis  = dims / blockDim; // 64/8 = 8
 
-    ivec3 blockId = ivec3(gl_WorkGroupID);
+    ivec3 blockId = ivec3(gl_WorkGroupID) + ubo.DispatchBaseBlock.xyz;
     
    // blockId = gl_BaseInstanceARB + blockId; // support multi-dispatch
     //what is gl_WorkGroupID?
@@ -184,6 +191,9 @@ void main()
         sGotHit        = 0u;
         sInsideBand    = 0u;
         sTouched       = 0u;
+        sHasNegative   = 0u;
+        sHasPositive   = 0u;
+        sNearSurfaceCount = 0u;
         sInsideBandDis = 0.0;
     }
     barrier();
@@ -240,20 +250,30 @@ void main()
             if (ubo.BrushAction < 0.5) {
                 h = max(-eraser, h);
             } else {
-                h = smin(eraser, h,0.001);
+                h = smin(eraser, h, max(ubo.BrushSmoothness, 0.0001));
             }
         }
 
-        bool hit        = (h < -0.000  && h > -0.02);
-        bool insideBand = (h < -0.02);
+        float keepBand = 2.0 / float(dims.x);
+        bool hit        = (abs(h) <= keepBand);
+        bool insideBand = (h < -keepBand);
+        bool negativeSample = (h < 0.0);
+        bool positiveSample = (h > 0.0);
 
         if (hit) {
             atomicOr(sGotHit, 1u);
+            atomicAdd(sNearSurfaceCount, 1u);
         }
         if (insideBand) {
             atomicOr(sInsideBand, 1u);
             // "last wins" like your original code
             sInsideBandDis = h;
+        }
+        if (negativeSample) {
+            atomicOr(sHasNegative, 1u);
+        }
+        if (positiveSample) {
+            atomicOr(sHasPositive, 1u);
         }
     }
 
@@ -262,9 +282,8 @@ void main()
 
     barrier();
 
-    bool groupGotHit = (sGotHit != 0u);
-    bool groupInside = (sInsideBand != 0u);
-    bool groupHasMaterial = groupGotHit || groupInside;
+    bool groupHasCrossing = (sHasNegative != 0u) && (sHasPositive != 0u);
+    bool groupHasMaterial = groupHasCrossing || (sNearSurfaceCount >= 3u);
 
     // Block-level decision & brick allocation
     if (lid == 0u) {

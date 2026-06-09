@@ -97,6 +97,69 @@ constexpr int kBlockIndexMask = kBlockEmissiveFlag - 1;
 constexpr int kAtlasDim = 512;
 constexpr float kBrushCenterBias = 0.031f;
 constexpr bool kForceCoarseLodDebug = false;
+
+bool BlockHasRenderableSurfaceSamples(const float* bricks, int brickBase, float nearSurfaceThreshold)
+{
+	if (brickBase < 0 || bricks == nullptr) {
+		return false;
+	}
+
+	bool hasNegative = false;
+	bool hasPositive = false;
+	int nearSurfaceCount = 0;
+
+	for (int i = 0; i < kBrickSamplesPerBlock; ++i) {
+		const float h = bricks[brickBase + i];
+		if (h < 0.0f) hasNegative = true;
+		if (h > 0.0f) hasPositive = true;
+		if (std::abs(h) <= nearSurfaceThreshold) {
+			nearSurfaceCount++;
+		}
+	}
+
+	return (hasNegative && hasPositive) || (nearSurfaceCount >= 3);
+}
+
+std::vector<int32_t> BuildRenderableActiveIds(
+	const std::vector<int32_t>& blockState,
+	const float* bricks,
+	float nearSurfaceThreshold)
+{
+	std::vector<int32_t> activeIds;
+	activeIds.reserve(blockState.size());
+
+	for (uint32_t i = 0; i < blockState.size(); ++i) {
+		const int32_t blockRaw = blockState[i];
+		if (blockRaw < 0) {
+			continue;
+		}
+
+		const int brickBase = (blockRaw & kBlockIndexMask);
+		if (BlockHasRenderableSurfaceSamples(bricks, brickBase, nearSurfaceThreshold)) {
+			activeIds.push_back(static_cast<int32_t>(i));
+		}
+	}
+
+	return activeIds;
+}
+
+std::vector<int32_t> BuildAllocatedActiveIds(const std::vector<int32_t>& blockState)
+{
+	std::vector<int32_t> activeIds;
+	activeIds.reserve(blockState.size());
+	for (uint32_t i = 0; i < blockState.size(); ++i) {
+		if (blockState[i] >= 0) {
+			activeIds.push_back(static_cast<int32_t>(i));
+		}
+	}
+	return activeIds;
+}
+
+uint32_t FlattenBlockIndex(uint32_t x, uint32_t y, uint32_t z, uint32_t blocksPerAxis)
+{
+	return x + y * blocksPerAxis + z * blocksPerAxis * blocksPerAxis;
+}
+
 }
 
 Pottery::Pottery(VulkanBase* base, Scene* scene)
@@ -156,7 +219,6 @@ Pottery::Pottery(VulkanBase* base, Scene* scene)
 	std::vector<glm::vec4> initialFineColors(static_cast<size_t>(numBlocks), glm::vec4(0.0f));
 	computeSBO[1].map(base->device, sizeof(int32_t) * initialFineBlocks.size(), initialFineBlocks.data());
 	computeSBO[3].map(base->device, sizeof(glm::vec4) * initialFineColors.size(), initialFineColors.data());
-	cachedEditableBlockState.assign(static_cast<size_t>(numBlocks), -999999);
 	fineActiveIds.clear();
 	scene->sdfAtlasCapacityBricks = atlasCapacityBricks;
 	scene->sdfAtlasUsedBricks = 0;
@@ -293,7 +355,15 @@ void Pottery::clearEditableChunk()
 	computeSBO[3].map(base->device, sizeof(glm::vec4) * clearedColors.size(), clearedColors.data());
 	computeSBO[4].map(base->device, sizeof(int), &zero);
 	computeSBO[6].map(base->device, sizeof(int), &zero);
-	cachedEditableBlockState.assign(totalBlocks, -999999);
+	pendingFullChunkResolve = false;
+	pendingStrictSurfaceScan = false;
+	pendingLod1Rebuild = false;
+	lod1RebuildSubmitted = false;
+	strictSurfaceScanCursor = 0;
+	strictScanBlockState.clear();
+	strictScanRenderableIds.clear();
+	fineActiveIds.clear();
+	lod1ActiveIds.clear();
 }
 
 void Pottery::rebuildLod1()
@@ -306,13 +376,12 @@ void Pottery::rebuildLod1()
 	const uint32_t totalBlocks = lod1BlocksPerAxis * lod1BlocksPerAxis * lod1BlocksPerAxis;
 	std::vector<int32_t> coarseBlocks(totalBlocks, -999999);
 	lod1SBO[1].read(base->device, sizeof(int32_t) * coarseBlocks.size(), coarseBlocks.data());
-
-	lod1ActiveIds.reserve(totalBlocks);
-	for (uint32_t i = 0; i < totalBlocks; ++i) {
-		if (coarseBlocks[i] >= 0) {
-			lod1ActiveIds.push_back(static_cast<int32_t>(i));
-		}
-	}
+	void* mapped = nullptr;
+	vkMapMemory(base->device, lod1SBO[0].bufferMemory, 0, lod1SBO[0].size, 0, &mapped);
+	const float* coarseBricks = static_cast<const float*>(mapped);
+	const float nearSurfaceThreshold = 2.0f / float(chunkBlocksPerAxis * chunkBlockDim);
+	lod1ActiveIds = BuildRenderableActiveIds(coarseBlocks, coarseBricks, nearSurfaceThreshold);
+	vkUnmapMemory(base->device, lod1SBO[0].bufferMemory);
 }
 
 void Pottery::updateLodSelection()
@@ -345,8 +414,7 @@ void Pottery::updateLodSelection()
 	base->vbuffer->updateInstanceIdBuffer(coarseMesh, desiredCoarse ? lod1ActiveIds : std::vector<int32_t>{});
 	coarseLodSelected = desiredCoarse;
 
-	vkQueueWaitIdle(base->queue);
-	scene->renderPass();
+	scene->renderPassDirty = true;
 }
 
 void Pottery::createStaticFloorObject()
@@ -576,7 +644,7 @@ void Pottery::finalizeStrokeChunk(float time)
 	vkDeviceWaitIdle(base->device);
 	scene->cleanDescriptors();
 	scene->createSceneDescriptor();
-	scene->renderPass();
+	scene->renderPassDirty = true;
 }
 
 Pottery::~Pottery() {
@@ -804,7 +872,7 @@ void Pottery::update(float time)
 
 	if (isBrushEditing) {
 		const float effectiveBrushRadius = BrushRadius * (leftBut < 0.5f ? 1.15f : 1.0f);
-		const float smoothSupportPadding = glm::max(BrushSmoothness * 4.0f, chunkBlockSizeWS);
+		const float smoothSupportPadding = glm::max(BrushSmoothness * 8.0f, chunkBlockSizeWS * 2.0f);
 		const glm::vec3 brushCenterCompute = brushCenterLocal + glm::vec3(kBrushCenterBias);
 		const glm::vec3 brushExtent = glm::vec3(effectiveBrushRadius + smoothSupportPadding);
 		const glm::vec3 blockCoordMinF =
@@ -816,17 +884,7 @@ void Pottery::update(float time)
 		dispatchBlockMin = glm::clamp(dispatchBlockMin, glm::ivec3(0), glm::ivec3(int(chunkBlocksPerAxis) - 1));
 		dispatchBlockMax = glm::clamp(dispatchBlockMax, glm::ivec3(0), glm::ivec3(int(chunkBlocksPerAxis) - 1));
 		const glm::ivec3 dispatchBlockCount = dispatchBlockMax - dispatchBlockMin + glm::ivec3(1);
-		pubo.DispatchBaseBlock = glm::ivec4(dispatchBlockMin, 0);
-		computeUBO[0].map(base->device, sizeof(potteryUBO), &pubo);
-
-		int dirtyZero = 0;
-		computeSBO[4].map(base->device, sizeof(int), &dirtyZero);
-		comp->submit(
-			static_cast<uint32_t>(dispatchBlockCount.x),
-			static_cast<uint32_t>(dispatchBlockCount.y),
-			static_cast<uint32_t>(dispatchBlockCount.z));
-
-		vkWaitForFences(base->device, 1, &comp->computeFence, VK_TRUE, UINT64_MAX);
+		const bool computeReady = (vkGetFenceStatus(base->device, comp->computeFence) == VK_SUCCESS);
 
 		Mesh* targetMesh = nullptr;
 		for (Object& obj : scene->objects) {
@@ -839,80 +897,143 @@ void Pottery::update(float time)
 			}
 			if (targetMesh) break;
 		}
-
-		if (targetMesh && targetMesh->hasInstanceIdBuffer) {
+		
+		if (computeReady && targetMesh && targetMesh->hasInstanceIdBuffer) {
 			const uint32_t totalBlocks = chunkBlocksPerAxis * chunkBlocksPerAxis * chunkBlocksPerAxis;
 			std::vector<int32_t> blockState(totalBlocks, -1);
 			computeSBO[1].read(base->device, sizeof(int32_t) * blockState.size(), blockState.data());
-
-			std::vector<int32_t> activeIds;
-			activeIds.reserve(static_cast<size_t>(scene->dirtyBlockCount > 0 ? scene->dirtyBlockCount : 0));
-			for (uint32_t i = 0; i < totalBlocks; ++i) {
-				if (blockState[i] >= 0) {
-					activeIds.push_back(static_cast<int32_t>(i));
-				}
-			}
-			fineActiveIds = activeIds;
-
-			uint32_t oldCount = targetMesh->instanceCount;
-			uint32_t oldCoarseCount = 0;
-			if (lod1MeshIndex >= 0) {
-				oldCoarseCount = scene->meshes[static_cast<size_t>(lod1MeshIndex)].instanceCount;
-			}
-			base->vbuffer->updateInstanceIdBuffer(*targetMesh, activeIds);
-			uint32_t newCount = targetMesh->instanceCount;
-			scene->dirtyBlockCount = static_cast<int>(newCount);
-
-			if (coarseLodSelected && lod1MeshIndex >= 0) {
-				Mesh& coarseMesh = scene->meshes[static_cast<size_t>(lod1MeshIndex)];
-				base->vbuffer->updateInstanceIdBuffer(coarseMesh, {});
-			}
-			coarseLodSelected = false;
-			uint32_t newCoarseCount = oldCoarseCount;
-			if (lod1MeshIndex >= 0) {
-				newCoarseCount = scene->meshes[static_cast<size_t>(lod1MeshIndex)].instanceCount;
-			}
-
-			if (newCount != oldCount || newCoarseCount != oldCoarseCount) {
-				vkQueueWaitIdle(base->queue);
-				scene->renderPass();
-			}
+			fineActiveIds = BuildAllocatedActiveIds(blockState);
+			base->vbuffer->updateInstanceIdBuffer(*targetMesh, fineActiveIds);
+			scene->dirtyBlockCount = static_cast<int>(fineActiveIds.size());
+			scene->renderPassDirty = true;
+		}
+		
+		if (computeReady) {
+			pubo.DispatchBaseBlock = glm::ivec4(dispatchBlockMin, 0);
+			computeUBO[0].map(base->device, sizeof(potteryUBO), &pubo);
+			int dirtyZero = 0;
+			computeSBO[4].map(base->device, sizeof(int), &dirtyZero);
+			comp->submit(
+				static_cast<uint32_t>(dispatchBlockCount.x),
+				static_cast<uint32_t>(dispatchBlockCount.y),
+				static_cast<uint32_t>(dispatchBlockCount.z));
 		}
 	}
 
 	if (editJustEnded) {
-		pendingEditableSync = true;
+		pendingFullChunkResolve = true;
+		pendingStrictSurfaceScan = false;
+		pendingLod1Rebuild = false;
+		lod1RebuildSubmitted = false;
+		strictSurfaceScanCursor = 0;
+		strictScanBlockState.clear();
+		strictScanRenderableIds.clear();
 	}
 
-	if (pendingEditableSync && !isBrushEditing) {
-		vkWaitForFences(base->device, 1, &comp->computeFence, VK_TRUE, UINT64_MAX);
+	if (!isBrushEditing && pendingFullChunkResolve) {
+		if (vkGetFenceStatus(base->device, comp->computeFence) == VK_SUCCESS) {
+			pubo.DispatchBaseBlock = glm::ivec4(0);
+			computeUBO[0].map(base->device, sizeof(potteryUBO), &pubo);
+			int dirtyZero = 0;
+			computeSBO[4].map(base->device, sizeof(int), &dirtyZero);
+			comp->submit(chunkBlocksPerAxis, chunkBlocksPerAxis, chunkBlocksPerAxis);
+			pendingFullChunkResolve = false;
+			pendingStrictSurfaceScan = true;
+		}
+	}
 
-		const uint32_t totalBlocks = chunkBlocksPerAxis * chunkBlocksPerAxis * chunkBlocksPerAxis;
-		std::vector<int32_t> blockState(totalBlocks, -1);
-		computeSBO[1].read(base->device, sizeof(int32_t) * blockState.size(), blockState.data());
+	if (!isBrushEditing && pendingStrictSurfaceScan) {
+		if (vkGetFenceStatus(base->device, comp->computeFence) == VK_SUCCESS) {
+			const uint32_t totalBlocks = chunkBlocksPerAxis * chunkBlocksPerAxis * chunkBlocksPerAxis;
+			if (strictScanBlockState.empty()) {
+				strictScanBlockState.resize(totalBlocks, -1);
+				computeSBO[1].read(
+					base->device,
+					sizeof(int32_t) * strictScanBlockState.size(),
+					strictScanBlockState.data());
+				strictScanRenderableIds.clear();
+				strictScanRenderableIds.reserve(fineActiveIds.size());
+				strictSurfaceScanCursor = 0;
+			}
 
-		int activeBlockCount = 0;
-		fineActiveIds.clear();
-		fineActiveIds.reserve(totalBlocks);
-		for (uint32_t i = 0; i < totalBlocks; ++i) {
-			const int32_t newRaw = blockState[static_cast<size_t>(i)];
-			if (newRaw >= 0) {
-				activeBlockCount++;
-				fineActiveIds.push_back(static_cast<int32_t>(i));
+			const uint32_t kBlocksPerFrame = 8192u;
+			const uint32_t scanEnd = glm::min(
+				strictSurfaceScanCursor + kBlocksPerFrame,
+				totalBlocks);
+			void* mapped = nullptr;
+			vkMapMemory(base->device, computeSBO[0].bufferMemory, 0, computeSBO[0].size, 0, &mapped);
+			const float* fineBricks = static_cast<const float*>(mapped);
+			const float nearSurfaceThreshold = 2.0f / float(chunkBlocksPerAxis * chunkBlockDim);
+			for (uint32_t i = strictSurfaceScanCursor; i < scanEnd; ++i) {
+				const int32_t blockRaw = strictScanBlockState[i];
+				if (blockRaw < 0) {
+					continue;
+				}
+				const int brickBase = (blockRaw & kBlockIndexMask);
+				if (BlockHasRenderableSurfaceSamples(fineBricks, brickBase, nearSurfaceThreshold)) {
+					strictScanRenderableIds.push_back(static_cast<int32_t>(i));
+				}
+			}
+			vkUnmapMemory(base->device, computeSBO[0].bufferMemory);
+			strictSurfaceScanCursor = scanEnd;
+
+			if (strictSurfaceScanCursor >= totalBlocks) {
+				fineActiveIds.swap(strictScanRenderableIds);
+
+				Mesh* targetMesh = nullptr;
+				for (Object& obj : scene->objects) {
+					if (!obj.hasMesh) continue;
+					for (size_t i = 0; i < obj.meshID.size(); ++i) {
+						if (i >= obj.shader.size()) continue;
+						if (obj.shader[i].graphicsPipeline != scene->pipelines[4]) continue;
+						targetMesh = &scene->meshes[obj.meshID[i]];
+						break;
+					}
+					if (targetMesh) break;
+				}
+				if (targetMesh && targetMesh->hasInstanceIdBuffer) {
+					base->vbuffer->updateInstanceIdBuffer(*targetMesh, fineActiveIds);
+				}
+				scene->dirtyBlockCount = static_cast<int>(fineActiveIds.size());
+
+				int gpuValue = 0;
+				int freeBrickCount = 0;
+				computeSBO[2].read(base->device, sizeof(int), &gpuValue);
+				computeSBO[6].read(base->device, sizeof(int), &freeBrickCount);
+				scene->sdfAtlasTailBricks = gpuValue / kBrickSamplesPerBlock;
+				scene->sdfAtlasFreeBricks = glm::max(freeBrickCount, 0);
+				scene->sdfAtlasUsedBricks = glm::max(scene->sdfAtlasTailBricks - scene->sdfAtlasFreeBricks, 0);
+
+				pendingStrictSurfaceScan = false;
+				pendingLod1Rebuild = true;
+				lod1RebuildSubmitted = false;
+				strictSurfaceScanCursor = 0;
+				strictScanBlockState.clear();
+				strictScanRenderableIds.clear();
+				scene->renderPassDirty = true;
 			}
 		}
-		cachedEditableBlockState = blockState;
-		scene->dirtyBlockCount = activeBlockCount;
-		rebuildLod1();
+	}
 
-		int gpuValue = 0;
-		int freeBrickCount = 0;
-		computeSBO[2].read(base->device, sizeof(int), &gpuValue);
-		computeSBO[6].read(base->device, sizeof(int), &freeBrickCount);
-		scene->sdfAtlasTailBricks = gpuValue / kBrickSamplesPerBlock;
-		scene->sdfAtlasFreeBricks = glm::max(freeBrickCount, 0);
-		scene->sdfAtlasUsedBricks = glm::max(scene->sdfAtlasTailBricks - scene->sdfAtlasFreeBricks, 0);
-		pendingEditableSync = false;
+	if (!isBrushEditing && pendingLod1Rebuild) {
+		if (!lod1RebuildSubmitted) {
+			lod1Builder->submit(lod1BlocksPerAxis, lod1BlocksPerAxis, lod1BlocksPerAxis);
+			lod1RebuildSubmitted = true;
+		}
+		else if (vkGetFenceStatus(base->device, lod1Builder->computeFence) == VK_SUCCESS) {
+			const uint32_t totalBlocks = lod1BlocksPerAxis * lod1BlocksPerAxis * lod1BlocksPerAxis;
+			std::vector<int32_t> coarseBlocks(totalBlocks, -999999);
+			lod1SBO[1].read(base->device, sizeof(int32_t) * coarseBlocks.size(), coarseBlocks.data());
+			void* mapped = nullptr;
+			vkMapMemory(base->device, lod1SBO[0].bufferMemory, 0, lod1SBO[0].size, 0, &mapped);
+			const float* coarseBricks = static_cast<const float*>(mapped);
+			const float nearSurfaceThreshold = 2.0f / float(chunkBlocksPerAxis * chunkBlockDim);
+			lod1ActiveIds = BuildRenderableActiveIds(coarseBlocks, coarseBricks, nearSurfaceThreshold);
+			vkUnmapMemory(base->device, lod1SBO[0].bufferMemory);
+			pendingLod1Rebuild = false;
+			lod1RebuildSubmitted = false;
+			scene->renderPassDirty = true;
+		}
 	}
 
 	if (!isBrushEditing) {

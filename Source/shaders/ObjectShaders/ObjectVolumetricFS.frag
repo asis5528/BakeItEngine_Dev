@@ -37,6 +37,7 @@ layout(location=7) flat in float blockEmissive;
 layout(location=8) flat in vec3 blockColor;
 layout(location=9) flat in float blockSizeWSIn;
 layout(location=10) flat in vec3 blockCenterObject;
+layout(location=11) flat in ivec3 blockCoordIn;
 layout(location = 0) out vec4 outColor;
 layout(location = 1) out vec4 outWorldPos;
 layout(location = 2) out vec4 outMotion;
@@ -181,9 +182,9 @@ vec4 textureTrilinear(sampler3D sam, vec3 uv)
     return mix(slice0, slice1, w.z);
 }
 float fetchBricks(int brickIndex,ivec3 p){
- if (any(lessThan(p, ivec3(0))) || any(greaterThan(p, ivec3(8)))) {
-    return 100.01;
- }
+// if (any(lessThan(p, ivec3(0))) || any(greaterThan(p, ivec3(8)))) {
+  //  return 100.01;
+ //}
 
 int localIndex = p.x + p.y*9 + p.z*9*9;
 
@@ -494,6 +495,67 @@ vec3 calcNormalSmooth(vec3 pos) {
         return calcNormal2(pos);
     }
     return normalize(grad);
+}
+
+// Sample SDF at an arbitrary point in the global voxel grid by walking blocks[].
+// globalGrid is in voxel units across the whole world; range [0, 64*8) per axis.
+// If the target block has no brick allocated, falls back to current-brick clamp
+// so silhouettes don't get blown out by an artificially large empty-space value.
+float sampleFieldGlobal(vec3 globalGrid)
+{
+    const int BPA = 64;
+    ivec3 blockCoord = ivec3(floor(globalGrid * 0.125));
+    blockCoord = clamp(blockCoord, ivec3(0), ivec3(BPA - 1));
+
+    int blockLinear = blockCoord.x + blockCoord.y * BPA + blockCoord.z * BPA * BPA;
+    int blockRaw = blocks[blockLinear];
+
+    int brickIdx;
+    vec3 localGrid;
+    if (blockRaw < 0) {
+        brickIdx = brickIndex2;
+        localGrid = clamp(globalGrid - vec3(blockCoordIn) * 8.0, vec3(0.0), vec3(7.9999));
+    } else {
+        brickIdx = blockRaw & BLOCK_INDEX_MASK;
+        localGrid = clamp(globalGrid - vec3(blockCoord) * 8.0, vec3(0.0), vec3(7.9999));
+    }
+
+    ivec3 cell = ivec3(floor(localGrid));
+    vec3 fracPart = fract(localGrid);
+
+    float v000 = fetchBricks(brickIdx, cell + ivec3(0,0,0));
+    float v100 = fetchBricks(brickIdx, cell + ivec3(1,0,0));
+    float v010 = fetchBricks(brickIdx, cell + ivec3(0,1,0));
+    float v110 = fetchBricks(brickIdx, cell + ivec3(1,1,0));
+    float v001 = fetchBricks(brickIdx, cell + ivec3(0,0,1));
+    float v101 = fetchBricks(brickIdx, cell + ivec3(1,0,1));
+    float v011 = fetchBricks(brickIdx, cell + ivec3(0,1,1));
+    float v111 = fetchBricks(brickIdx, cell + ivec3(1,1,1));
+
+    float s0 = mix(mix(v000, v100, fracPart.x), mix(v010, v110, fracPart.x), fracPart.y);
+    float s1 = mix(mix(v001, v101, fracPart.x), mix(v011, v111, fracPart.x), fracPart.y);
+    return mix(s0, s1, fracPart.z);
+}
+
+// Central-difference normal that crosses brick boundaries via sampleFieldGlobal.
+// hitLocalPos is in [-0.5, 0.5] of the current brick. e = 0.5 voxel units (= 1/16 local).
+vec3 calcNormalSmoothGlobal(vec3 hitLocalPos)
+{
+    vec3 baseGlobal = vec3(blockCoordIn) * 8.0 + (hitLocalPos + 0.5) * 8.0;
+    float e = 0.5;
+    vec3 ex = vec3(e, 0.0, 0.0);
+    vec3 ey = vec3(0.0, e, 0.0);
+    vec3 ez = vec3(0.0, 0.0, e);
+
+    float dx = sampleFieldGlobal(baseGlobal + ex) - sampleFieldGlobal(baseGlobal - ex);
+    float dy = sampleFieldGlobal(baseGlobal + ey) - sampleFieldGlobal(baseGlobal - ey);
+    float dz = sampleFieldGlobal(baseGlobal + ez) - sampleFieldGlobal(baseGlobal - ez);
+
+    vec3 g = vec3(dx, dy, dz);
+   // if (dot(g, g) <= 1e-10) {
+     //   return calcNormalSmooth(hitLocalPos);
+    //}
+    return normalize(g);
 }
 
 vec3 calcNormal3(vec3 pos) {
@@ -878,51 +940,40 @@ outColor.a = 1.0;
     int brickIndexx;
     float cnt = 0.0;
     t = 0.0;
-    float minStep = 0.001;
-float maxStep = 0.05;
-float dis = length(worldPosition-cameraPos.xyz);
-int siz = 192;
-float tPrev = 0.0;
-float dPrev = 1e9;      // previous distance sample
-float voxelStepLocal = 1.0 / 8.0;
-float minMarchStep = voxelStepLocal * 0.2;
-float maxMarchStep = voxelStepLocal;
+    int siz = 16;
+    float tPrev = 0.0;
+    float dPrev = 1e9;
+    float voxelStepLocal = 1.0 / 8.0;
+    float minMarchStep = voxelStepLocal * 0.5;
 
-for (int i = 0; i < siz; i++)
-{
-    vec3 pos = localCoord + dirLocal * t;
-
-    if (max(abs(pos.x), max(abs(pos.y), abs(pos.z))) >= 0.505)
-        break;
-
-    float d = map2(pos).x;   // your SDF-ish distance (whatever units map2 returns)
-
-    // If we are "close enough" (or crossed), refine using linear interpolation
-    if (d < 0.0005)
+    // Cube diagonal in local space is sqrt(3) ~= 1.73, so 16 sphere-trace steps
+    // is plenty: empty cubes traverse in 1-3 steps, surface hits in 3-6.
+    // smin has Lipschitz constant <= 1, so stepping by d is conservative
+    // (underestimates distance, never overshoots).
+    for (int i = 0; i < siz; i++)
     {
-        // We want approximate t where d == 0.
-        // Interpolate between previous sample (tPrev, dPrev) and current (t, d).
-        // Note: if dPrev was also already < 0.001 (or invalid), fall back.
-        float denom = (dPrev - d);
+        vec3 pos = localCoord + dirLocal * t;
 
-        float alpha = 0.0;
-        if (abs(denom) > 1e-8)
-            alpha = clamp(dPrev / denom, 0.0, 1.0); // fraction from prev->current where d hits ~0
+        if (max(abs(pos.x), max(abs(pos.y), abs(pos.z))) >= 0.505)
+            break;
 
-        float tHit = mix(tPrev, t, alpha);
+        float d = map2(pos).x;
 
-        t = tHit;
-        hit = true;
-        break;
+        if (d < 0.0005)
+        {
+            float denom = (dPrev - d);
+            float alpha = 0.0;
+            if (abs(denom) > 1e-8)
+                alpha = clamp(dPrev / denom, 0.0, 1.0);
+            t = mix(tPrev, t, alpha);
+            hit = true;
+            break;
+        }
+
+        tPrev = t;
+        dPrev = d;
+        t += max(d, minMarchStep);
     }
-
-    // store previous sample BEFORE advancing
-    tPrev = t;
-    dPrev = d;
-
-    // Clamp to the local voxel size so coarse blocks do not skip thin features.
-    t += clamp(d, minMarchStep, maxMarchStep);
-}
 
     /*
    for(int i = 0;i<8;i++){
@@ -988,7 +1039,7 @@ ivec3 ires = ivec3(blockPerAxis,blockPerAxis,blockPerAxis);
   //outColor.a = sum;
   //outColor.rgb*=outColor.a;
   float border = float(abs(localCoord.x)>0.45 && abs(localCoord.x)<0.49) +float(abs(localCoord.y)>0.45&& abs(localCoord.y)<0.49)+float(abs(localCoord.z)>0.45&& abs(localCoord.z)<0.49);
- //border = 0.0;
+ border = 0.0;
  //border = 0.0;
 if(hit){
 // t=  tn;
@@ -1018,12 +1069,7 @@ ivec3 ires = ivec3(blockPerAxis,blockPerAxis,blockPerAxis);
 
 //vec3 n = normalFromDerivatives(t/64., worldPosition+dir*(t/64.));
 //n = calcNormalTetra( localCoord+dirLocal*t,brickIndexx,1./(8.));
-  vec3 sdfNormal = calcNormal2(hitLocalPos);
-  vec3 borderNormal = calcNormal3(hitLocalPos);
-  float borderDistance = 0.5 - max(abs(hitLocalPos.x), max(abs(hitLocalPos.y), abs(hitLocalPos.z)));
-  float borderBoost = 1.0 - smoothstep(0.015, 0.075, borderDistance);
-  float normalMix = mix(0.14, 0.38, borderBoost);
-  vec3 n = borderNormal;
+  vec3 n = calcNormalSmoothGlobal(hitLocalPos);
 
   vec3 light = vec3(10.,10.,10.);
 
