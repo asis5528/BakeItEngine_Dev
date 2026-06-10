@@ -38,25 +38,25 @@ Entry point is `Source/main.cpp`'s `Vulkan` class. `run()` does `initWindow → 
 
 Top-level systems owned by `Vulkan`:
 
-- `VulkanBase` (`Graphics/VulkanBase.*`) — instance, device, surface, swapchain, command buffers, sync. Owns `VulkanDevice`, `SwapChain`, `VBuffer` (`VulkanBuffer`), `VulkanDescriptor`. `recreate()` handles swapchain rebuild on resize.
+- `VulkanBase` (`Core/Vulkan/VulkanBase.*`) — instance, device, surface, swapchain, command buffers, sync. Owns `VulkanDevice`, `SwapChain`, `VBuffer` (`VulkanBuffer`), `VulkanDescriptor`. `recreate()` handles swapchain rebuild on resize.
 - `Scene` (`Scene/Scene.*`) — the central state: `objects`, `meshes`, `materials`, `animations`, `ptextures`, `SBOs`, `framebuffers`, `quads`, descriptor pool, camera (`proj[2]/view[2]` — array-of-2 because the renderer is multiview-capable for VR), TAA jitter state, brush state (`brushData`, `brushColor`, `brushShapeMode`, `brushAction`, etc.), and gameplay flags (`renderPassDirty`, `dirtyBlockCount`, `sdfAtlas*`).
   - `Scene::renderPass()` records command buffers per swapchain image: offscreen pass draws all objects → post-process chain → swapchain pass for present.
   - `Scene::update(time)` updates animation bones, builds camera matrices (orbit camera in non-VR), writes per-object UBOs, applies TAA jitter via Halton sequence, updates post-processing.
-- `PostProcessingManager` (`PostProcessing/`) — chain of full-screen `Quad`s + intermediate `Framebuffer`s. Owns `VolumeRendering` which raymarches the SDF/volume textures via screen-space quads. `recreate()` on viewport resize.
+- `PostProcessingManager` (`Render/PostProcess/`) — chain of full-screen `Quad`s + intermediate `Framebuffer`s. Owns `VolumeRendering` which raymarches the SDF/volume textures via screen-space quads. `recreate()` on viewport resize.
 - `ComputeShaderPipelines` (`Source/ComputeShaderPipelines.*`) — owns `GaussianFluidSim`, `MeshToSdf`, and **`Pottery`** (the volumetric brush editor — the heart of BakeIT). Its `update(time)` is dispatched once per frame after present.
-- `EditorGui` (`GUI/EditorGui.*`) + `VulkanImgui` (`Graphics/IMGUI/`) — ImGui dockspace with a Viewport that displays the last post-process framebuffer as an `ImGui_ImplVulkan` texture, a Scene hierarchy panel (drives `Scene::selectedID` via `rootNode` tree), FPS, and tool buttons (e.g. "MeshToSDF Dispatch"). On viewport resize it triggers framebuffer + pipeline recreation and rebuilds the ImGui descriptor pointing at the new image.
-- `Loader` (`Loader.*`) — Assimp-backed model loader (`assimp-vc143-mtd.dll`). The GLFW drop callback in `main.cpp` forwards dropped paths to `Loader::load`, then calls `cleanDescriptors → createSceneDescriptor → createCommandBuffers` to refresh the scene.
+- `EditorGui` + `VulkanImgui` (both in `Editor/`) — ImGui dockspace with a Viewport that displays the last post-process framebuffer as an `ImGui_ImplVulkan` texture, a Scene hierarchy panel (drives `Scene::selectedID` via `rootNode` tree), FPS, and tool buttons (e.g. "MeshToSDF Dispatch"). On viewport resize it triggers framebuffer + pipeline recreation and rebuilds the ImGui descriptor pointing at the new image.
+- `Loader` (`World/Loader.*`) — Assimp-backed model loader (`assimp-vc143-mtd.dll`). The GLFW drop callback in `main.cpp` forwards dropped paths to `Loader::load`, then calls `cleanDescriptors → createSceneDescriptor → createCommandBuffers` to refresh the scene.
 
 ### Pottery (volumetric SDF editor)
 
-`ComputeShaderPipelines/Pottery.*` is where almost all SDF/volumetric edit logic lives. Key concepts to keep straight:
+`Features/Volumetric/Edit/Pottery.*` is where almost all SDF/volumetric edit logic lives. Key concepts to keep straight:
 
 - **Editable chunk** vs **snapshot (settled) chunks** — different performance policies. The editable chunk prioritizes drag responsiveness; snapshots can be compacted aggressively and LOD'd. `snapshotChunks[]` and `snapshotChunkSBOs[]` hold settled work; `chunkBlocksPerAxis`, `chunkBlockDim`, `chunkBlockSizeWS` describe the live chunk grid.
 - **Brick atlas** — fine-resolution SDF storage. Tracked via `sdfAtlasUsedBricks/CapacityBricks/TailBricks/FreeBricks/Usage` on `Scene` (and surfaced in the GUI).
 - **Block sets** — `strictScanBlockState`, `strictScanRenderableIds`, `fineActiveIds`, `lod1ActiveIds`. These are *different sets* (recompute / store / render); do not unify them.
 - **Phased pipeline flags** — `pendingFullChunkResolve`, `pendingStrictSurfaceScan`, `pendingLod1Rebuild`, `lod1RebuildSubmitted`, `strictSurfaceScanCursor`. The brush release path sets these and `Pottery::update` chips at them across frames. Anything new that mutates the chunk should plug into this phasing rather than stalling.
 - **LOD** — `rebuildLod1`, `updateLodSelection`, `coarseLodSelected`, `lod1ObjectIndex/MeshIndex`. LOD selection lives in compute; rebuild must not run in the drag path.
-- Compute shaders: `shaders/ComputeShaders/VolumetricBrushCS.comp` and `VolumetricLod1CS.comp` are Pottery's GPU side.
+- Compute shaders: `shaders/Volumetric/VolumetricBrushCS.comp` and `VolumetricLod1CS.comp` are Pottery's GPU side.
 
 ## Conventions & gotchas
 
