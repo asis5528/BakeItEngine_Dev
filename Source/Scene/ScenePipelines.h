@@ -1,7 +1,7 @@
 #pragma once
 #include <vector>
-#include "../Graphics/GraphicsPipeline.h"
-#include "../Graphics/VulkanBase.h"
+#include "Core/Pipelines/GraphicsPipeline.h"
+#include "Core/Vulkan/VulkanBase.h"
 class ScenePipelines
 {
 public:

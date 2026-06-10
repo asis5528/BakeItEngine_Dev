@@ -5,9 +5,9 @@
 #include "VulkanDevice.h"
 #include "SwapChain.h"
 #include "Framebuffer.h"
-#include "GraphicsPipeline.h"
-#include "VulkanBuffer.h"
-#include "VulkanDescriptor.h"
+#include "Core/Pipelines/GraphicsPipeline.h"
+#include "Core/Resources/VulkanBuffer.h"
+#include "Core/Resources/VulkanDescriptor.h"
 class VulkanBase {
 
 public:

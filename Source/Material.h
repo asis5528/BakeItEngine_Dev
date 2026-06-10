@@ -1,5 +1,5 @@
 #pragma once
-#include "Graphics/GraphicsPipeline.h"
+#include "Core/Pipelines/GraphicsPipeline.h"
 
 enum MaterialType {
 	BasicMaterial, 

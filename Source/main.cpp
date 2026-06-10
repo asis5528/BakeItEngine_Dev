@@ -35,7 +35,7 @@
 #include <optional>
 #include <set>
 #include <unordered_map>
-#include "MathUtils.h"
+#include "Core/Math/MathUtils.h"
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 601;
 //for quad to render compute texture
@@ -61,22 +61,22 @@ const bool enableValidationLayers = false;
 #else
 const bool enableValidationLayers = true;
 #endif
-#include "Graphics/Mesh.h"
-#include"Graphics/VulkanBase.h"
+#include "World/Mesh.h"
+#include "Core/Vulkan/VulkanBase.h"
 #include "Graphics/IMGUI/VulkanImgui.h"
 
 #include "Object.h"
 #include "quad.h"
 //uncomment to enable VR
  //#define VR
-#include "Graphics/ComputePipeline.h"
+#include "Core/Pipelines/ComputePipeline.h"
 #include "Scene/Scene.h"
 #include "Loader.h"
 #include "GUI/EditorGui.h"
 #include <glm/gtx/matrix_decompose.hpp>
-#include "Graphics/VulkanUtils.h"
+#include "Core/Vulkan/VulkanUtils.h"
 #include "ComputeShaderPipelines.h"
-#include "ResourceManager.h"
+#include "Core/Resources/ResourceManager.h"
 
 
 

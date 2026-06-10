@@ -5,7 +5,7 @@ const bool enableValidationLayers = false;
 #else
 const bool enableValidationLayers = true;
 #endif
-#include "VulkanBuffer.h"
+#include "Core/Resources/VulkanBuffer.h"
 #include "VulkanUtils.h"
 
 

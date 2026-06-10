@@ -1,10 +1,10 @@
 #pragma once
-#include "VulkanDevice.h"
+#include "Core/Vulkan/VulkanDevice.h"
 #include <array>
 #include <vector>
-#include "Mesh.h"
-#include "../Shader.h"
-#include "GraphicsPipeline.h"
+#include "World/Mesh.h"
+#include "Core/Pipelines/Shader.h"
+#include "Core/Pipelines/GraphicsPipeline.h"
 #include "VulkanImage.h"
 
 

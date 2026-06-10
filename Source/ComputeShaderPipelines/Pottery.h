@@ -1,6 +1,6 @@
 #pragma once
 #include "../Scene/Scene.h"
-#include "../Graphics/ComputePipeline.h"
+#include "Core/Pipelines/ComputePipeline.h"
 #include <glm/glm.hpp>
 #include <vector>
 class Pottery

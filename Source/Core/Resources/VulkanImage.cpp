@@ -1,7 +1,7 @@
 #include "VulkanImage.h"
 #include <stdexcept>
 #include "VulkanBuffer.h"
-#include "VulkanUtils.h"
+#include "Core/Vulkan/VulkanUtils.h"
 
  VulkanImage::VulkanImage(VkDevice device, VkPhysicalDevice physicalDevice) {
     this->device = device;

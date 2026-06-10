@@ -1,6 +1,6 @@
 #pragma once
-#include "Graphics/GraphicsPipeline.h"
-#include "Graphics/VulkanBase.h"
+#include "Core/Pipelines/GraphicsPipeline.h"
+#include "Core/Vulkan/VulkanBase.h"
 //REMAINDER,MAKE THIS QUAD AS SEPARATE FOR POSTPROCESSING QUAD,MAYBE INHERTIANCE FROM BASIC QUAD CLASS
 class Quad
 {

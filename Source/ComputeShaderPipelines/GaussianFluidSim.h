@@ -1,7 +1,7 @@
 #pragma once
-#include "../Graphics/VulkanBase.h"
+#include "Core/Vulkan/VulkanBase.h"
 #include "../Scene/Scene.h"
-#include "../Graphics/ComputePipeline.h"
+#include "Core/Pipelines/ComputePipeline.h"
 class GaussianFluidSim
 {
 

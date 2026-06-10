@@ -1,6 +1,6 @@
 #pragma once
 #include <vector>
-#include "../Graphics/Framebuffer.h"
+#include "Core/Vulkan/Framebuffer.h"
 #include "../quad.h"
 #include "VolumeRendering.h"
 class Scene;

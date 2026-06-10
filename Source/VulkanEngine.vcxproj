@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -90,7 +90,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>C:\Users\asisp\source\repos\VulkanEngine\ThirdParty\Headers\OpenVR;C:\Users\asisp\Documents\Visual Studio 2019\Libraries\tinyobjloader-master;C:\Users\asisp\Documents\Visual Studio 2019\Libraries\glm-0.9.9.8\glm;C:\Users\asisp\Documents\Visual Studio 2019\Libraries\glfw-3.3.4.bin.WIN64\glfw-3.3.4.bin.WIN64\include;C:\VulkanSDK\1.2.189.2\Include;C:\Users\asisp\Documents\Visual Studio 2019\Libraries\stb;C:\Users\asisp\Documents\source\assimp\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\asisp\source\repos\VulkanEngine\ThirdParty\Headers\OpenVR;C:\Users\asisp\Documents\Visual Studio 2019\Libraries\tinyobjloader-master;C:\Users\asisp\Documents\Visual Studio 2019\Libraries\glm-0.9.9.8\glm;C:\Users\asisp\Documents\Visual Studio 2019\Libraries\glfw-3.3.4.bin.WIN64\glfw-3.3.4.bin.WIN64\include;C:\VulkanSDK\1.2.189.2\Include;C:\Users\asisp\Documents\Visual Studio 2019\Libraries\stb;C:\Users\asisp\Documents\source\assimp\include;$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <ExternalWarningLevel>InheritWarningLevel</ExternalWarningLevel>
     </ClCompile>
@@ -109,7 +109,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>C:\Users\asisp\Documents\Visual Studio 2019\Libraries\glm-0.9.9.8\glm;C:\Users\asisp\Documents\Visual Studio 2019\Libraries\glfw-3.3.4.bin.WIN64\glfw-3.3.4.bin.WIN64\include;C:\VulkanSDK\1.2.182.0\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\asisp\Documents\Visual Studio 2019\Libraries\glm-0.9.9.8\glm;C:\Users\asisp\Documents\Visual Studio 2019\Libraries\glfw-3.3.4.bin.WIN64\glfw-3.3.4.bin.WIN64\include;C:\VulkanSDK\1.2.182.0\Include;$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
@@ -127,7 +127,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>$(SolutionDir)ThirdParty\Include;$(SolutionDir)ThirdParty\VulkanSDK\1.4.304.0\Include;$(SolutionDir)ThirdParty\OpenVR\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)ThirdParty\Include;$(SolutionDir)ThirdParty\VulkanSDK\1.4.304.0\Include;$(SolutionDir)ThirdParty\OpenVR\Include;$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <ExternalWarningLevel>InheritWarningLevel</ExternalWarningLevel>
     </ClCompile>
@@ -151,7 +151,7 @@ if exist "$(SolutionDir)ThirdParty\Libs\glfw3.dll" copy /Y "$(SolutionDir)ThirdP
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>C:\Users\asisp\Documents\Visual Studio 2019\Libraries\glm-0.9.9.8\glm;C:\Users\asisp\Documents\Visual Studio 2019\Libraries\glfw-3.3.4.bin.WIN64\glfw-3.3.4.bin.WIN64\include;C:\VulkanSDK\1.2.182.0\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\asisp\Documents\Visual Studio 2019\Libraries\glm-0.9.9.8\glm;C:\Users\asisp\Documents\Visual Studio 2019\Libraries\glfw-3.3.4.bin.WIN64\glfw-3.3.4.bin.WIN64\include;C:\VulkanSDK\1.2.182.0\Include;$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
@@ -174,10 +174,10 @@ if exist "$(SolutionDir)ThirdParty\Libs\glfw3.dll" copy /Y "$(SolutionDir)ThirdP
     <ClCompile Include="ComputeShaderPipelines.cpp" />
     <ClCompile Include="ComputeShaderPipelines\GaussianFluidSim.cpp" />
     <ClCompile Include="ComputeShaderPipelines\Pottery.cpp" />
-    <ClCompile Include="Graphics\ComputePipeline.cpp" />
+    <ClCompile Include="Core\Pipelines\ComputePipeline.cpp" />
     <ClCompile Include="GUI\EditorGui.cpp" />
-    <ClCompile Include="Graphics\GraphicsPipeline.cpp" />
-    <ClCompile Include="Graphics\Framebuffer.cpp" />
+    <ClCompile Include="Core\Pipelines\GraphicsPipeline.cpp" />
+    <ClCompile Include="Core\Vulkan\Framebuffer.cpp" />
     <ClCompile Include="Imgui\imgui.cpp" />
     <ClCompile Include="Imgui\imgui_demo.cpp" />
     <ClCompile Include="Imgui\imgui_draw.cpp" />
@@ -187,23 +187,23 @@ if exist "$(SolutionDir)ThirdParty\Libs\glfw3.dll" copy /Y "$(SolutionDir)ThirdP
     <ClCompile Include="Imgui\imgui_widgets.cpp" />
     <ClCompile Include="Loader.cpp" />
     <ClCompile Include="main.cpp" />
-    <ClCompile Include="Graphics\VulkanBase.cpp" />
-    <ClCompile Include="Graphics\VulkanDevice.cpp" />
-    <ClCompile Include="Graphics\SwapChain.cpp" />
-    <ClCompile Include="Graphics\VulkanImage.cpp" />
-    <ClCompile Include="Graphics\VulkanUtils.cpp" />
-    <ClCompile Include="Graphics\VulkanBuffer.cpp" />
-    <ClCompile Include="Graphics\Mesh.cpp" />
-    <ClCompile Include="Graphics\VulkanDescriptor.cpp" />
+    <ClCompile Include="Core\Vulkan\VulkanBase.cpp" />
+    <ClCompile Include="Core\Vulkan\VulkanDevice.cpp" />
+    <ClCompile Include="Core\Vulkan\SwapChain.cpp" />
+    <ClCompile Include="Core\Resources\VulkanImage.cpp" />
+    <ClCompile Include="Core\Vulkan\VulkanUtils.cpp" />
+    <ClCompile Include="Core\Resources\VulkanBuffer.cpp" />
+    <ClCompile Include="World\Mesh.cpp" />
+    <ClCompile Include="Core\Resources\VulkanDescriptor.cpp" />
     <ClCompile Include="Graphics\IMGUI\VulkanImgui.cpp" />
     <ClCompile Include="Material.cpp" />
-    <ClCompile Include="MathUtils.cpp" />
+    <ClCompile Include="Core\Math\MathUtils.cpp" />
     <ClCompile Include="ComputeShaderPipelines\MeshToSdf.cpp" />
     <ClCompile Include="Model.cpp" />
     <ClCompile Include="Object.cpp" />
     <ClCompile Include="PostProcessing\PostProcessingManager.cpp" />
     <ClCompile Include="quad.cpp" />
-    <ClCompile Include="ResourceManager.cpp" />
+    <ClCompile Include="Core\Resources\ResourceManager.cpp" />
     <ClCompile Include="Scene\ScenePipelines.cpp" />
     <ClCompile Include="Scene\Scene.cpp" />
     <ClCompile Include="PostProcessing\VolumeRendering.cpp" />
@@ -214,10 +214,10 @@ if exist "$(SolutionDir)ThirdParty\Libs\glfw3.dll" copy /Y "$(SolutionDir)ThirdP
     <ClInclude Include="ComputeShaderPipelines.h" />
     <ClInclude Include="ComputeShaderPipelines\GaussianFluidSim.h" />
     <ClInclude Include="ComputeShaderPipelines\Pottery.h" />
-    <ClInclude Include="Graphics\ComputePipeline.h" />
+    <ClInclude Include="Core\Pipelines\ComputePipeline.h" />
     <ClInclude Include="GUI\EditorGui.h" />
-    <ClInclude Include="Graphics\GraphicsPipeline.h" />
-    <ClInclude Include="Graphics\Framebuffer.h" />
+    <ClInclude Include="Core\Pipelines\GraphicsPipeline.h" />
+    <ClInclude Include="Core\Vulkan\Framebuffer.h" />
     <ClInclude Include="Imgui\imconfig.h" />
     <ClInclude Include="Imgui\imgui.h" />
     <ClInclude Include="Imgui\imgui_impl_glfw.h" />
@@ -227,28 +227,28 @@ if exist "$(SolutionDir)ThirdParty\Libs\glfw3.dll" copy /Y "$(SolutionDir)ThirdP
     <ClInclude Include="Imgui\imstb_rectpack.h" />
     <ClInclude Include="Imgui\imstb_textedit.h" />
     <ClInclude Include="Imgui\imstb_truetype.h" />
-    <ClInclude Include="Graphics\VulkanBase.h" />
-    <ClInclude Include="Graphics\VulkanDevice.h" />
-    <ClInclude Include="Graphics\SwapChain.h" />
-    <ClInclude Include="Graphics\VulkanImage.h" />
-    <ClInclude Include="Graphics\VulkanUtils.h" />
-    <ClInclude Include="Graphics\VulkanBuffer.h" />
-    <ClInclude Include="Graphics\Mesh.h" />
-    <ClInclude Include="Graphics\VulkanDescriptor.h" />
+    <ClInclude Include="Core\Vulkan\VulkanBase.h" />
+    <ClInclude Include="Core\Vulkan\VulkanDevice.h" />
+    <ClInclude Include="Core\Vulkan\SwapChain.h" />
+    <ClInclude Include="Core\Resources\VulkanImage.h" />
+    <ClInclude Include="Core\Vulkan\VulkanUtils.h" />
+    <ClInclude Include="Core\Resources\VulkanBuffer.h" />
+    <ClInclude Include="World\Mesh.h" />
+    <ClInclude Include="Core\Resources\VulkanDescriptor.h" />
     <ClInclude Include="Graphics\IMGUI\VulkanImgui.h" />
     <ClInclude Include="Loader.h" />
     <ClInclude Include="Material.h" />
-    <ClInclude Include="MathUtils.h" />
+    <ClInclude Include="Core\Math\MathUtils.h" />
     <ClInclude Include="ComputeShaderPipelines\MeshToSdf.h" />
     <ClInclude Include="Model.h" />
     <ClInclude Include="Object.h" />
-    <ClInclude Include="PGEResourceTypes.h" />
+    <ClInclude Include="Core\Resources\PGEResourceTypes.h" />
     <ClInclude Include="PostProcessing\PostProcessingManager.h" />
     <ClInclude Include="quad.h" />
-    <ClInclude Include="ResourceManager.h" />
+    <ClInclude Include="Core\Resources\ResourceManager.h" />
     <ClInclude Include="Scene\ScenePipelines.h" />
     <ClInclude Include="Scene\Scene.h" />
-    <ClInclude Include="Shader.h" />
+    <ClInclude Include="Core\Pipelines\Shader.h" />
     <ClInclude Include="PostProcessing\VolumeRendering.h" />
   </ItemGroup>
   <ItemGroup>

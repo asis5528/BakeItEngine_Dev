@@ -1,7 +1,7 @@
 #pragma once
 #include <vector>
 #include <glm/glm.hpp>
-#include "../Graphics/Framebuffer.h"
+#include "Core/Vulkan/Framebuffer.h"
 #include "../quad.h"
 
 class Scene;

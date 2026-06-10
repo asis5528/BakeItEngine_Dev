@@ -1,7 +1,7 @@
 #pragma once
 #include <vector>
-#include "Graphics/VulkanImage.h"
-#include "Graphics/VulkanBase.h"
+#include "Core/Resources/VulkanImage.h"
+#include "Core/Vulkan/VulkanBase.h"
 class VulkanBase;
 class ResourceManager {
 public:

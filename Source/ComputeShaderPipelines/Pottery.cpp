@@ -1,5 +1,5 @@
 #include "Pottery.h"
-#include "../ResourceManager.h"
+#include "Core/Resources/ResourceManager.h"
 #include <algorithm>
 #include <cfloat>
 #include <cmath>

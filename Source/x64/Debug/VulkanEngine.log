@@ -1,17 +1,9 @@
-﻿  ComputeShaderPipelines.cpp
-  GaussianFluidSim.cpp
+﻿  GaussianFluidSim.cpp
   MeshToSdf.cpp
   Pottery.cpp
-  EditorGui.cpp
-  ComputePipeline.cpp
-  Loader.cpp
-  Model.cpp
-  PostProcessingManager.cpp
-  VolumeRendering.cpp
   Scene.cpp
   main.cpp
   Generating Code...
-LINK : warning LNK4098: defaultlib 'MSVCRT' conflicts with use of other libs; use /NODEFAULTLIB:library
   VulkanEngine.vcxproj -> C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\x64\Debug\BakeItEngine.exe
   'pwsh.exe' is not recognized as an internal or external command,
   operable program or batch file.

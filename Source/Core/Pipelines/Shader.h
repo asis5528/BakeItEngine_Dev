@@ -1,5 +1,5 @@
-﻿#pragma once
-#include "Graphics/GraphicsPipeline.h"
+#pragma once
+#include "Core/Pipelines/GraphicsPipeline.h"
 struct UBO {
 	VkBuffer buffer;
 	VkDeviceMemory bufferMemory;
@@ -32,7 +32,7 @@ struct SBO {
 	void read(const VkDevice device, uint64_t size, void* dst) {
 		void* src;
 		vkMapMemory(device, bufferMemory, 0, size, 0, &src);
-		memcpy(dst, src, size);   // <-- GPU → CPU
+		memcpy(dst, src, size);   // <-- GPU ? CPU
 		vkUnmapMemory(device, bufferMemory);
 	}
 

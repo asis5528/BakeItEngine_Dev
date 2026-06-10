@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <Filter Include="Source Files">
@@ -47,34 +47,34 @@
     <ClCompile Include="Imgui\imgui_widgets.cpp">
       <Filter>ImGui</Filter>
     </ClCompile>
-    <ClCompile Include="Graphics\VulkanBase.cpp">
+    <ClCompile Include="Core\Vulkan\VulkanBase.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Graphics\VulkanDevice.cpp">
+    <ClCompile Include="Core\Vulkan\VulkanDevice.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Graphics\SwapChain.cpp">
+    <ClCompile Include="Core\Vulkan\SwapChain.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Graphics\VulkanImage.cpp">
+    <ClCompile Include="Core\Resources\VulkanImage.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Graphics\Framebuffer.cpp">
+    <ClCompile Include="Core\Vulkan\Framebuffer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Graphics\VulkanUtils.cpp">
+    <ClCompile Include="Core\Vulkan\VulkanUtils.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Graphics\VulkanBuffer.cpp">
+    <ClCompile Include="Core\Resources\VulkanBuffer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Graphics\GraphicsPipeline.cpp">
+    <ClCompile Include="Core\Pipelines\GraphicsPipeline.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Graphics\Mesh.cpp">
+    <ClCompile Include="World\Mesh.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Graphics\VulkanDescriptor.cpp">
+    <ClCompile Include="Core\Resources\VulkanDescriptor.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Graphics\IMGUI\VulkanImgui.cpp">
@@ -95,7 +95,7 @@
     <ClCompile Include="Model.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="MathUtils.cpp">
+    <ClCompile Include="Core\Math\MathUtils.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Animation.cpp">
@@ -107,7 +107,7 @@
     <ClCompile Include="Material.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Graphics\ComputePipeline.cpp">
+    <ClCompile Include="Core\Pipelines\ComputePipeline.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="ComputeShaderPipelines.cpp">
@@ -128,7 +128,7 @@
     <ClCompile Include="ComputeShaderPipelines\MeshToSdf.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="ResourceManager.cpp">
+    <ClCompile Include="Core\Resources\ResourceManager.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="ComputeShaderPipelines\Pottery.cpp">
@@ -163,37 +163,37 @@
     <ClInclude Include="Imgui\imstb_truetype.h">
       <Filter>ImGui</Filter>
     </ClInclude>
-    <ClInclude Include="Graphics\VulkanBase.h" />
-    <ClInclude Include="Graphics\VulkanDevice.h" />
-    <ClInclude Include="Graphics\SwapChain.h" />
-    <ClInclude Include="Graphics\VulkanImage.h" />
-    <ClInclude Include="Graphics\Framebuffer.h" />
-    <ClInclude Include="Graphics\VulkanUtils.h" />
-    <ClInclude Include="Graphics\VulkanBuffer.h" />
-    <ClInclude Include="Graphics\GraphicsPipeline.h" />
-    <ClInclude Include="Graphics\Mesh.h" />
-    <ClInclude Include="Graphics\VulkanDescriptor.h" />
+    <ClInclude Include="Core\Vulkan\VulkanBase.h" />
+    <ClInclude Include="Core\Vulkan\VulkanDevice.h" />
+    <ClInclude Include="Core\Vulkan\SwapChain.h" />
+    <ClInclude Include="Core\Resources\VulkanImage.h" />
+    <ClInclude Include="Core\Vulkan\Framebuffer.h" />
+    <ClInclude Include="Core\Vulkan\VulkanUtils.h" />
+    <ClInclude Include="Core\Resources\VulkanBuffer.h" />
+    <ClInclude Include="Core\Pipelines\GraphicsPipeline.h" />
+    <ClInclude Include="World\Mesh.h" />
+    <ClInclude Include="Core\Resources\VulkanDescriptor.h" />
     <ClInclude Include="Graphics\IMGUI\VulkanImgui.h" />
     <ClInclude Include="Object.h" />
-    <ClInclude Include="Shader.h" />
+    <ClInclude Include="Core\Pipelines\Shader.h" />
     <ClInclude Include="quad.h" />
     <ClInclude Include="Scene\Scene.h" />
     <ClInclude Include="Loader.h" />
     <ClInclude Include="Model.h" />
-    <ClInclude Include="MathUtils.h" />
+    <ClInclude Include="Core\Math\MathUtils.h" />
     <ClInclude Include="AnimationData.h" />
     <ClInclude Include="Animation.h" />
     <ClInclude Include="GUI\EditorGui.h" />
     <ClInclude Include="Material.h" />
-    <ClInclude Include="Graphics\ComputePipeline.h" />
+    <ClInclude Include="Core\Pipelines\ComputePipeline.h" />
     <ClInclude Include="ComputeShaderPipelines.h" />
     <ClInclude Include="ComputeShaderPipelines\GaussianFluidSim.h" />
     <ClInclude Include="Scene\ScenePipelines.h" />
     <ClInclude Include="PostProcessing\VolumeRendering.h" />
     <ClInclude Include="PostProcessing\PostProcessingManager.h" />
     <ClInclude Include="ComputeShaderPipelines\MeshToSdf.h" />
-    <ClInclude Include="ResourceManager.h" />
-    <ClInclude Include="PGEResourceTypes.h" />
+    <ClInclude Include="Core\Resources\ResourceManager.h" />
+    <ClInclude Include="Core\Resources\PGEResourceTypes.h" />
     <ClInclude Include="ComputeShaderPipelines\Pottery.h" />
   </ItemGroup>
   <ItemGroup>

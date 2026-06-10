@@ -1,7 +1,7 @@
 #pragma once
-#include "Graphics/VulkanBase.h"
+#include "Core/Vulkan/VulkanBase.h"
 #include "Scene/Scene.h"
-#include "Graphics/ComputePipeline.h"
+#include "Core/Pipelines/ComputePipeline.h"
 #include "ComputeShaderPipelines/GaussianFluidSim.h"
 #include "ComputeShaderPipelines/MeshToSdf.h"
 #include "ComputeShaderPipelines/Pottery.h"

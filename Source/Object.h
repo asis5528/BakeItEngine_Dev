@@ -1,7 +1,7 @@
 #pragma once
-#include "Graphics/GraphicsPipeline.h"
-#include "Graphics/VulkanDescriptor.h"
-#include "Shader.h"
+#include "Core/Pipelines/GraphicsPipeline.h"
+#include "Core/Resources/VulkanDescriptor.h"
+#include "Core/Pipelines/Shader.h"
 #include "Animation.h"
 
 class Object

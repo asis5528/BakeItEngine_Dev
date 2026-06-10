@@ -1,7 +1,7 @@
 #include "VulkanBuffer.h"
 #include <stdexcept>
 #include "VulkanImage.h"
-#include "../ResourceManager.h"
+#include "Core/Resources/ResourceManager.h"
 
  VBuffer::VBuffer(VulkanDevice* vulkandevice) {
      this->vulkandevice = vulkandevice;

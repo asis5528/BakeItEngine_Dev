@@ -1,12 +1,12 @@
 #pragma once
 #include <vulkan/vulkan.h>
 #include <vector>
-#include "GraphicsPipeline.h"
-#include "Mesh.h"
-#include "../Shader.h"
+#include "Core/Pipelines/GraphicsPipeline.h"
+#include "World/Mesh.h"
+#include "Core/Pipelines/Shader.h"
 #include "VulkanImage.h"
-#include "VulkanDevice.h"
-#include "../PGEResourceTypes.h"
+#include "Core/Vulkan/VulkanDevice.h"
+#include "Core/Resources/PGEResourceTypes.h"
 
 struct VBuffer {
 	VulkanDevice* vulkandevice;

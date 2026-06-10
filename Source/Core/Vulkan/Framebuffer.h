@@ -2,7 +2,7 @@
 #include <cstdint>
 #include <vulkan/vulkan.h>
 #include <array>
-#include "VulkanImage.h"
+#include "Core/Resources/VulkanImage.h"
 #include "VulkanDevice.h"
 class Framebuffer
 {

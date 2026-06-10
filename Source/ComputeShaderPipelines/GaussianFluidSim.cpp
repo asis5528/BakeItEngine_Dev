@@ -1,5 +1,5 @@
 #include "GaussianFluidSim.h"
-#include "../ResourceManager.h"
+#include "Core/Resources/ResourceManager.h"
 
 
 struct fluidUBO {

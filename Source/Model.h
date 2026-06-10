@@ -1,5 +1,5 @@
 #pragma once
-#include "Graphics/Mesh.h"
+#include "World/Mesh.h"
 #include <assimp/Importer.hpp>
 #include <assimp/postprocess.h>
 #include <assimp/mesh.h>

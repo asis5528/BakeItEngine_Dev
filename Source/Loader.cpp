@@ -2,7 +2,7 @@
 #include "Model.h"
 #include <stb/stb_image.h>
 #include <glm/gtx/matrix_decompose.hpp>
-#include "ResourceManager.h"
+#include "Core/Resources/ResourceManager.h"
 
 Loader::Loader(VulkanBase* base, Scene* scene) {
 	this->base = base;

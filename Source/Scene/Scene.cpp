@@ -1,8 +1,8 @@
 #include "Scene.h"
 #include <chrono>
 #include <iostream>
-#include "../Graphics/VulkanUtils.h"
-#include "../ResourceManager.h"
+#include "Core/Vulkan/VulkanUtils.h"
+#include "Core/Resources/ResourceManager.h"
 
 namespace
 {
