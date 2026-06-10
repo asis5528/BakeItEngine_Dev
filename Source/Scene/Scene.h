@@ -2,7 +2,6 @@
 #include "../Graphics/VulkanBase.h"
 #include "../Object.h"
 #include "../quad.h"
-#include "../SceneObjects.h"
 #include "../Material.h"
 #include "ScenePipelines.h"
 #include "../PostProcessing/PostProcessingManager.h"

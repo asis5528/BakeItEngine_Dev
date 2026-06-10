@@ -164,7 +164,6 @@ if exist "$(SolutionDir)ThirdParty\Libs\glfw3.dll" copy /Y "$(SolutionDir)ThirdP
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <None Include="..\..\engine\game-engine\imgui.ini" />
     <None Include="shaders\ComputeShaders\GaussianFluidSim.comp" />
     <None Include="shaders\ComputeShaders\MeshtoSdf.comp" />
     <None Include="shaders\PostProcessing\quad.frag" />
@@ -210,7 +209,6 @@ if exist "$(SolutionDir)ThirdParty\Libs\glfw3.dll" copy /Y "$(SolutionDir)ThirdP
     <ClCompile Include="ResourceManager.cpp" />
     <ClCompile Include="Scene\ScenePipelines.cpp" />
     <ClCompile Include="Scene\Scene.cpp" />
-    <ClCompile Include="SceneObjects.cpp" />
     <ClCompile Include="PostProcessing\VolumeRendering.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -253,7 +251,6 @@ if exist "$(SolutionDir)ThirdParty\Libs\glfw3.dll" copy /Y "$(SolutionDir)ThirdP
     <ClInclude Include="ResourceManager.h" />
     <ClInclude Include="Scene\ScenePipelines.h" />
     <ClInclude Include="Scene\Scene.h" />
-    <ClInclude Include="SceneObjects.h" />
     <ClInclude Include="Shader.h" />
     <ClInclude Include="PostProcessing\VolumeRendering.h" />
   </ItemGroup>

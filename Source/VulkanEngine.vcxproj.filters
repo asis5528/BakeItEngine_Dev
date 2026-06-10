@@ -93,9 +93,6 @@
     <ClCompile Include="Scene\Scene.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="SceneObjects.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="Loader.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -185,7 +182,6 @@
     <ClInclude Include="Shader.h" />
     <ClInclude Include="quad.h" />
     <ClInclude Include="Scene\Scene.h" />
-    <ClInclude Include="SceneObjects.h" />
     <ClInclude Include="Loader.h" />
     <ClInclude Include="Model.h" />
     <ClInclude Include="MathUtils.h" />
