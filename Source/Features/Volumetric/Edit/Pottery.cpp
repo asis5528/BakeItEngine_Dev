@@ -672,61 +672,8 @@ Pottery::~Pottery() {
 	//vkDestroySampler(base->device, computeTexture.imageSampler, nullptr);
 }
 
-static bool KeyPressed = false;
-static bool WKeyDown = false;
-static bool SKeyDown = false;
-static bool AKeyDown = false;
-static bool DKeyDown = false;
-static bool QKeyDown = false;
-static bool EKeyDown = false;
-static bool LeftArrowDown = false;
-static bool RightArrowDown = false;
-static bool AltKeyDown = false;
-static bool ShiftKeyDown = false;
 static int BrushShapeMode = 0; // 0 cube, 1 sphere, 2 plane
 static bool EmissiveMode = false;
-static void key_cb(GLFWwindow* win, int key, int scancode, int action, int mods)
-{
-	const char* act = (action == GLFW_PRESS) ? "down" :
-		(action == GLFW_RELEASE) ? "up" : "repeat";
-
-	std::printf("Key %d %s (mods=%d)\n", key, act, mods);
-
-	// Track general press
-	KeyPressed = (action == GLFW_PRESS);
-	if (key == GLFW_KEY_LEFT_ALT) {
-		AltKeyDown = (action != GLFW_RELEASE);
-	}
-	if (key == GLFW_KEY_LEFT_SHIFT || key == GLFW_KEY_RIGHT_SHIFT) {
-		ShiftKeyDown = (action != GLFW_RELEASE);
-	}
-	// Track specific keys
-	if (key == GLFW_KEY_W)
-		WKeyDown = (action != GLFW_RELEASE);
-	if (key == GLFW_KEY_S)
-		SKeyDown = (action != GLFW_RELEASE);
-	if (key == GLFW_KEY_A)
-		AKeyDown = (action != GLFW_RELEASE);
-	if (key == GLFW_KEY_D)
-		DKeyDown = (action != GLFW_RELEASE);
-	if (key == GLFW_KEY_Q)
-		QKeyDown = (action != GLFW_RELEASE);
-	if (key == GLFW_KEY_E)
-		EKeyDown = (action != GLFW_RELEASE);
-	if (key == GLFW_KEY_LEFT)
-		LeftArrowDown = (action != GLFW_RELEASE);
-	if (key == GLFW_KEY_RIGHT)
-		RightArrowDown = (action != GLFW_RELEASE);
-	if (key == GLFW_KEY_U && action == GLFW_PRESS) {
-		BrushShapeMode = (BrushShapeMode + 1) % 3;
-		const char* shapeName = (BrushShapeMode == 0) ? "Cube" : ((BrushShapeMode == 1) ? "Sphere" : "Plane");
-		std::printf("Brush Shape: %s\n", shapeName);
-	}
-	if (key == GLFW_KEY_I && action == GLFW_PRESS) {
-		EmissiveMode = !EmissiveMode;
-		std::printf("Emissive Mode: %s\n", EmissiveMode ? "ON" : "OFF");
-	}
-}
 
 static float leftBut = 1.0;
 static float BrushRadius = 0.01;
@@ -765,38 +712,39 @@ void Pottery::update(float time)
 	uploadChunkSpatialData();
 	scene->floorBlobShadowCount = 0;
 
-	double mouseX, mouseY;
-	glfwGetCursorPos(base->window, &mouseX, &mouseY);
-	const glm::dvec2 currentCursorPos(mouseX, mouseY);
-	
-	glfwSetKeyCallback(base->window, key_cb);
-	scene->slowZoom = AltKeyDown;
-	const float altSpeed = AltKeyDown ? 0.1f : 1.0f;
+	const Input& in = *scene->input;
+	const glm::dvec2 currentCursorPos = in.mousePos;
+
+	if (in.uPressed) {
+		BrushShapeMode = (BrushShapeMode + 1) % 3;
+		const char* shapeName = (BrushShapeMode == 0) ? "Cube" : ((BrushShapeMode == 1) ? "Sphere" : "Plane");
+		std::printf("Brush Shape: %s\n", shapeName);
+	}
+	if (in.iPressed) {
+		EmissiveMode = !EmissiveMode;
+		std::printf("Emissive Mode: %s\n", EmissiveMode ? "ON" : "OFF");
+	}
+
+	const float altSpeed = in.altDown ? 0.1f : 1.0f;
 	const float brushRadiusStep = 0.0001f * altSpeed;
 	const float brushSmoothnessStep = 0.0001f * altSpeed;
 	const float brushDistanceStep = 0.005f * altSpeed;
-	float msx = mouseX / base->swapChain->swapChainExtent.width;
-	float msy = mouseY / base->swapChain->swapChainExtent.height;
+	float msx = in.mousePos.x / base->swapChain->swapChainExtent.width;
+	float msy = in.mousePos.y / base->swapChain->swapChainExtent.height;
 	// Example: print to console
 	//std::printf("Mouse: (%.1f, %.1f)\n", msx-0.5, msy-0.5);
 	potteryUBO pubo;
 	pubo.time = time*0.05;
-	
-	scene->WKeyDown = WKeyDown;
-	scene->AKeyDown = AKeyDown;
-	scene->SKeyDown = SKeyDown;
-	scene->DKeyDown = DKeyDown;
-	scene->LeftArrowDown = LeftArrowDown;
-	scene->RightArrowDown = RightArrowDown;
-	if(!scene->cameraMoveMode){
-		 if (scene->RightButtonDown) leftBut = 0.0;
-		if (scene->LeftButtonDown) leftBut = 1.0;
-		if (AKeyDown) { BrushRadius += brushRadiusStep; std::cout << BrushRadius << "\n"; }
-		if (DKeyDown) { BrushRadius -= brushRadiusStep; std::cout << BrushRadius << "\n"; }
-		if (QKeyDown) { BrushSmoothness += brushSmoothnessStep; }
-		if (EKeyDown) { BrushSmoothness -= brushSmoothnessStep; }
-		if (WKeyDown) BrushDistanceFromCamera += brushDistanceStep;
-		if (SKeyDown) BrushDistanceFromCamera -= brushDistanceStep;
+
+	if(!in.cameraMoveMode){
+		 if (in.rightButtonDown) leftBut = 0.0;
+		if (in.leftButtonDown) leftBut = 1.0;
+		if (in.aDown) { BrushRadius += brushRadiusStep; std::cout << BrushRadius << "\n"; }
+		if (in.dDown) { BrushRadius -= brushRadiusStep; std::cout << BrushRadius << "\n"; }
+		if (in.qDown) { BrushSmoothness += brushSmoothnessStep; }
+		if (in.eDown) { BrushSmoothness -= brushSmoothnessStep; }
+		if (in.wDown) BrushDistanceFromCamera += brushDistanceStep;
+		if (in.sDown) BrushDistanceFromCamera -= brushDistanceStep;
 
 		if (BrushRadius < 0.001f) BrushRadius = 0.001f;
 		if (BrushSmoothness < 0.0001f) BrushSmoothness = 0.0001f;
@@ -833,7 +781,7 @@ void Pottery::update(float time)
 	pubo.BrushShape = static_cast<float>(BrushShapeMode);
 	pubo.BrushSmoothness = BrushSmoothness;
 	pubo.BrushEmissive = EmissiveMode ? 1.0f : 0.0f;
-	pubo.BrushRecolor = (ShiftKeyDown && scene->LeftButtonDown && !scene->cameraMoveMode) ? 1.0f : 0.0f;
+	pubo.BrushRecolor = (in.shiftDown && in.leftButtonDown && !in.cameraMoveMode) ? 1.0f : 0.0f;
 	scene->brushData = glm::vec4(-brushCenter, BrushRadius);
 	scene->brushUseSphere = (BrushShapeMode == 1);
 	scene->brushShapeMode = BrushShapeMode;
@@ -841,7 +789,6 @@ void Pottery::update(float time)
 	scene->brushSmoothness = BrushSmoothness;
 	scene->brushZAxis = BrushDistanceFromCamera;
 	scene->brushAction = leftBut;
-	scene->ShiftDown = ShiftKeyDown;
 	scene->emissiveMode = EmissiveMode;
 	computeUBO[0].map(base->device, sizeof(potteryUBO), &pubo);
 
@@ -858,7 +805,7 @@ void Pottery::update(float time)
 	
 	//std::cout << "gpuArray[0]: " << gpuArray[10] << std::endl;
 
-	const bool brushPointerDown = !scene->cameraMoveMode && (scene->LeftButtonDown || scene->RightButtonDown);
+	const bool brushPointerDown = !in.cameraMoveMode && (in.leftButtonDown || in.rightButtonDown);
 	const glm::dvec2 cursorDelta = currentCursorPos - previousBrushCursorPos;
 	const bool cursorDragged =
 		wasBrushPointerDown &&

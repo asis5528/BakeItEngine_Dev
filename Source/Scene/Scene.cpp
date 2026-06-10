@@ -230,28 +230,27 @@ void Scene::update(float iTime) {
     
     float angle = (sin(iTime/3.)*3.1415)*0.;
  //   float an = iTime*0.;
-    double mouseX, mouseY;
-    glfwGetCursorPos(base->window, &mouseX, &mouseY);
+    const Input& in = *input;
 
-    float msx = mouseX / base->swapChain->swapChainExtent.width;
-    float msy = mouseY / base->swapChain->swapChainExtent.height;
+    float msx = in.mousePos.x / base->swapChain->swapChainExtent.width;
+    float msy = in.mousePos.y / base->swapChain->swapChainExtent.height;
     static float msxold = 0.0;
 	static float msyold = 0.0;
 	float msxdelta = msx - msxold;
 	float msydelta = msy - msyold;
 	msxold = msx;
 	msyold = msy;
-    
+
 
     //std::cout << msx<<"\n";
-    if(cameraMoveMode){
-       
+    if(in.cameraMoveMode){
+
         an += (msx-0.5)*0.03;
         //std::cout << an << "\n";
 	}
    // angle = 1.4;
    //camPos = glm::vec3(glm::sin(an) * offset,  glm::cos(an)*0., glm::cos(an ) * offset);
-   if (cameraMoveMode) {
+   if (in.cameraMoveMode) {
 	   std::cout << "camPos: " << camPos.x << " " << camPos.y << " " << camPos.z << "\n";
    }
  //  view[0] = glm::lookAt(camPos, glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
@@ -263,15 +262,15 @@ void Scene::update(float iTime) {
    static float rightKey = 0;
    static float leftKey = 0;
    float cameraStep = 0.005;
-   if (slowZoom) cameraStep = 0.0001;
-   forwardKey += WKeyDown ? cameraStep : 0.0;
-   backwardKey += SKeyDown ? cameraStep : 0.0;
-   forwardKey *= WKeyDown ? 1.0 : 0.0;
-   backwardKey *= SKeyDown ? 1.0 : 0.0;
-   rightKey += DKeyDown ? cameraStep : 0.0;
-   leftKey += AKeyDown ? cameraStep : 0.0;
-   rightKey *= DKeyDown ? 1.0 : 0.0;
-   leftKey *= AKeyDown ? 1.0 : 0.0;
+   if (in.altDown) cameraStep = 0.0001;
+   forwardKey += in.wDown ? cameraStep : 0.0;
+   backwardKey += in.sDown ? cameraStep : 0.0;
+   forwardKey *= in.wDown ? 1.0 : 0.0;
+   backwardKey *= in.sDown ? 1.0 : 0.0;
+   rightKey += in.dDown ? cameraStep : 0.0;
+   leftKey += in.aDown ? cameraStep : 0.0;
+   rightKey *= in.dDown ? 1.0 : 0.0;
+   leftKey *= in.aDown ? 1.0 : 0.0;
 
    float upKey = 0;
    float downKey = 0;
@@ -279,12 +278,12 @@ void Scene::update(float iTime) {
    float moveR = rightKey - leftKey;      // D/A
    float moveU = upKey - downKey;      // Space/Shift
    float rollInput = 0.0f;
-   rollInput += LeftArrowDown ? 1.0f : 0.0f;
-   rollInput -= RightArrowDown ? 1.0f : 0.0f;
+   rollInput += in.leftArrowDown ? 1.0f : 0.0f;
+   rollInput -= in.rightArrowDown ? 1.0f : 0.0f;
    static FreeCam cam;
-   if (cameraMoveMode || LeftArrowDown || RightArrowDown) {
-       float mouseDx = cameraMoveMode ? dx : 0.0f;
-       float mouseDy = cameraMoveMode ? dy : 0.0f;
+   if (in.cameraMoveMode || in.leftArrowDown || in.rightArrowDown) {
+       float mouseDx = in.cameraMoveMode ? dx : 0.0f;
+       float mouseDy = in.cameraMoveMode ? dy : 0.0f;
        UpdateFreeCamera(cam, view[0], mouseDx, mouseDy, moveF, moveR, moveU, rollInput, delTime);
        camPos = cam.pos;
    }

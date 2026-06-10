@@ -2,6 +2,7 @@ C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\World\Animat
 C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\ComputeShaderPipelines.cpp;C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\x64\Debug\ComputeShaderPipelines.obj
 C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\Features\Fluid\GaussianFluidSim.cpp;C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\x64\Debug\GaussianFluidSim.obj
 C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\Features\Volumetric\Edit\Pottery.cpp;C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\x64\Debug\Pottery.obj
+C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\Platform\Desktop\Input.cpp;C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\x64\Debug\Input.obj
 C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\Core\Pipelines\ComputePipeline.cpp;C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\x64\Debug\ComputePipeline.obj
 C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\Editor\EditorGui.cpp;C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\x64\Debug\EditorGui.obj
 C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\Core\Pipelines\GraphicsPipeline.cpp;C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\x64\Debug\GraphicsPipeline.obj

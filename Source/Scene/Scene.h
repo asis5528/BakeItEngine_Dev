@@ -6,6 +6,7 @@
 #include "ScenePipelines.h"
 #include "Render/PostProcess/PostProcessingManager.h"
 #include "Core/Resources/PGEResourceTypes.h"
+#include "Platform/Desktop/Input.h"
 #include <array>
 
 
@@ -47,20 +48,8 @@ public:
 	float camFarPlane = 100.0f;
 	glm::vec3 camPos;
 	float offset = 2.;
-	bool slowZoom = false;
 	bool dispatch = false;
-	 bool ButtonPressed = false;
-	 bool LeftButtonDown = false;
-	 bool MiddleButtonDown = false;
-	 bool RightButtonDown = false;
-	 bool ShiftDown = false;
-	 bool cameraMoveMode = false; // toggled by middle mouse press
-	 bool WKeyDown = false;
-	 bool SKeyDown = false;
-	 bool AKeyDown = false;
-	 bool DKeyDown = false;
-	 bool LeftArrowDown = false;
-	 bool RightArrowDown = false;
+	const Input* input = nullptr; // routed input, owned by Platform (wired in main.cpp)
 	 glm::vec4 brushData = glm::vec4(0.0f, 0.0f, 0.2f, 0.01f);
 	 glm::vec4 brushColor = glm::vec4(1.0f, 0.35f, 0.75f, 1.0f);
 	 bool brushUseSphere = false;

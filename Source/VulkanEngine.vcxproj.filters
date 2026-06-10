@@ -131,6 +131,9 @@
     <ClCompile Include="Core\Resources\ResourceManager.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Platform\Desktop\Input.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="Features\Volumetric\Edit\Pottery.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -196,6 +199,7 @@
     <ClInclude Include="Core\Resources\PGEResourceTypes.h" />
     <ClInclude Include="Features\Volumetric\Edit\Pottery.h" />
     <ClInclude Include="Features\Volumetric\SdfVolume.h" />
+    <ClInclude Include="Platform\Desktop\Input.h" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="REMAINDER.txt" />

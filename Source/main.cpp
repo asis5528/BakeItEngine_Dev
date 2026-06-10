@@ -77,6 +77,7 @@ const bool enableValidationLayers = true;
 #include "Core/Vulkan/VulkanUtils.h"
 #include "ComputeShaderPipelines.h"
 #include "Core/Resources/ResourceManager.h"
+#include "Platform/Desktop/Input.h"
 
 
 
@@ -116,6 +117,7 @@ private:
     int computeDimension[3] = { 128,128,128 };
 
     ComputeShaderPipelines *clines;
+    DesktopInput input;
     void initWindow() {
         glfwInit();
 
@@ -126,25 +128,10 @@ private:
         glfwSetWindowUserPointer(window, this);
         glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
         glfwSetDropCallback(window, dropCallback);
-        glfwSetMouseButtonCallback(window, mouse_button_cbb);
-         
-    }
-    static void mouse_button_cbb(GLFWwindow* win, int button, int action, int mods) {
-        auto app = reinterpret_cast<Vulkan*>(glfwGetWindowUserPointer(win));
-		Scene* scene = app->scene;
+        // All key/mouse-button/scroll callbacks live in Platform/Desktop.
+        // Installed before ImGui init so ImGui chain-calls them.
+        input.install(window);
 
-        // now you can safely access members
-        scene->ButtonPressed = (action == GLFW_PRESS);
-        scene->ShiftDown = ((mods & GLFW_MOD_SHIFT) != 0);
-
-        if (button == GLFW_MOUSE_BUTTON_LEFT)
-            scene->LeftButtonDown = (action == GLFW_PRESS);
-        else if (button == GLFW_MOUSE_BUTTON_RIGHT)
-            scene->RightButtonDown = (action == GLFW_PRESS);
-        else if (button == GLFW_MOUSE_BUTTON_MIDDLE && action == GLFW_PRESS) {
-            scene->cameraMoveMode = !scene->cameraMoveMode;
-            scene->MiddleButtonDown = scene->cameraMoveMode; // keep legacy path behavior aligned
-        }
     }
     static void dropCallback(GLFWwindow* window, int path_count, const char* paths[]) {
 
@@ -164,21 +151,6 @@ private:
 
     }
 
-    static void scroll_callback(GLFWwindow* window, double xoffset, double yoffset)
-    {
-        auto app = reinterpret_cast<Vulkan*>(glfwGetWindowUserPointer(window));
-        if (app->scene->slowZoom) {
-            app->scene->offset -= float(yoffset) * 0.001;
-        }
-        else {
-            app->scene->offset -= float(yoffset) * 0.1;
-        }
-        
-    }
-
-    static void  mouse_callback(GLFWwindow* window, double xpos, double ypos) {
-        std::cout << xpos << "\n";
-    }
 
     static void framebufferResizeCallback(GLFWwindow* window, int width, int height) {
         if (!window) return;
@@ -207,6 +179,7 @@ private:
         ResourceManager::setVulkanBase(base);
         // ResourceManager& resourceManager = ResourceManager::getInstance();
         scene = new Scene(base);
+        scene->input = &input.state;
         loader = new Loader(base, scene);
         editorGui = new EditorGui(scene, base);
 
@@ -294,16 +267,15 @@ private:
         guitex.imageView = scene->postprocessingManager->framebuffers[scene->postprocessingManager->bufferSize - 1]->MultisampledColorImage->imageView;
         guitex.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         editorGui->createdescriptor(guitex);
-        glfwSetScrollCallback(window, scroll_callback);
-      //  glfwSetCursorPosCallback(window, mouse_callback);
-        
     }
 
     void mainLoop() {
         while (!glfwWindowShouldClose(window)) {
             current_ticks = clock();
             glfwPollEvents();
-            
+            input.update();
+            scene->offset -= float(input.state.scrollDelta) * (input.state.altDown ? 0.001f : 0.1f);
+
             drawFrame();
             delta_ticks = clock() - current_ticks; //the time, in ms, that took to render the scene
             if (delta_ticks > 0)

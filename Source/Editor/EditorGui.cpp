@@ -296,7 +296,7 @@ void DrawSdfAtlasUsageBar(const char* label, float fraction, int usedBricks, int
          ImGui::Text("Vol Indices: %d", static_cast<int>(volumetricMesh->indices.size()));
          ImGui::Text("Vol Instances: %u / %u", volumetricMesh->instanceCount, volumetricMesh->instanceCapacity);
      }
-     ImGui::Text("Mode: %s (MMB toggle)", m_scene->cameraMoveMode ? "Camera" : "Edit");
+     ImGui::Text("Mode: %s (MMB toggle)", (m_scene->input && m_scene->input->cameraMoveMode) ? "Camera" : "Edit");
      ImGui::Text("Shift+LMB: Recolor existing blocks");
      ImGui::End();
     
