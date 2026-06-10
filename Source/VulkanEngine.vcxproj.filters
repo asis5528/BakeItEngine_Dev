@@ -18,7 +18,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="shaders\ComputeShaders\VolumetricBrushCS.comp" />
-    <None Include="shaders\ComputeShaders\sdfCompute_lod1.comp" />
+    <None Include="shaders\ComputeShaders\VolumetricLod1CS.comp" />
     <None Include="shaders\ComputeShaders\GaussianFluidSim.comp" />
     <None Include="shaders\ComputeShaders\MeshtoSdf.comp" />
   </ItemGroup>

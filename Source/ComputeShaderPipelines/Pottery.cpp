@@ -186,7 +186,7 @@ Pottery::Pottery(VulkanBase* base, Scene* scene)
 	};
 	comp = new ComputePipeline(base, input);
 	ComputeInput lodInput;
-	lodInput.computeShaderPath = "shaders/ComputeShaders/sdfCompute_lod1.spv";
+	lodInput.computeShaderPath = "shaders/ComputeShaders/VolumetricLod1CS.spv";
 	lodInput.descriptorTypes = {
 		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
