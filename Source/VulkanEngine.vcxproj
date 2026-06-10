@@ -164,10 +164,10 @@ if exist "$(SolutionDir)ThirdParty\Libs\glfw3.dll" copy /Y "$(SolutionDir)ThirdP
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <None Include="shaders\ComputeShaders\GaussianFluidSimCS.comp" />
-    <None Include="shaders\ComputeShaders\MeshToSdfCS.comp" />
-    <None Include="shaders\ComputeShaders\VolumetricBrushCS.comp" />
-    <None Include="shaders\ComputeShaders\VolumetricLod1CS.comp" />
+    <None Include="shaders\Fluid\GaussianFluidSimCS.comp" />
+    <None Include="shaders\Volumetric\MeshToSdfCS.comp" />
+    <None Include="shaders\Volumetric\VolumetricBrushCS.comp" />
+    <None Include="shaders\Volumetric\VolumetricLod1CS.comp" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="World\Animation.cpp" />

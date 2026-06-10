@@ -8,8 +8,8 @@ ScenePipelines::ScenePipelines(VulkanBase *base,VkRenderPass renderPass) {
     GraphicsPipeline* opipe = new GraphicsPipeline();
     pipelines.push_back(opipe);
     PipelineInput input;
-    input.vertexShaderpath = "shaders/ObjectShaders/ObjectShaderVS.spv";
-    input.fragmentShaderpath = "shaders/ObjectShaders/ObjectTexturedFS.spv";
+    input.vertexShaderpath = "shaders/World/ObjectShaderVS.spv";
+    input.fragmentShaderpath = "shaders/World/ObjectTexturedFS.spv";
     input.renderPass = renderPass;
     //   input.MultiviewLayer = frameBuffer[0].multiLayerView;
     input.device = base->device;
@@ -26,7 +26,7 @@ ScenePipelines::ScenePipelines(VulkanBase *base,VkRenderPass renderPass) {
     GraphicsPipeline* skinned = new GraphicsPipeline();
     pipelines.push_back(skinned);
     input.skinned = true;
-    input.vertexShaderpath = "shaders/ObjectShaders/ObjectSkinnedVS.spv";
+    input.vertexShaderpath = "shaders/World/ObjectSkinnedVS.spv";
     pipelines[1]->bufferSize = { sizeof(SkinnedUniformBufferObject),sizeof(ubo1) };
     pipelines[1]->setupPipeline(input);
     pipelines[1]->createGraphicsPipeline();
@@ -34,8 +34,8 @@ ScenePipelines::ScenePipelines(VulkanBase *base,VkRenderPass renderPass) {
     GraphicsPipeline* basic = new GraphicsPipeline();
     pipelines.push_back(basic);
     input.skinned = false;
-    input.vertexShaderpath = "shaders/ObjectShaders/ObjectShaderVS.spv";
-    input.fragmentShaderpath = "shaders/ObjectShaders/ObjectBasicFS.spv";
+    input.vertexShaderpath = "shaders/World/ObjectShaderVS.spv";
+    input.fragmentShaderpath = "shaders/World/ObjectBasicFS.spv";
 
     input.descriptorTypes = { descriptorTypes{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_SHADER_STAGE_VERTEX_BIT},
        descriptorTypes{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_SHADER_STAGE_FRAGMENT_BIT} };
@@ -47,7 +47,7 @@ ScenePipelines::ScenePipelines(VulkanBase *base,VkRenderPass renderPass) {
     GraphicsPipeline* skinnedBasic = new GraphicsPipeline();
     pipelines.push_back(skinnedBasic);
     input.skinned = true;
-    input.vertexShaderpath = "shaders/ObjectShaders/ObjectSkinnedVS.spv";
+    input.vertexShaderpath = "shaders/World/ObjectSkinnedVS.spv";
     pipelines[3]->bufferSize = { sizeof(SkinnedUniformBufferObject),sizeof(BasicUbo) };
     pipelines[3]->setupPipeline(input);
     pipelines[3]->createGraphicsPipeline();
@@ -56,8 +56,8 @@ ScenePipelines::ScenePipelines(VulkanBase *base,VkRenderPass renderPass) {
     volumetric->frontFaceCull = 1;
     pipelines.push_back(volumetric);
     input.skinned = false;
-    input.vertexShaderpath = "shaders/ObjectShaders/ObjectVolumetricVS.spv";
-    input.fragmentShaderpath = "shaders/ObjectShaders/ObjectVolumetricFS.spv";
+    input.vertexShaderpath = "shaders/Volumetric/ObjectVolumetricVS.spv";
+    input.fragmentShaderpath = "shaders/Volumetric/ObjectVolumetricFS.spv";
     input.useInstanceIdAttribute = true;
 
     input.descriptorTypes = { descriptorTypes{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_SHADER_STAGE_ALL_GRAPHICS},

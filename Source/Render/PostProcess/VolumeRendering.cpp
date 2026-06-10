@@ -54,7 +54,7 @@ VolumeRendering::VolumeRendering(VulkanBase* base,Scene *scene, Framebuffer* pre
     
 	volumeUBO = base->vbuffer->createUniformBuffers({ sizeof(CameraUBO)  });
 
-    quad->createGraphicsPipeline("shaders/PostProcessing/VolumePassVS.spv", "shaders/PostProcessing/VolumePassFS.spv",VolumeDescriptorTypes);
+    quad->createGraphicsPipeline("shaders/Render/VolumePassVS.spv", "shaders/Render/VolumePassFS.spv",VolumeDescriptorTypes);
     VulkanTexture quadtex;
     quadtex.imageView = previousFB->MultisampledColorImage->imageView;
     quadtex.imageSampler = base->vbuffer->createTextureSampler(1);
@@ -90,7 +90,7 @@ VolumeRendering::VolumeRendering(VulkanBase* base,Scene *scene, Framebuffer* pre
     std::vector<descriptorTypes> copyDescTypes = {
         descriptorTypes{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT }
     };
-    copyQuad->createGraphicsPipeline("shaders/PostProcessing/VolumePassVS.spv", "shaders/PostProcessing/TaaHistoryCopyFS.spv", copyDescTypes);
+    copyQuad->createGraphicsPipeline("shaders/Render/VolumePassVS.spv", "shaders/Render/TaaHistoryCopyFS.spv", copyDescTypes);
     VulkanTexture copySrcTex;
     copySrcTex.imageView = framebuffers[0]->MultisampledColorImage->imageView;
     copySrcTex.imageSampler = base->vbuffer->createTextureSampler(1);

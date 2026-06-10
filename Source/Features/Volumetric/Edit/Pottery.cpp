@@ -173,7 +173,7 @@ Pottery::Pottery(VulkanBase* base, Scene* scene)
 	int size = blocksPerAxis * blockDim; // 64 * 8 = 512
 
 	ComputeInput input;
-	input.computeShaderPath = "shaders/ComputeShaders/VolumetricBrushCS.spv";
+	input.computeShaderPath = "shaders/Volumetric/VolumetricBrushCS.spv";
 	input.descriptorTypes = {
 		VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
 		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
@@ -186,7 +186,7 @@ Pottery::Pottery(VulkanBase* base, Scene* scene)
 	};
 	comp = new ComputePipeline(base, input);
 	ComputeInput lodInput;
-	lodInput.computeShaderPath = "shaders/ComputeShaders/VolumetricLod1CS.spv";
+	lodInput.computeShaderPath = "shaders/Volumetric/VolumetricLod1CS.spv";
 	lodInput.descriptorTypes = {
 		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
