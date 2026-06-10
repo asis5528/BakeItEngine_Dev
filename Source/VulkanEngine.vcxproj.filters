@@ -195,6 +195,7 @@
     <ClInclude Include="Core\Resources\ResourceManager.h" />
     <ClInclude Include="Core\Resources\PGEResourceTypes.h" />
     <ClInclude Include="Features\Volumetric\Edit\Pottery.h" />
+    <ClInclude Include="Features\Volumetric\SdfVolume.h" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="REMAINDER.txt" />

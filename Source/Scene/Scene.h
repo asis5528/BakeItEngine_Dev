@@ -72,12 +72,6 @@ public:
 	 bool emissiveMode = false; // toggled with I
 	 bool taaEnabled = true;
 	 bool renderPassDirty = true;
-	 int dirtyBlockCount = 0;
-	 int sdfAtlasUsedBricks = 0;
-	 int sdfAtlasCapacityBricks = 0;
-	 int sdfAtlasTailBricks = 0;
-	 int sdfAtlasFreeBricks = 0;
-	 float sdfAtlasUsage = 0.0f;
 	 std::array<glm::vec4, MaxFloorBlobShadows> floorBlobShadows{};
 	 std::array<glm::vec4, MaxFloorBlobShadows> floorBlobBounceColors{};
 	 int floorBlobShadowCount = 0;

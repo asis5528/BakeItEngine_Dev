@@ -220,11 +220,11 @@ Pottery::Pottery(VulkanBase* base, Scene* scene)
 	computeSBO[1].map(base->device, sizeof(int32_t) * initialFineBlocks.size(), initialFineBlocks.data());
 	computeSBO[3].map(base->device, sizeof(glm::vec4) * initialFineColors.size(), initialFineColors.data());
 	fineActiveIds.clear();
-	scene->sdfAtlasCapacityBricks = atlasCapacityBricks;
-	scene->sdfAtlasUsedBricks = 0;
-	scene->sdfAtlasTailBricks = 0;
-	scene->sdfAtlasFreeBricks = 0;
-	scene->sdfAtlasUsage = 0.0f;
+	volume.stats.capacityBricks = atlasCapacityBricks;
+	volume.stats.usedBricks = 0;
+	volume.stats.tailBricks = 0;
+	volume.stats.freeBricks = 0;
+	volume.stats.usage = 0.0f;
 
 	uploadChunkSpatialData();
 
@@ -904,10 +904,10 @@ void Pottery::update(float time)
 			computeSBO[1].read(base->device, sizeof(int32_t) * blockState.size(), blockState.data());
 			fineActiveIds = BuildAllocatedActiveIds(blockState);
 			base->vbuffer->updateInstanceIdBuffer(*targetMesh, fineActiveIds);
-			scene->dirtyBlockCount = static_cast<int>(fineActiveIds.size());
+			volume.stats.dirtyBlockCount = static_cast<int>(fineActiveIds.size());
 			scene->renderPassDirty = true;
 		}
-		
+
 		if (computeReady) {
 			pubo.DispatchBaseBlock = glm::ivec4(dispatchBlockMin, 0);
 			computeUBO[0].map(base->device, sizeof(potteryUBO), &pubo);
@@ -994,15 +994,15 @@ void Pottery::update(float time)
 				if (targetMesh && targetMesh->hasInstanceIdBuffer) {
 					base->vbuffer->updateInstanceIdBuffer(*targetMesh, fineActiveIds);
 				}
-				scene->dirtyBlockCount = static_cast<int>(fineActiveIds.size());
+				volume.stats.dirtyBlockCount = static_cast<int>(fineActiveIds.size());
 
 				int gpuValue = 0;
 				int freeBrickCount = 0;
 				computeSBO[2].read(base->device, sizeof(int), &gpuValue);
 				computeSBO[6].read(base->device, sizeof(int), &freeBrickCount);
-				scene->sdfAtlasTailBricks = gpuValue / kBrickSamplesPerBlock;
-				scene->sdfAtlasFreeBricks = glm::max(freeBrickCount, 0);
-				scene->sdfAtlasUsedBricks = glm::max(scene->sdfAtlasTailBricks - scene->sdfAtlasFreeBricks, 0);
+				volume.stats.tailBricks = gpuValue / kBrickSamplesPerBlock;
+				volume.stats.freeBricks = glm::max(freeBrickCount, 0);
+				volume.stats.usedBricks = glm::max(volume.stats.tailBricks - volume.stats.freeBricks, 0);
 
 				pendingStrictSurfaceScan = false;
 				pendingLod1Rebuild = true;
@@ -1040,14 +1040,14 @@ void Pottery::update(float time)
 		updateLodSelection();
 	}
 
-	if (scene->sdfAtlasCapacityBricks > 0) {
-		scene->sdfAtlasUsage = glm::clamp(
-			static_cast<float>(scene->sdfAtlasUsedBricks) /
-			static_cast<float>(scene->sdfAtlasCapacityBricks),
+	if (volume.stats.capacityBricks > 0) {
+		volume.stats.usage = glm::clamp(
+			static_cast<float>(volume.stats.usedBricks) /
+			static_cast<float>(volume.stats.capacityBricks),
 			0.0f,
 			1.0f);
 	}
 	else {
-		scene->sdfAtlasUsage = 0.0f;
+		volume.stats.usage = 0.0f;
 	}
 }

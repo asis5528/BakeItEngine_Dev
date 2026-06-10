@@ -273,19 +273,22 @@ void DrawSdfAtlasUsageBar(const char* label, float fraction, int usedBricks, int
      ImGui::Text("Z Offset: %.4f (W/S)", m_scene->brushZAxis);
      ImGui::Text("Action  : %s", (m_scene->brushAction < 0.5f) ? "Remove (RMB)" : "Add (LMB)");
      ImGui::Text("Emissive Paint: %s (I)", m_scene->emissiveMode ? "On" : "Off");
-     ImGui::Text("Dirty Blocks: %d", m_scene->dirtyBlockCount);
-     DrawSdfAtlasUsageBar(
-         "SDF Atlas",
-         m_scene->sdfAtlasUsage,
-         m_scene->sdfAtlasUsedBricks,
-         m_scene->sdfAtlasCapacityBricks);
-     const int atlasLeftBricks =
-         (m_scene->sdfAtlasCapacityBricks > m_scene->sdfAtlasUsedBricks)
-         ? (m_scene->sdfAtlasCapacityBricks - m_scene->sdfAtlasUsedBricks)
-         : 0;
-     ImGui::Text("Atlas Left: %d bricks", atlasLeftBricks);
-     ImGui::Text("Atlas Tail: %d bricks", m_scene->sdfAtlasTailBricks);
-     ImGui::Text("Free Stack: %d bricks", m_scene->sdfAtlasFreeBricks);
+     if (sdfVolume) {
+         const SdfVolumeStats& atlas = sdfVolume->stats;
+         ImGui::Text("Dirty Blocks: %d", atlas.dirtyBlockCount);
+         DrawSdfAtlasUsageBar(
+             "SDF Atlas",
+             atlas.usage,
+             atlas.usedBricks,
+             atlas.capacityBricks);
+         const int atlasLeftBricks =
+             (atlas.capacityBricks > atlas.usedBricks)
+             ? (atlas.capacityBricks - atlas.usedBricks)
+             : 0;
+         ImGui::Text("Atlas Left: %d bricks", atlasLeftBricks);
+         ImGui::Text("Atlas Tail: %d bricks", atlas.tailBricks);
+         ImGui::Text("Free Stack: %d bricks", atlas.freeBricks);
+     }
      int volumetricMeshId = -1;
      if (const Mesh* volumetricMesh = FindFirstVolumetricMesh(m_scene, &volumetricMeshId)) {
          ImGui::Separator();

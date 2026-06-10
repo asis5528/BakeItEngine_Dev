@@ -1,10 +1,12 @@
 #pragma once
 #include "Scene/Scene.h"
+#include "Features/Volumetric/SdfVolume.h"
 class EditorGui
 {
 public:
 	Scene* m_scene;
 	VulkanBase* m_base;
+	const SdfVolume* sdfVolume = nullptr; // wired in main.cpp once Pottery exists
 	int frameID = 0;
 	std::vector<VkDescriptorSet> ds;
 	VkSampler texturesamp;

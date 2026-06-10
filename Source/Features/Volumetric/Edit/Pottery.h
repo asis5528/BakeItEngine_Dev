@@ -1,11 +1,13 @@
 #pragma once
 #include "Scene/Scene.h"
 #include "Core/Pipelines/ComputePipeline.h"
+#include "Features/Volumetric/SdfVolume.h"
 #include <glm/glm.hpp>
 #include <vector>
 class Pottery
 {
 public:
+	SdfVolume volume;
 	struct SnapshotChunk
 	{
 		size_t objectIndex = 0;
