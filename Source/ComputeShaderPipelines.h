@@ -3,8 +3,8 @@
 #include "World/Scene.h"
 #include "Core/Pipelines/ComputePipeline.h"
 #include "Features/Fluid/GaussianFluidSim.h"
-#include "Features/Volumetric/Bake/MeshToSdf.h"
-#include "Features/Volumetric/Edit/Pottery.h"
+#include "Features/Sdf/Bake/MeshToSdf.h"
+#include "Features/Sdf/Edit/SdfEditor.h"
 #include "EngineContext.h"
 class ComputeShaderPipelines
 {
@@ -26,7 +26,7 @@ public:
 
     GaussianFluidSim *fluidSim;
     MeshToSdf *meshtosdf;
-    Pottery* pottery;
+    SdfEditor* sdfEditor;
     ComputeShaderPipelines(EngineContext& ctx);
     ~ComputeShaderPipelines();
     void update(float time);

@@ -165,15 +165,15 @@ if exist "$(SolutionDir)ThirdParty\Libs\glfw3.dll" copy /Y "$(SolutionDir)ThirdP
   </ItemDefinitionGroup>
   <ItemGroup>
     <None Include="shaders\Fluid\GaussianFluidSimCS.comp" />
-    <None Include="shaders\Volumetric\MeshToSdfCS.comp" />
-    <None Include="shaders\Volumetric\VolumetricBrushCS.comp" />
-    <None Include="shaders\Volumetric\VolumetricLod1CS.comp" />
+    <None Include="shaders\Sdf\MeshToSdfCS.comp" />
+    <None Include="shaders\Sdf\SdfBrushCS.comp" />
+    <None Include="shaders\Sdf\SdfLod1CS.comp" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="World\Animation.cpp" />
     <ClCompile Include="ComputeShaderPipelines.cpp" />
     <ClCompile Include="Features\Fluid\GaussianFluidSim.cpp" />
-    <ClCompile Include="Features\Volumetric\Edit\Pottery.cpp" />
+    <ClCompile Include="Features\Sdf\Edit\SdfEditor.cpp" />
     <ClCompile Include="Platform\Desktop\Input.cpp" />
     <ClCompile Include="World\Camera\Camera.cpp" />
     <ClCompile Include="Core\Pipelines\ComputePipeline.cpp" />
@@ -200,7 +200,7 @@ if exist "$(SolutionDir)ThirdParty\Libs\glfw3.dll" copy /Y "$(SolutionDir)ThirdP
     <ClCompile Include="Editor\VulkanImgui.cpp" />
     <ClCompile Include="World\Material.cpp" />
     <ClCompile Include="Core\Math\MathUtils.cpp" />
-    <ClCompile Include="Features\Volumetric\Bake\MeshToSdf.cpp" />
+    <ClCompile Include="Features\Sdf\Bake\MeshToSdf.cpp" />
     <ClCompile Include="World\Model.cpp" />
     <ClCompile Include="World\Object.cpp" />
     <ClCompile Include="Render\PostProcess\PostProcessingManager.cpp" />
@@ -217,9 +217,9 @@ if exist "$(SolutionDir)ThirdParty\Libs\glfw3.dll" copy /Y "$(SolutionDir)ThirdP
     <ClInclude Include="ComputeShaderPipelines.h" />
     <ClInclude Include="EngineContext.h" />
     <ClInclude Include="Features\Fluid\GaussianFluidSim.h" />
-    <ClInclude Include="Features\Volumetric\Edit\Pottery.h" />
-    <ClInclude Include="Features\Volumetric\SdfVolume.h" />
-    <ClInclude Include="Features\Volumetric\Edit\BrushState.h" />
+    <ClInclude Include="Features\Sdf\Edit\SdfEditor.h" />
+    <ClInclude Include="Features\Sdf\SdfVolume.h" />
+    <ClInclude Include="Features\Sdf\Edit\BrushState.h" />
     <ClInclude Include="Platform\Desktop\Input.h" />
     <ClInclude Include="World\Camera\Camera.h" />
     <ClInclude Include="Core\Pipelines\ComputePipeline.h" />
@@ -247,7 +247,7 @@ if exist "$(SolutionDir)ThirdParty\Libs\glfw3.dll" copy /Y "$(SolutionDir)ThirdP
     <ClInclude Include="World\Loader.h" />
     <ClInclude Include="World\Material.h" />
     <ClInclude Include="Core\Math\MathUtils.h" />
-    <ClInclude Include="Features\Volumetric\Bake\MeshToSdf.h" />
+    <ClInclude Include="Features\Sdf\Bake\MeshToSdf.h" />
     <ClInclude Include="World\Model.h" />
     <ClInclude Include="World\Object.h" />
     <ClInclude Include="Core\Resources\ResourceTypes.h" />

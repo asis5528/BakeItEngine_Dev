@@ -16,16 +16,16 @@ ComputeShaderPipelines::ComputeShaderPipelines(EngineContext& ctx) {
     this->scene = ctx.scene;
     meshtosdf = new MeshToSdf(ctx);
     fluidSim = new GaussianFluidSim(ctx, meshtosdf->computeTexture);
-	pottery = new Pottery(ctx);
+	sdfEditor = new SdfEditor(ctx);
   //  ct3D = fluidSim->computeTexture;
-	scene->SBOs.push_back(pottery->computeSBO);
-	scene->SBOs.push_back(pottery->lod1SBO);
+	scene->SBOs.push_back(sdfEditor->computeSBO);
+	scene->SBOs.push_back(sdfEditor->lod1SBO);
    // scene->ptextures.push_back(fluidSim->computeTexture);
 }
 ComputeShaderPipelines::~ComputeShaderPipelines() {
     delete meshtosdf;
     delete fluidSim;
-    delete pottery;
+    delete sdfEditor;
 }
 
 void ComputeShaderPipelines::update(float time) {
@@ -33,14 +33,14 @@ void ComputeShaderPipelines::update(float time) {
    // glfwSetMouseButtonCallback(base->window, mouse_button_cb);
     //fluidSim->update(time);
  //   if (ButtonPressed ||time<0.01) {
-        pottery->update(time);
+        sdfEditor->update(time);
    // }
 }
 
 void ComputeShaderPipelines::createStaticFloorObject() {
-    pottery->createStaticFloorObject();
+    sdfEditor->createStaticFloorObject();
 }
 
 void ComputeShaderPipelines::createLodObjects() {
-    pottery->createLodObjects();
+    sdfEditor->createLodObjects();
 }

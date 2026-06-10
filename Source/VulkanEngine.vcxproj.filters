@@ -17,10 +17,10 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <None Include="shaders\Volumetric\VolumetricBrushCS.comp" />
-    <None Include="shaders\Volumetric\VolumetricLod1CS.comp" />
+    <None Include="shaders\Sdf\SdfBrushCS.comp" />
+    <None Include="shaders\Sdf\SdfLod1CS.comp" />
     <None Include="shaders\Fluid\GaussianFluidSimCS.comp" />
-    <None Include="shaders\Volumetric\MeshToSdfCS.comp" />
+    <None Include="shaders\Sdf\MeshToSdfCS.comp" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp">
@@ -128,7 +128,7 @@
     <ClCompile Include="Render\PostProcess\PostProcessingManager.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Features\Volumetric\Bake\MeshToSdf.cpp">
+    <ClCompile Include="Features\Sdf\Bake\MeshToSdf.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Core\Resources\ResourceManager.cpp">
@@ -140,7 +140,7 @@
     <ClCompile Include="Platform\Desktop\Input.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Features\Volumetric\Edit\Pottery.cpp">
+    <ClCompile Include="Features\Sdf\Edit\SdfEditor.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -202,12 +202,12 @@
     <ClInclude Include="Render\PostProcess\PostProcessPass.h" />
     <ClInclude Include="Render\PostProcess\PostProcessingManager.h" />
     <ClInclude Include="Render\Renderer.h" />
-    <ClInclude Include="Features\Volumetric\Bake\MeshToSdf.h" />
+    <ClInclude Include="Features\Sdf\Bake\MeshToSdf.h" />
     <ClInclude Include="Core\Resources\ResourceManager.h" />
     <ClInclude Include="Core\Resources\ResourceTypes.h" />
-    <ClInclude Include="Features\Volumetric\Edit\Pottery.h" />
-    <ClInclude Include="Features\Volumetric\SdfVolume.h" />
-    <ClInclude Include="Features\Volumetric\Edit\BrushState.h" />
+    <ClInclude Include="Features\Sdf\Edit\SdfEditor.h" />
+    <ClInclude Include="Features\Sdf\SdfVolume.h" />
+    <ClInclude Include="Features\Sdf\Edit\BrushState.h" />
     <ClInclude Include="Platform\Desktop\Input.h" />
     <ClInclude Include="World\Camera\Camera.h" />
   </ItemGroup>

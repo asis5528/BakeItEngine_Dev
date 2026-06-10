@@ -2,8 +2,8 @@
 
 // Public contract for the sparse SDF volume (brick atlas).
 //
-// Owner: Features/Volumetric. Pottery (Edit/) writes it; other features and
-// the Editor read it through this header instead of reaching into Pottery
+// Owner: Features/Volumetric. SdfEditor (Edit/) writes it; other features and
+// the Editor read it through this header instead of reaching into SdfEditor
 // internals or Scene fields.
 //
 // Grows as consumers appear. Next candidates to migrate here:

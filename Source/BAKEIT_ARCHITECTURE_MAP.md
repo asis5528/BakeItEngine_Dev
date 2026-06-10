@@ -20,9 +20,9 @@ Source/
 │   │                          # Animation, AnimationData, Loader
 │   └── Camera/                # Camera: proj/view[2], free-fly, viewportResolution
 ├── Features/                  # Vertical slices: each owns all its GPU stages
-│   ├── Volumetric/            # ★ the SDF research core
+│   ├── Sdf/            # ★ the SDF research core
 │   │   ├── SdfVolume.h        #   public contract: atlas stats (grows as needed)
-│   │   ├── Edit/              #   Pottery (brush editor) + BrushState contract
+│   │   ├── Edit/              #   SdfEditor (brush editor) + BrushState contract
 │   │   └── Bake/              #   MeshToSdf
 │   └── Fluid/                 # GaussianFluidSim
 ├── Render/                    # Renderer (resources + frame recording),
@@ -33,12 +33,12 @@ Source/
 ├── Imgui/                     # vendored third-party — leave alone
 ├── shaders/                   # mirrors features; compiled by recursive compile.bat
 │   ├── World/                 # ObjectShaderVS/SkinnedVS/TexturedFS/BasicFS
-│   ├── Volumetric/            # ObjectVolumetricVS/FS, VolumetricBrushCS,
-│   │                          # VolumetricLod1CS, MeshToSdfCS
+│   ├── Sdf/            # ObjectVolumetricVS/FS, SdfBrushCS,
+│   │                          # SdfLod1CS, MeshToSdfCS
 │   ├── Fluid/                 # GaussianFluidSimCS
 │   └── Render/                # PostPassVS/FS
 ├── EngineContext.h            # root wiring struct passed to subsystem ctors
-├── ComputeShaderPipelines.*   # thin per-frame compute fan-out (Pottery, MeshToSdf)
+├── ComputeShaderPipelines.*   # thin per-frame compute fan-out (SdfEditor, MeshToSdf)
 └── main.cpp                   # Vulkan class: owns everything below
 ```
 
@@ -55,10 +55,10 @@ Vulkan (main.cpp)
 ├── Scene* scene                (World data + wiring pointers, see §3)
 ├── EngineContext ctx           {base, scene, renderer, camera, input}
 ├── Loader* loader              (ctx)
-├── EditorGui* editorGui        (ctx; + SdfVolume*/BrushState* from Pottery)
+├── EditorGui* editorGui        (ctx; + SdfVolume*/BrushState* from SdfEditor)
 ├── VulkanImgui* vulkanImgui
 └── ComputeShaderPipelines* clines (ctx)
-    ├── Pottery* (ctx)          — the volumetric brush editor
+    ├── SdfEditor* (ctx)          — the volumetric brush editor
     ├── MeshToSdf* (ctx)
     └── GaussianFluidSim* (ctx)
 ```
@@ -74,16 +74,16 @@ Former responsibilities and where they went:
 |---|---|
 | camera matrices, fov/near/far, viewport resolution | `World/Camera/Camera` |
 | 13 raw input bools | `Platform/Desktop/Input` |
-| brush state (9 fields) | `Features/Volumetric/Edit/BrushState` (owned by Pottery) |
-| atlas stats (`sdfAtlas*`, dirty blocks) | `Features/Volumetric/SdfVolume` (owned by Pottery) |
+| brush state (9 fields) | `Features/Sdf/Edit/BrushState` (owned by SdfEditor) |
+| atlas stats (`sdfAtlas*`, dirty blocks) | `Features/Sdf/SdfVolume` (owned by SdfEditor) |
 | framebuffers, pipelines, post chain, descriptor pool, sampler, renderPassDirty | `Render/Renderer` |
 | TAA jitter + motion history, floor-blob SSGI | **deleted** (experiments removed) |
 
 ## 4. Feature contracts
 
-- `Features/Volumetric/SdfVolume.h` — atlas stats today; grid constants/buffers
+- `Features/Sdf/SdfVolume.h` — atlas stats today; grid constants/buffers
   migrate here when Physics/Fluid become consumers.
-- `Features/Volumetric/Edit/BrushState.h` — brush params; Pottery writes,
+- `Features/Sdf/Edit/BrushState.h` — brush params; SdfEditor writes,
   Editor displays + edits color.
 - Cross-feature rule: features share **data through contracts**, never include
   each other's internals.

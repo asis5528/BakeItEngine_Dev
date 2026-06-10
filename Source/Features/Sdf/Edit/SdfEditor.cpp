@@ -1,4 +1,4 @@
-#include "Pottery.h"
+#include "SdfEditor.h"
 #include "Core/Resources/ResourceManager.h"
 #include "Render/Renderer.h"
 #include <algorithm>
@@ -6,7 +6,7 @@
 #include <cmath>
 #include <vector>
 
- struct alignas(16) potteryUBO {
+ struct alignas(16) sdfEditUBO {
 	glm::vec4 BrushData;
 	glm::vec4 BrushColor;
 	float BrushAction; // 1.0 add, 0.0 remove
@@ -163,7 +163,7 @@ uint32_t FlattenBlockIndex(uint32_t x, uint32_t y, uint32_t z, uint32_t blocksPe
 
 }
 
-Pottery::Pottery(EngineContext& ctx)
+SdfEditor::SdfEditor(EngineContext& ctx)
 {
 	this->base = ctx.base;
 	this->scene = ctx.scene;
@@ -174,7 +174,7 @@ Pottery::Pottery(EngineContext& ctx)
 	int size = blocksPerAxis * blockDim; // 64 * 8 = 512
 
 	ComputeInput input;
-	input.computeShaderPath = "shaders/Volumetric/VolumetricBrushCS.spv";
+	input.computeShaderPath = "shaders/Sdf/SdfBrushCS.spv";
 	input.descriptorTypes = {
 		VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
 		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
@@ -187,7 +187,7 @@ Pottery::Pottery(EngineContext& ctx)
 	};
 	comp = new ComputePipeline(base, input);
 	ComputeInput lodInput;
-	lodInput.computeShaderPath = "shaders/Volumetric/VolumetricLod1CS.spv";
+	lodInput.computeShaderPath = "shaders/Sdf/SdfLod1CS.spv";
 	lodInput.descriptorTypes = {
 		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
@@ -197,7 +197,7 @@ Pottery::Pottery(EngineContext& ctx)
 		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
 	};
 	lod1Builder = new ComputePipeline(base, lodInput);
-	computeUBO = base->vbuffer->createUniformBuffers({ sizeof(potteryUBO) });
+	computeUBO = base->vbuffer->createUniformBuffers({ sizeof(sdfEditUBO) });
 	
 	int numBlocks = blocksPerAxis * blocksPerAxis * blocksPerAxis; // 64^3 = 262144
 	int bricksPerBlock = kBrickSamplesPerBlock;                                     // 729
@@ -274,7 +274,7 @@ Pottery::Pottery(EngineContext& ctx)
 	//glfwSetMouseButtonCallback(base->window, mouse_button_cb);
 }
 
-void Pottery::createLodObjects()
+void SdfEditor::createLodObjects()
 {
 	if (lod1ObjectIndex >= 0 || scene->objects.empty() || scene->objects[0].meshID.empty()) {
 		return;
@@ -319,7 +319,7 @@ void Pottery::createLodObjects()
 	lod1ObjectIndex = static_cast<int>(scene->objects.size() - 1);
 }
 
-void Pottery::uploadChunkSpatialData()
+void SdfEditor::uploadChunkSpatialData()
 {
 	if (chunkTranslationWS == uploadedChunkTranslationWS) {
 		return;
@@ -345,7 +345,7 @@ void Pottery::uploadChunkSpatialData()
 	uploadedChunkTranslationWS = chunkTranslationWS;
 }
 
-void Pottery::clearEditableChunk()
+void SdfEditor::clearEditableChunk()
 {
 	const uint32_t totalBlocks = chunkBlocksPerAxis * chunkBlocksPerAxis * chunkBlocksPerAxis;
 	std::vector<int32_t> clearedBlocks(totalBlocks, -999999);
@@ -367,7 +367,7 @@ void Pottery::clearEditableChunk()
 	lod1ActiveIds.clear();
 }
 
-void Pottery::rebuildLod1()
+void SdfEditor::rebuildLod1()
 {
 	lod1ActiveIds.clear();
 
@@ -385,7 +385,7 @@ void Pottery::rebuildLod1()
 	vkUnmapMemory(base->device, lod1SBO[0].bufferMemory);
 }
 
-void Pottery::updateLodSelection()
+void SdfEditor::updateLodSelection()
 {
 	if (lod1MeshIndex < 0 || lod1ObjectIndex < 0 || scene->objects.empty() || scene->objects[0].meshID.empty()) {
 		return;
@@ -418,7 +418,7 @@ void Pottery::updateLodSelection()
 	scene->renderer->renderPassDirty = true;
 }
 
-void Pottery::createStaticFloorObject()
+void SdfEditor::createStaticFloorObject()
 {
 	const Mesh& sourceMesh = scene->meshes[scene->objects[0].meshID[0]];
 	const uint32_t totalBlocks = chunkBlocksPerAxis * chunkBlocksPerAxis * chunkBlocksPerAxis;
@@ -496,7 +496,7 @@ void Pottery::createStaticFloorObject()
 	scene->objects.push_back(floorObject);
 }
 
-void Pottery::updateSnapshotChunks(float time)
+void SdfEditor::updateSnapshotChunks(float time)
 {
 	for (const SnapshotChunk& snapshot : snapshotChunks) {
 		if (snapshot.objectIndex >= scene->objects.size()) {
@@ -510,7 +510,7 @@ void Pottery::updateSnapshotChunks(float time)
 	}
 }
 
-void Pottery::finalizeStrokeChunk(float time)
+void SdfEditor::finalizeStrokeChunk(float time)
 {
 	const uint32_t totalBlocks = chunkBlocksPerAxis * chunkBlocksPerAxis * chunkBlocksPerAxis;
 	std::vector<int32_t> blockState(totalBlocks, -1);
@@ -638,7 +638,7 @@ void Pottery::finalizeStrokeChunk(float time)
 	scene->renderer->renderPassDirty = true;
 }
 
-Pottery::~Pottery() {
+SdfEditor::~SdfEditor() {
 	delete comp;
 	delete lod1Builder;
 	for (UBO& ubo : computeUBO) {
@@ -698,7 +698,7 @@ static bool intersectAabb(const glm::vec3& ro, const glm::vec3& rd, const glm::v
 	return true;
 }
 
-void Pottery::update(float time)
+void SdfEditor::update(float time)
 {
 	uploadChunkSpatialData();
 
@@ -723,7 +723,7 @@ void Pottery::update(float time)
 	float msy = in.mousePos.y / base->swapChain->swapChainExtent.height;
 	// Example: print to console
 	//std::printf("Mouse: (%.1f, %.1f)\n", msx-0.5, msy-0.5);
-	potteryUBO pubo;
+	sdfEditUBO pubo;
 	pubo.time = time*0.05;
 
 	if(!in.cameraMoveMode){
@@ -780,7 +780,7 @@ void Pottery::update(float time)
 	brush.zAxis = BrushDistanceFromCamera;
 	brush.action = leftBut;
 	brush.emissive = EmissiveMode;
-	computeUBO[0].map(base->device, sizeof(potteryUBO), &pubo);
+	computeUBO[0].map(base->device, sizeof(sdfEditUBO), &pubo);
 
 
 	const int dim = 8;
@@ -847,7 +847,7 @@ void Pottery::update(float time)
 
 		if (computeReady) {
 			pubo.DispatchBaseBlock = glm::ivec4(dispatchBlockMin, 0);
-			computeUBO[0].map(base->device, sizeof(potteryUBO), &pubo);
+			computeUBO[0].map(base->device, sizeof(sdfEditUBO), &pubo);
 			int dirtyZero = 0;
 			computeSBO[4].map(base->device, sizeof(int), &dirtyZero);
 			comp->submit(
@@ -870,7 +870,7 @@ void Pottery::update(float time)
 	if (!isBrushEditing && pendingFullChunkResolve) {
 		if (vkGetFenceStatus(base->device, comp->computeFence) == VK_SUCCESS) {
 			pubo.DispatchBaseBlock = glm::ivec4(0);
-			computeUBO[0].map(base->device, sizeof(potteryUBO), &pubo);
+			computeUBO[0].map(base->device, sizeof(sdfEditUBO), &pubo);
 			int dirtyZero = 0;
 			computeSBO[4].map(base->device, sizeof(int), &dirtyZero);
 			comp->submit(chunkBlocksPerAxis, chunkBlocksPerAxis, chunkBlocksPerAxis);

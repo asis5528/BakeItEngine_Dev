@@ -17,7 +17,7 @@ Both batch scripts recursively compile every `*.vert/*.frag/*.comp` under `shade
 - `../compile.bat` (repo root) is canonical; `main()` runs it automatically at startup.
 - `Source/compile.bat` is the same loop for invoking manually from inside `Source/`.
 
-`glslc.exe` is expected on `PATH`. SPIR-V outputs sit next to the `.vert/.frag/.comp` sources (same basename, `.spv` extension, gitignored); the C++ code loads the `.spv` files directly. Shader naming convention: `<Feature><What><Stage>` with stage suffix `VS`/`FS`/`CS` (e.g. `VolumetricBrushCS.comp`, `ObjectVolumetricFS.frag`).
+`glslc.exe` is expected on `PATH`. SPIR-V outputs sit next to the `.vert/.frag/.comp` sources (same basename, `.spv` extension, gitignored); the C++ code loads the `.spv` files directly. Shader naming convention: `<Feature><What><Stage>` with stage suffix `VS`/`FS`/`CS` (e.g. `SdfBrushCS.comp`, `ObjectVolumetricFS.frag`).
 
 ## Engine direction (read this before changing the edit/render path)
 
@@ -25,7 +25,7 @@ Both batch scripts recursively compile every `*.vert/*.frag/*.comp` under `shade
 
 > The interaction (brush drag) path must never block on optimization. Drag = immediate, possibly approximate. Release = async settle. Idle = heavy cleanup.
 
-Practical consequences when editing the Pottery / SDF / LOD code paths:
+Practical consequences when editing the SdfEditor / SDF / LOD code paths:
 
 - Drag path: only local compute dispatch around the brush, broad/preview instance coverage, shader-side block validity. No full-chunk CPU rebuild, no strict surface scan, no full `lod1` rebuild, no compact-instance rebuild.
 - Release path: full resolve, strict surface scan, fine-active-id rebuild, lod1 rebuild — but **phased over multiple frames**, never one blocking step.
@@ -43,20 +43,20 @@ Entry point is `Source/main.cpp`'s `Vulkan` class. `mainLoop` per frame: `glfwPo
 - `Core/` — Vulkan plumbing (`VulkanBase` owns device/swapchain/commands/sync; `Resources/` buffers, images, descriptors, `ResourceTypes`; `Pipelines/` graphics+compute pipeline wrappers). Knows nothing about the game.
 - `Platform/Desktop/Input` — the **only** place GLFW key/mouse-button/scroll callbacks are registered (before ImGui init, so ImGui chain-calls them). Consumers read the routed `Input` struct.
 - `World/` — `Scene` (world data: objects/meshes/materials/animations/rootNode + wiring pointers; its render methods are forwarders to Renderer), `Camera` (proj/view[2] multiview, free-fly update), Object/Mesh/Model/Material/Animation, and the Assimp `Loader` (the GLFW drop callback feeds it, then `cleanDescriptors → createSceneDescriptor → createCommandBuffers`).
-- `Features/Volumetric/` — the SDF research core: `Edit/Pottery` (brush editor — the heart of BakeIT) + `BrushState`, `Bake/MeshToSdf`, and the `SdfVolume.h` data contract (atlas stats; grows as Physics/Fluid become consumers). `Features/Fluid/` — GaussianFluidSim.
+- `Features/Sdf/` — the SDF research core: `Edit/SdfEditor` (brush editor — the heart of BakeIT) + `BrushState`, `Bake/MeshToSdf`, and the `SdfVolume.h` data contract (atlas stats; grows as Physics/Fluid become consumers). `Features/Fluid/` — GaussianFluidSim.
 - `Render/` — `Renderer` owns the offscreen framebuffer, `ScenePipelines` (object pipeline registry, mirrored as `scene->pipelines`), the scene descriptor pool, `renderPassDirty`, and command-buffer recording (offscreen object pass → post-process → swapchain pass). `PostProcess/` is currently a passthrough quad (`PostPassVS/FS`) that feeds the Editor viewport; new effects plug in there.
 - `Editor/` — `EditorGui` (ImGui dockspace: viewport image, scene tree, brush/atlas stats panels) + `VulkanImgui`. On viewport resize it calls `scene->recreate()` and rebuilds the viewport descriptor (`ds[0]`).
 
-### Pottery (volumetric SDF editor)
+### SdfEditor (volumetric SDF editor)
 
-`Features/Volumetric/Edit/Pottery.*` is where almost all SDF/volumetric edit logic lives. Key concepts to keep straight:
+`Features/Sdf/Edit/SdfEditor.*` is where almost all SDF/volumetric edit logic lives. Key concepts to keep straight:
 
 - **Editable chunk** vs **snapshot (settled) chunks** — different performance policies. The editable chunk prioritizes drag responsiveness; snapshots can be compacted aggressively and LOD'd. `snapshotChunks[]` and `snapshotChunkSBOs[]` hold settled work; `chunkBlocksPerAxis`, `chunkBlockDim`, `chunkBlockSizeWS` describe the live chunk grid.
-- **Brick atlas** — fine-resolution SDF storage. Tracked via `SdfVolume::stats` (`Features/Volumetric/SdfVolume.h`, owned by Pottery, surfaced in the GUI).
+- **Brick atlas** — fine-resolution SDF storage. Tracked via `SdfVolume::stats` (`Features/Sdf/SdfVolume.h`, owned by SdfEditor, surfaced in the GUI).
 - **Block sets** — `strictScanBlockState`, `strictScanRenderableIds`, `fineActiveIds`, `lod1ActiveIds`. These are *different sets* (recompute / store / render); do not unify them.
-- **Phased pipeline flags** — `pendingFullChunkResolve`, `pendingStrictSurfaceScan`, `pendingLod1Rebuild`, `lod1RebuildSubmitted`, `strictSurfaceScanCursor`. The brush release path sets these and `Pottery::update` chips at them across frames. Anything new that mutates the chunk should plug into this phasing rather than stalling.
+- **Phased pipeline flags** — `pendingFullChunkResolve`, `pendingStrictSurfaceScan`, `pendingLod1Rebuild`, `lod1RebuildSubmitted`, `strictSurfaceScanCursor`. The brush release path sets these and `SdfEditor::update` chips at them across frames. Anything new that mutates the chunk should plug into this phasing rather than stalling.
 - **LOD** — `rebuildLod1`, `updateLodSelection`, `coarseLodSelected`, `lod1ObjectIndex/MeshIndex`. LOD selection lives in compute; rebuild must not run in the drag path.
-- Compute shaders: `shaders/Volumetric/VolumetricBrushCS.comp` and `VolumetricLod1CS.comp` are Pottery's GPU side.
+- Compute shaders: `shaders/Sdf/SdfBrushCS.comp` and `SdfLod1CS.comp` are SdfEditor's GPU side.
 
 ## Conventions & gotchas
 

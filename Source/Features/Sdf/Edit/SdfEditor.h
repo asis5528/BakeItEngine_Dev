@@ -1,12 +1,12 @@
 #pragma once
 #include "World/Scene.h"
 #include "Core/Pipelines/ComputePipeline.h"
-#include "Features/Volumetric/SdfVolume.h"
-#include "Features/Volumetric/Edit/BrushState.h"
+#include "Features/Sdf/SdfVolume.h"
+#include "Features/Sdf/Edit/BrushState.h"
 #include "EngineContext.h"
 #include <glm/glm.hpp>
 #include <vector>
-class Pottery
+class SdfEditor
 {
 public:
 	SdfVolume volume;
@@ -56,8 +56,8 @@ public:
 	bool coarseLodSelected = false;
 	std::vector<SnapshotChunk> snapshotChunks;
 	std::vector<std::vector<SBO>> snapshotChunkSBOs;
-	Pottery(EngineContext& ctx);
-	~Pottery();
+	SdfEditor(EngineContext& ctx);
+	~SdfEditor();
 	void update(float time);
 	void uploadChunkSpatialData();
 	void createLodObjects();

@@ -56,8 +56,8 @@ ScenePipelines::ScenePipelines(VulkanBase *base,VkRenderPass renderPass) {
     volumetric->frontFaceCull = 1;
     pipelines.push_back(volumetric);
     input.skinned = false;
-    input.vertexShaderpath = "shaders/Volumetric/ObjectVolumetricVS.spv";
-    input.fragmentShaderpath = "shaders/Volumetric/ObjectVolumetricFS.spv";
+    input.vertexShaderpath = "shaders/Sdf/ObjectVolumetricVS.spv";
+    input.fragmentShaderpath = "shaders/Sdf/ObjectVolumetricFS.spv";
     input.useInstanceIdAttribute = true;
 
     input.descriptorTypes = { descriptorTypes{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_SHADER_STAGE_ALL_GRAPHICS},
