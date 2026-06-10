@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build & run
 
-- **Build**: open `../BakeItEngine.sln` in Visual Studio 2022 (PlatformToolset `v143`) and build the `BakeItEngine` project (`Source/VulkanEngine.vcxproj`). Configurations are `Debug|x64` / `Release|x64`. There is no command-line build.
+- **Build**: open `../BakeItEngine.sln` in Visual Studio 2022 (PlatformToolset `v143`) and build the `BakeItEngine` project (`Source/VulkanEngine.vcxproj`). Configurations are `Debug|x64` / `Release|x64`. Command-line build works too: `MSBuild.exe ..\BakeItEngine.sln /p:Configuration=Debug /p:Platform=x64` (MSBuild from VS2022 Community, locatable via vswhere).
 - **Run**: launch from Visual Studio. The exe's working directory must be the repo root (parent of `Source/`) — at startup `main()` calls `system("compile.bat")` and the engine loads assets via relative paths like `models/ube.glb`, `textures/...`, `shaders/.../*.spv`.
 - **Tests**: there are no automated tests.
 
