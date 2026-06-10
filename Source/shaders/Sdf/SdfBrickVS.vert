@@ -65,14 +65,7 @@ void main()
     brickIndex = (blockRaw & BLOCK_INDEX_MASK);
     blockEmissive = ((blockRaw & BLOCK_EMISSIVE_FLAG) != 0) ? 1.0 : 0.0;
     blockColor = blockColors[blockIdx].rgb;
-if(blockIdx>0) {
-  //gl_Position = vec4(2e9, 2e9, 2e9, 1.0); // push off-screen
-    //   return;
-}
-// Hide inactive blocks (your compute uses negatives for "not allocated/empty/packed")
-    // If you ALSO want to draw packed-band blocks, change condition to:
-    // if (bb.blocks[blockIdx] == -999999) ...
-    
+
     vec4 spatial = blockSpatial[blockIdx];
     float blockSizeWS = spatial.w;
     blockSizeWSOut = blockSizeWS;
@@ -84,42 +77,13 @@ if(blockIdx>0) {
     vertWS = (ubo.model * vec4(vertWS, 1.0)).xyz;
 
     worldPosition = vertWS;
-   // worldPosition += 0.001;
-   // vertWS.xy+=0.0078;
-    //vertWs-=0.0078;
-    //worldPosition = vertWS;
     mat4 invView = inverse(ubo.view[gl_ViewIndex]);
-       cameraPos = vec3(invView[3]);
-   camLocal = (cameraPos - centerWorld) / blockSizeWS;
-
-    vec3 cpos =  worldPosition+vec3(0.5+0.00);
-vec3 ppos = cpos;
-
-
-int blockPerAxis = 64;
-ivec3 ires = ivec3(blockPerAxis,blockPerAxis,blockPerAxis);
-    vec3  fres = vec3(ires);
-
-    // texel space
-    vec3 st = clamp(cpos * fres - 0.5,0.,fres.x-1);
-    ivec3 i = ivec3(floor(st));
-    
-   // bricks[i.x+i.y*8+i.z*64] = h1.r;
-  // blocks[i.x+i.y*8+i.z*64] = int(h1.r*255.);
-
-//h = textureTrilinear( texSampler, cpos).r;
- //brickIndex = blocks[i.x+i.y*blockPerAxis+i.z*blockPerAxis*blockPerAxis];
-
-
+    cameraPos = vec3(invView[3]);
+    camLocal = (cameraPos - centerWorld) / blockSizeWS;
 
     gl_Position = ubo.proj[gl_ViewIndex] *
                   ubo.view[gl_ViewIndex] *
                   vec4(vertWS, 1.0);
-//worldPosition = inPosition.xyz;
-    // If you actually want camera world position, compute it like this:
-    // (assuming ubo.view is a standard view matrix)
-    
-   
 
     fragColor = inColor;
     fragTexCoord = inTexCoord;
