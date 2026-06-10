@@ -18,7 +18,7 @@ GaussianFluidSim::GaussianFluidSim(VulkanBase* base, Scene* scene, PGEResourceTy
 
 	computeUBO = base->vbuffer->createUniformBuffers({ sizeof(fluidUBO) });
 	ComputeInput input;
-	input.computeShaderPath = "shaders/ComputeShaders/GaussianFluidSim.spv";
+	input.computeShaderPath = "shaders/ComputeShaders/GaussianFluidSimCS.spv";
 	input.descriptorTypes = { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER };
 	comp = new ComputePipeline(base, input);
 	comp->setupDescriptors(computeUBO, { ResourceManager::getTexture(computeTexture.id),ResourceManager::getTexture( scene->ptextures[0].id),ResourceManager::getTexture(computeTexture2.id),ResourceManager::getTexture(sdftex.id) }, {});
@@ -28,7 +28,7 @@ GaussianFluidSim::GaussianFluidSim(VulkanBase* base, Scene* scene, PGEResourceTy
 
 	computeUBO2 = base->vbuffer->createUniformBuffers({ sizeof(fluidUBO) });
 	ComputeInput input2;
-	input2.computeShaderPath = "shaders/ComputeShaders/GaussianFluidSim.spv";
+	input2.computeShaderPath = "shaders/ComputeShaders/GaussianFluidSimCS.spv";
 	input2.descriptorTypes = { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER };
 	comp2 = new ComputePipeline(base, input2);
 	comp2->setupDescriptors(computeUBO, { ResourceManager::getTexture(computeTexture2.id),ResourceManager::getTexture(scene->ptextures[0].id),ResourceManager::getTexture(computeTexture.id),ResourceManager::getTexture(sdftex.id) }, {});
