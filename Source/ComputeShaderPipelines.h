@@ -1,6 +1,6 @@
 #pragma once
 #include "Core/Vulkan/VulkanBase.h"
-#include "Scene/Scene.h"
+#include "World/Scene.h"
 #include "Core/Pipelines/ComputePipeline.h"
 #include "Features/Fluid/GaussianFluidSim.h"
 #include "Features/Volumetric/Bake/MeshToSdf.h"

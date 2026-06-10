@@ -1,5 +1,5 @@
 #include "Renderer.h"
-#include "Scene/Scene.h"
+#include "World/Scene.h"
 #include "Core/Vulkan/VulkanUtils.h"
 #include "Core/Resources/ResourceManager.h"
 #include <stdexcept>

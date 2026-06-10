@@ -1,5 +1,5 @@
 #pragma once
-#include "Scene/Scene.h"
+#include "World/Scene.h"
 #include "Core/Pipelines/ComputePipeline.h"
 #include "Features/Volumetric/SdfVolume.h"
 #include "Features/Volumetric/Edit/BrushState.h"

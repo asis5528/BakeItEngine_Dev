@@ -70,7 +70,7 @@ const bool enableValidationLayers = true;
 //uncomment to enable VR
  //#define VR
 #include "Core/Pipelines/ComputePipeline.h"
-#include "Scene/Scene.h"
+#include "World/Scene.h"
 #include "World/Loader.h"
 #include "Editor/EditorGui.h"
 #include <glm/gtx/matrix_decompose.hpp>

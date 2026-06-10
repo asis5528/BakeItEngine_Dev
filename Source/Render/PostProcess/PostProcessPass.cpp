@@ -1,6 +1,6 @@
 #include "PostProcessPass.h"
 #include "Core/Vulkan/VulkanUtils.h"
-#include "Scene/Scene.h"
+#include "World/Scene.h"
 
 PostProcessPass::PostProcessPass(VulkanBase* base, Scene *scene, Framebuffer* previousFB)
 {

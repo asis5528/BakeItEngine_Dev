@@ -1,5 +1,5 @@
 #pragma once
-#include "Scene/Scene.h"
+#include "World/Scene.h"
 #include "Features/Volumetric/SdfVolume.h"
 #include "Features/Volumetric/Edit/BrushState.h"
 class Renderer;

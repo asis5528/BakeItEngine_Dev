@@ -86,7 +86,7 @@
     <ClCompile Include="Render\PostProcess\Quad.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Scene\Scene.cpp">
+    <ClCompile Include="World\Scene.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="World\Loader.cpp">
@@ -186,7 +186,7 @@
     <ClInclude Include="World\Object.h" />
     <ClInclude Include="Core\Pipelines\Shader.h" />
     <ClInclude Include="Render\PostProcess\Quad.h" />
-    <ClInclude Include="Scene\Scene.h" />
+    <ClInclude Include="World\Scene.h" />
     <ClInclude Include="World\Loader.h" />
     <ClInclude Include="World\Model.h" />
     <ClInclude Include="Core\Math\MathUtils.h" />
