@@ -6,7 +6,7 @@
 #include "Core/Pipelines/Shader.h"
 #include "VulkanImage.h"
 #include "Core/Vulkan/VulkanDevice.h"
-#include "Core/Resources/PGEResourceTypes.h"
+#include "Core/Resources/ResourceTypes.h"
 
 struct VBuffer {
 	VulkanDevice* vulkandevice;
@@ -19,9 +19,9 @@ struct VBuffer {
 	std::vector<UBO> createUniformBuffers(std::vector<uint64_t> Buffersize);
 	std::vector<SBO> createStorageBuffers(std::vector<uint64_t> bufferSizes);
 //	std::vector 
-	PGEResourceTypes::Texture createTexturefromBuffer(VulkanTexture& texture, void* pixels);
-	PGEResourceTypes::Texture3D createTexture3DGeneral(int w,int h,int d);
-	PGEResourceTypes::Texture3D createTexture3DfromBuffer(VulkanTexture3D& texture, void* pixels);
+	ResourceTypes::Texture createTexturefromBuffer(VulkanTexture& texture, void* pixels);
+	ResourceTypes::Texture3D createTexture3DGeneral(int w,int h,int d);
+	ResourceTypes::Texture3D createTexture3DfromBuffer(VulkanTexture3D& texture, void* pixels);
 	void transitionImageLayout(VkImage image, VkImageAspectFlags aspectMask, VkImageLayout oldLayout, VkImageLayout newLayout, uint32_t mipLevels, uint32_t layerCount = 1);
 	void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height,uint32_t depth);
 	void generateMipmaps(VkImage image, VkFormat imageFormat, int32_t texWidth, int32_t texHeight, uint32_t mipLevels);

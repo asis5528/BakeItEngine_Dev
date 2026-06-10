@@ -52,7 +52,7 @@ void Loader::load(int path_count, const char* paths[])
             if (!rawtex.data) {
                 throw std::runtime_error("failed to load texture image!");
             }
-            PGEResourceTypes::Texture  ptexture=  base->vbuffer->createTexturefromBuffer(texture, rawtex.data);
+            ResourceTypes::Texture  ptexture=  base->vbuffer->createTexturefromBuffer(texture, rawtex.data);
             stbi_image_free(rawtex.data);
             scene->ptextures.push_back(ptexture);
         }

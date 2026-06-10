@@ -358,7 +358,7 @@ private:
         
     }
 
-    PGEResourceTypes::Texture createTexture(const char* path) {
+    ResourceTypes::Texture createTexture(const char* path) {
         VulkanTexture texture;
         int texWidth, texHeight, texChannels;
         stbi_uc* pixels = stbi_load(path, &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
@@ -371,7 +371,7 @@ private:
         if (!pixels) {
             throw std::runtime_error("failed to load texture image!");
         }
-        PGEResourceTypes::Texture t = base->vbuffer->createTexturefromBuffer(texture, pixels);
+        ResourceTypes::Texture t = base->vbuffer->createTexturefromBuffer(texture, pixels);
         stbi_image_free(pixels);
         return t;
 

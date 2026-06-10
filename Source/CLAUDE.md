@@ -34,18 +34,16 @@ If a change makes the brush feel laggier in exchange for cleaner data structures
 
 ## Architecture
 
-Entry point is `Source/main.cpp`'s `Vulkan` class. `run()` does `initWindow → initVulkan → mainLoop → cleanup`. `mainLoop` per frame: `glfwPollEvents → drawFrame`. `drawFrame` orchestrates `editorGui->run()`, `vulkanImgui->draw()`, `scene->update(iTime)`, `base->presentQueue()`, then `clines->update(iTime)` (compute pipelines run **after** present).
+`BAKEIT_ARCHITECTURE_MAP.md` is the detailed current-state map; `BAKEIT_ARCHITECTURE_TARGET.md` explains the design. Short version:
 
-Top-level systems owned by `Vulkan`:
+Entry point is `Source/main.cpp`'s `Vulkan` class. `mainLoop` per frame: `glfwPollEvents → input.update() → drawFrame`. `drawFrame` orchestrates `editorGui->run()`, `vulkanImgui->draw()`, `scene->update(iTime)`, `base->presentQueue()`, then `clines->update(iTime)` (compute pipelines run **after** present). `main.cpp` owns `EngineContext ctx` (`base/scene/renderer/camera/input`) — every subsystem constructor takes `EngineContext&` and picks what it needs.
 
-- `VulkanBase` (`Core/Vulkan/VulkanBase.*`) — instance, device, surface, swapchain, command buffers, sync. Owns `VulkanDevice`, `SwapChain`, `VBuffer` (`VulkanBuffer`), `VulkanDescriptor`. `recreate()` handles swapchain rebuild on resize.
-- `Scene` (`Scene/Scene.*`) — the central state: `objects`, `meshes`, `materials`, `animations`, `ptextures`, `SBOs`, `framebuffers`, `quads`, descriptor pool, camera (`proj[2]/view[2]` — array-of-2 because the renderer is multiview-capable for VR), brush state (`brushData`, `brushColor`, `brushShapeMode`, `brushAction`, etc.), and gameplay flags (`renderPassDirty`); atlas stats live in `Features/Volumetric/SdfVolume.h`.
-  - `Scene::renderPass()` records command buffers per swapchain image: offscreen pass draws all objects → post-process chain → swapchain pass for present.
-  - `Scene::update(time)` updates animation bones, builds camera matrices (orbit camera in non-VR), writes per-object UBOs, updates post-processing.
-- `PostProcessingManager` (`Render/PostProcess/`) — owns `PostProcessPass`, currently a plain passthrough quad (offscreen color to the framebuffer the Editor viewport displays); new effects plug in here as fullscreen quads. `recreate()` on viewport resize.
-- `ComputeShaderPipelines` (`Source/ComputeShaderPipelines.*`) — owns `GaussianFluidSim`, `MeshToSdf`, and **`Pottery`** (the volumetric brush editor — the heart of BakeIT). Its `update(time)` is dispatched once per frame after present.
-- `EditorGui` + `VulkanImgui` (both in `Editor/`) — ImGui dockspace with a Viewport that displays the last post-process framebuffer as an `ImGui_ImplVulkan` texture, a Scene hierarchy panel (drives `Scene::selectedID` via `rootNode` tree), FPS, and tool buttons (e.g. "MeshToSDF Dispatch"). On viewport resize it triggers framebuffer + pipeline recreation and rebuilds the ImGui descriptor pointing at the new image.
-- `Loader` (`World/Loader.*`) — Assimp-backed model loader (`assimp-vc143-mtd.dll`). The GLFW drop callback in `main.cpp` forwards dropped paths to `Loader::load`, then calls `cleanDescriptors → createSceneDescriptor → createCommandBuffers` to refresh the scene.
+- `Core/` — Vulkan plumbing (`VulkanBase` owns device/swapchain/commands/sync; `Resources/` buffers, images, descriptors, `ResourceTypes`; `Pipelines/` graphics+compute pipeline wrappers). Knows nothing about the game.
+- `Platform/Desktop/Input` — the **only** place GLFW key/mouse-button/scroll callbacks are registered (before ImGui init, so ImGui chain-calls them). Consumers read the routed `Input` struct.
+- `World/` — `Scene` (world data: objects/meshes/materials/animations/rootNode + wiring pointers; its render methods are forwarders to Renderer), `Camera` (proj/view[2] multiview, free-fly update), Object/Mesh/Model/Material/Animation, and the Assimp `Loader` (the GLFW drop callback feeds it, then `cleanDescriptors → createSceneDescriptor → createCommandBuffers`).
+- `Features/Volumetric/` — the SDF research core: `Edit/Pottery` (brush editor — the heart of BakeIT) + `BrushState`, `Bake/MeshToSdf`, and the `SdfVolume.h` data contract (atlas stats; grows as Physics/Fluid become consumers). `Features/Fluid/` — GaussianFluidSim.
+- `Render/` — `Renderer` owns the offscreen framebuffer, `ScenePipelines` (object pipeline registry, mirrored as `scene->pipelines`), the scene descriptor pool, `renderPassDirty`, and command-buffer recording (offscreen object pass → post-process → swapchain pass). `PostProcess/` is currently a passthrough quad (`PostPassVS/FS`) that feeds the Editor viewport; new effects plug in there.
+- `Editor/` — `EditorGui` (ImGui dockspace: viewport image, scene tree, brush/atlas stats panels) + `VulkanImgui`. On viewport resize it calls `scene->recreate()` and rebuilds the viewport descriptor (`ds[0]`).
 
 ### Pottery (volumetric SDF editor)
 

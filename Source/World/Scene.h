@@ -2,7 +2,7 @@
 #include "Core/Vulkan/VulkanBase.h"
 #include "World/Object.h"
 #include "World/Material.h"
-#include "Core/Resources/PGEResourceTypes.h"
+#include "Core/Resources/ResourceTypes.h"
 #include "Platform/Desktop/Input.h"
 #include "World/Camera/Camera.h"
 #include <array>
@@ -17,7 +17,7 @@ class Scene
 
 public:
 	std::vector<GraphicsPipeline*> pipelines; // mirror of Renderer::pipelines (set by Renderer::init)
-	std::vector<PGEResourceTypes::Texture> ptextures;
+	std::vector<ResourceTypes::Texture> ptextures;
 
 	std::vector<std::vector<SBO> >SBOs;
 	std::vector<Material> materials;

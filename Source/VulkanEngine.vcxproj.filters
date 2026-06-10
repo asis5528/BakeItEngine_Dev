@@ -204,7 +204,7 @@
     <ClInclude Include="Render\Renderer.h" />
     <ClInclude Include="Features\Volumetric\Bake\MeshToSdf.h" />
     <ClInclude Include="Core\Resources\ResourceManager.h" />
-    <ClInclude Include="Core\Resources\PGEResourceTypes.h" />
+    <ClInclude Include="Core\Resources\ResourceTypes.h" />
     <ClInclude Include="Features\Volumetric\Edit\Pottery.h" />
     <ClInclude Include="Features\Volumetric\SdfVolume.h" />
     <ClInclude Include="Features\Volumetric\Edit\BrushState.h" />

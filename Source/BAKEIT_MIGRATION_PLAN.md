@@ -1,6 +1,6 @@
 # BakeIT Engine — Migration Plan
 
-**Status:** Step 4. Executes the structure in `BAKEIT_ARCHITECTURE_TARGET.md`.
+**Status: COMPLETE (2026-06-10).** All phases executed; the engine matches `BAKEIT_ARCHITECTURE_TARGET.md` and `BAKEIT_ARCHITECTURE_MAP.md` describes the result. Kept for history. Extras done along the way: TAA/SSGI experimental postprocess removed (passthrough `PostProcessPass` kept), `.spv` outputs gitignored, MSBuild CLI build documented. Deliberately deferred: framebuffer aux/motion attachments stay as G-buffer slots; feature hooks formalize when a second feature needs them; brush indicator re-add is REMAINDER.txt item 4.
 **Golden rule:** the engine builds and runs after **every phase**. Build is Visual Studio only (no CLI build), so each phase ends with: *user builds Debug|x64 in VS, runs, sculpts with the brush, resizes the viewport, drops a model.* That 2-minute smoke test is the gate to the next phase.
 
 **Mechanics that apply to every file move:**

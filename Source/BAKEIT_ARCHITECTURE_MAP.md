@@ -1,7 +1,6 @@
 # BakeIT Engine — Architecture Map
 
-**Status:** Step 1 of an ongoing cleanup/restructure effort.
-**Purpose:** Honest map of the engine as it exists *today*. No opinions baked in beyond §9 ("pain pointers"). Future steps (target structure, migration plan, execution) will reference this.
+**Status:** Current state after the 2026-06 restructure (all 7 phases of `BAKEIT_MIGRATION_PLAN.md` executed). Companion docs: `BAKEIT_ARCHITECTURE_TARGET.md` (the design rationale), `BAKEIT_ENGINE_DIRECTION.md` (product north-star).
 
 ---
 
@@ -9,163 +8,105 @@
 
 ```
 Source/
-├── (top-level loose files: ~20)
-├── Imgui/                        # vendored 3rd-party ImGui — leave alone
-├── Graphics/
-│   └── IMGUI/                    # OUR ImGui wrapper (VulkanImgui)
-├── Scene/                        # 2 files: Scene, ScenePipelines
-├── PostProcessing/               # PostProcessingManager + VolumeRendering
-├── ComputeShaderPipelines/       # GaussianFluidSim, MeshToSdf, Pottery
-├── GUI/                          # only EditorGui
-└── shaders/
-    ├── ObjectShaders/            # rasterization VS/FS
-    ├── ComputeShaders/           # .comp files
-    └── PostProcessing/           # screen-space VS/FS
+├── Core/                      # Vulkan foundation. Knows nothing about the game.
+│   ├── Vulkan/                # VulkanBase, VulkanDevice, SwapChain, VulkanUtils, Framebuffer
+│   ├── Resources/             # VulkanBuffer, VulkanImage, VulkanDescriptor,
+│   │                          # ResourceManager, ResourceTypes
+│   ├── Pipelines/             # GraphicsPipeline, ComputePipeline, Shader
+│   └── Math/                  # MathUtils
+├── Platform/
+│   └── Desktop/               # Input: the ONLY place GLFW input callbacks live
+├── World/                     # Scene (world data), Object, Mesh, Model, Material,
+│   │                          # Animation, AnimationData, Loader
+│   └── Camera/                # Camera: proj/view[2], free-fly, viewportResolution
+├── Features/                  # Vertical slices: each owns all its GPU stages
+│   ├── Volumetric/            # ★ the SDF research core
+│   │   ├── SdfVolume.h        #   public contract: atlas stats (grows as needed)
+│   │   ├── Edit/              #   Pottery (brush editor) + BrushState contract
+│   │   └── Bake/              #   MeshToSdf
+│   └── Fluid/                 # GaussianFluidSim
+├── Render/                    # Renderer (resources + frame recording),
+│   │                          # ScenePipelines (object pipeline registry)
+│   └── PostProcess/           # PostProcessingManager → PostProcessPass
+│                              # (passthrough quad; effects plug in here), Quad
+├── Editor/                    # EditorGui (ImGui dockspace), VulkanImgui
+├── Imgui/                     # vendored third-party — leave alone
+├── shaders/                   # mirrors features; compiled by recursive compile.bat
+│   ├── World/                 # ObjectShaderVS/SkinnedVS/TexturedFS/BasicFS
+│   ├── Volumetric/            # ObjectVolumetricVS/FS, VolumetricBrushCS,
+│   │                          # VolumetricLod1CS, MeshToSdfCS
+│   ├── Fluid/                 # GaussianFluidSimCS
+│   └── Render/                # PostPassVS/FS
+├── EngineContext.h            # root wiring struct passed to subsystem ctors
+├── ComputeShaderPipelines.*   # thin per-frame compute fan-out (Pottery, MeshToSdf)
+└── main.cpp                   # Vulkan class: owns everything below
 ```
 
----
-
-## 2. Class ownership tree
+## 2. Ownership & wiring
 
 ```
-Vulkan (main.cpp)                    ← root
-├── VulkanBase* base
-│   ├── VulkanDevice*
-│   ├── SwapChain*
-│   ├── VBuffer*
-│   └── VulkanDescriptor*
-├── Scene* scene  ─── GOD OBJECT (see §3)
-├── Loader*
-├── VulkanImgui*
-├── EditorGui*    (← Scene*, VulkanBase*)
-├── ComputeShaderPipelines* clines
-│   ├── (← VulkanBase*, Scene*)
-│   ├── GaussianFluidSim* (← VulkanBase*, Scene*)
-│   ├── MeshToSdf*        (← VulkanBase*, Scene*)
-│   └── Pottery*          (← VulkanBase*, Scene*)
-└── Scene-owned:
-    ├── PostProcessingManager* (← VulkanBase*, Scene*)
-    │   └── VolumeRendering*
-    └── ScenePipelines*
+Vulkan (main.cpp)
+├── VulkanBase* base            (Core: device/swapchain/commands/sync)
+├── DesktopInput input          (Platform: owns ALL GLFW input callbacks,
+│                                installed before ImGui init so ImGui chains)
+├── Camera camera               (World/Camera)
+├── Renderer* renderer          (Render: framebuffer, pipelines, post chain,
+│                                descriptor pool, renderPassDirty, recording)
+├── Scene* scene                (World data + wiring pointers, see §3)
+├── EngineContext ctx           {base, scene, renderer, camera, input}
+├── Loader* loader              (ctx)
+├── EditorGui* editorGui        (ctx; + SdfVolume*/BrushState* from Pottery)
+├── VulkanImgui* vulkanImgui
+└── ComputeShaderPipelines* clines (ctx)
+    ├── Pottery* (ctx)          — the volumetric brush editor
+    ├── MeshToSdf* (ctx)
+    └── GaussianFluidSim* (ctx)
 ```
 
----
+**Frame loop:** `glfwPollEvents → input.update() → drawFrame { editorGui->run, vulkanImgui->draw, scene->update (camera->update, UBO writes, renderer->update), base->presentQueue, clines->update }` — compute runs **after** present.
 
-## 3. What Scene currently holds (the god-object)
+## 3. Scene (world data, no longer a god object)
 
-From `Scene.h`:
+`World/Scene.h` holds: `objects`, `meshes`, `materials`, `animations`, `rootNode`, `selectedID`, `ptextures`, `SBOs`, a `pipelines` mirror (set by `Renderer::init`), and the wiring pointers `input`/`camera`/`renderer`. Its render methods (`init/renderPass/createSceneDescriptor/cleanDescriptors/recreate`) are **one-line forwarders to Renderer** kept for legacy call sites.
 
-| Category | Members |
+Former responsibilities and where they went:
+| Was on Scene | Now lives in |
 |---|---|
-| **Render resources** | pipelines, ptextures, framebuffers, quads, descriptorPool, standardSampler, computeTexture, postprocessingManager, scenePipelines |
-| **Scene graph** | objects, meshes, materials, animations, SBOs, rootNode, selectedID |
-| **Camera (multiview)** | proj[2], view[2], projNoJitter[2], prevProjForMotion[2], prevViewForMotion[2], prevProjNoJitterForMotion[2], taaJitter, camFovDegrees, camNearPlane, camFarPlane, camPos, motionHistoryValid |
-| **Input state** | ButtonPressed, Left/Middle/RightButtonDown, Shift/W/S/A/D/LeftArrow/RightArrowDown, cameraMoveMode (11 bools) |
-| **Brush state** | brushData, brushColor, brushUseSphere, brushShapeMode, brushRadius, brushSmoothness, brushZAxis, brushAction, emissiveMode |
-| **Render flags** | taaEnabled, renderPassDirty, dispatch, slowZoom, offset |
-| **Stats/HUD** | dirtyBlockCount, sdfAtlasUsedBricks/Capacity/Tail/Free/Usage, fps |
-| **Lighting** | floorBlobShadows[64], floorBlobBounceColors[64], floorBlobShadowCount |
-| **Connection** | base*, viewport_resolution |
+| camera matrices, fov/near/far, viewport resolution | `World/Camera/Camera` |
+| 13 raw input bools | `Platform/Desktop/Input` |
+| brush state (9 fields) | `Features/Volumetric/Edit/BrushState` (owned by Pottery) |
+| atlas stats (`sdfAtlas*`, dirty blocks) | `Features/Volumetric/SdfVolume` (owned by Pottery) |
+| framebuffers, pipelines, post chain, descriptor pool, sampler, renderPassDirty | `Render/Renderer` |
+| TAA jitter + motion history, floor-blob SSGI | **deleted** (experiments removed) |
 
-**8 unrelated responsibility groups in one class.**
+## 4. Feature contracts
 
----
+- `Features/Volumetric/SdfVolume.h` — atlas stats today; grid constants/buffers
+  migrate here when Physics/Fluid become consumers.
+- `Features/Volumetric/Edit/BrushState.h` — brush params; Pottery writes,
+  Editor displays + edits color.
+- Cross-feature rule: features share **data through contracts**, never include
+  each other's internals.
 
-## 4. Shader inventory
+## 5. Known leftovers / intentional slots
 
-**`ObjectShaders/`** (rasterization):
-- `ObjectShaderVS.vert` + `ObjectBasicFS.frag`
-- `ObjectSkinnedVS.vert`
-- `ObjectTexturedFS.frag`
-- `ObjectVolumetricVS.vert` + `ObjectVolumetricFS.frag` ← SDF cubes (Pottery)
-- `ObjectFluidPrensentation.frag` ← **typo: Prensentation**
+- **Aux-worldpos + motion-vector attachments** in `Core/Vulkan/Framebuffer` have
+  no consumer (shaders write zeros) — kept deliberately as future G-buffer
+  slots for deferred lighting. Do not remove.
+- **Brush indicator** was lost with the TAA/SSGI postprocess removal —
+  `REMAINDER.txt` item 4; re-add via `PostProcessPass` quad or the volumetric pass.
+- `ComputeShaderPipelines` is a thin fan-out; it dissolves into a feature
+  registry when a second feature implements the update/record hook shape.
+- Scene's forwarder methods retire when call sites migrate to `ctx.renderer`.
+- `Object::update()`, `Scene::cleanTextures/cleanMeshes/cleanQuads` are declared
+  but unimplemented legacy stubs.
 
-**`ComputeShaders/`**:
-- `MeshtoSdf.comp` ← **lowercase 't', cpp is `MeshToSdf`**
-- `sdfCompute.comp`
-- `sdfCompute2.comp` ← unclear vs `sdfCompute.comp`
-- `sdfCompute _pottery.comp` ← **literal space in filename**
-- `sdfCompute_lod1.comp`
-- `GaussianFluidSim.comp`
-- `GaussianFluidSim - Copy.comp` ← **Windows accidental copy**
-- `simple.comp` ← unclear purpose
+## 6. Conventions
 
-**`PostProcessing/`**:
-- `quad.frag`, `quad.vert` ← **lowercase, no stage suffix**
-- `VolumePassVS.vert`, `VolumePassFS.frag`
-- `TaaHistoryCopyFS.frag`
-
----
-
-## 5. `compile.bat` sync issues
-
-**Live shaders NOT being compiled by `compile.bat`:**
-- `sdfCompute_lod1.comp` (referenced by Pottery — bug if it ever needs recompile)
-- `ObjectFluidPrensentation.frag`
-- `simple.comp`
-- `quad.frag` / `quad.vert`
-
-Plus the dead `GaussianFluidSim - Copy.comp`.
-
-**Two `compile.bat` files** (root + `Source/`) must stay in sync; easy to drift.
-
----
-
-## 6. Connection pattern (de facto)
-
-Every subsystem constructor takes `(VulkanBase* base, Scene* scene)`. Inside, code reaches through both:
-- `base->vbuffer->createTexturefromBuffer(...)`
-- `base->vulkandescriptor->createX(...)`
-- `base->swapChain->...`
-- `scene->brushData`, `scene->brushAction`, `scene->camPos`, `scene->renderPassDirty`, `scene->dirtyBlockCount`...
-
-Scene is the bulletin board for shared state. No per-subsystem context, no service layer, no event/message bus.
-
----
-
-## 7. Likely-dead or anachronistic files
-
-| File | Status |
-|---|---|
-| `SceneObjects.h/.cpp` | Defines a class duplicating Scene's fields. Only self-referenced + project files. **Dead.** |
-| `Header.h` | Just `#pragma once`. **Dead.** |
-| `PGEResourceTypes.h` | `PGE` prefix from a previous project name. Namespace is live, but the name is anachronistic. |
-| `GaussianFluidSim - Copy.comp` | Windows accident. **Dead.** |
-| `Imgui/imgui_impl_glut - Copy.cpp` | Windows accident. **Dead.** |
-| Dead helpers inside `ObjectVolumetricFS.frag` | See separate cleanup plan (1A–1E). |
-
----
-
-## 8. Naming inconsistencies (raw list)
-
-| Issue | Examples |
-|---|---|
-| File case | `quad.cpp`/`quad.h` lowercase vs everything else PascalCase |
-| Class purpose ambiguous | `Object` vs `SceneObjects`; `Scene` vs `ScenePipelines`; `ComputeShaderPipelines` class vs same-name folder |
-| Shader stage suffix | `ObjectBasicFS.frag` (suffix) vs `quad.frag` (none) |
-| Shader file case | `MeshtoSdf.comp` (cpp `MeshToSdf.cpp`) |
-| Literal space in filename | `sdfCompute _pottery.comp` |
-| Anachronistic prefix | `PGE` namespace throughout |
-| Numeric versioning | `sdfCompute.comp` / `sdfCompute2.comp` (which is live?) |
-| Folder casing | `Imgui/` (vendored) vs `Graphics/IMGUI/` (ours) |
-
----
-
-## 9. Pain pointers (observations only)
-
-1. **Scene is doing 8 unrelated jobs.** Camera, input, brush, render resources, gameplay graph, stats, render flags, lighting. The de facto "shared state" mechanism.
-2. **`base + scene` as global bus.** Every subsystem reaches through them. No isolation, no scoping, no clear contracts.
-3. **`ComputeShaderPipelines` is both a class and a folder with the same name.** Awkward; the class is a thin wrapper that mostly dispatches to its members.
-4. **`GUI/` has one file.** Disproportionate folder.
-5. **No render-graph / pass abstraction.** `Scene::renderPass` records command buffers; `PostProcessingManager::renderPass` records its own; subsystems each have ad-hoc dispatch.
-6. **Shader/file naming has at least 4 conventions in use simultaneously.** No enforced format.
-7. **At least 3 dead C++ files**, plus literal "Copy" files, plus inactive shaders not in `compile.bat`.
-
----
-
-## Next steps in this effort
-
-- **Step 2** (conversation): pick top pain points from §9. Decide principles for the target architecture.
-- **Step 3**: draft target structure doc (`BAKEIT_ARCHITECTURE_TARGET.md` or similar).
-- **Step 4**: migration plan, broken into small commits.
-- **Step 5**: execute, one phase at a time, with engine always runnable.
+- Includes are **project-root-relative** (`#include "Core/Vulkan/VulkanBase.h"`);
+  `$(ProjectDir)` is on the include path. Same-folder includes stay bare.
+- Shaders: `<Feature><What><Stage>` with `VS`/`FS`/`CS` suffix; compile.bat is a
+  recursive loop — new shader files need no script edit.
+- New features: folder under `Features/` + `shaders/<Feature>/`, constructor
+  takes `EngineContext&`, register update in the frame loop.
+- File moves must update `VulkanEngine.vcxproj` **and** `.filters`.

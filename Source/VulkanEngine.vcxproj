@@ -250,7 +250,7 @@ if exist "$(SolutionDir)ThirdParty\Libs\glfw3.dll" copy /Y "$(SolutionDir)ThirdP
     <ClInclude Include="Features\Volumetric\Bake\MeshToSdf.h" />
     <ClInclude Include="World\Model.h" />
     <ClInclude Include="World\Object.h" />
-    <ClInclude Include="Core\Resources\PGEResourceTypes.h" />
+    <ClInclude Include="Core\Resources\ResourceTypes.h" />
     <ClInclude Include="Render\PostProcess\PostProcessingManager.h" />
     <ClInclude Include="Render\Renderer.h" />
     <ClInclude Include="Render\PostProcess\Quad.h" />

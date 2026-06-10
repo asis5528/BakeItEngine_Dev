@@ -7,7 +7,7 @@ struct fluidUBO {
 	int Frame;
 
 };
-GaussianFluidSim::GaussianFluidSim(EngineContext& ctx, PGEResourceTypes::Texture3D sdftex)
+GaussianFluidSim::GaussianFluidSim(EngineContext& ctx, ResourceTypes::Texture3D sdftex)
 {
 	this->base = ctx.base;
 	this->scene = ctx.scene;

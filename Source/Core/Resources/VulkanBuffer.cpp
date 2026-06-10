@@ -228,7 +228,7 @@ std::vector<SBO> VBuffer::createStorageBuffers(std::vector<uint64_t> bufferSizes
 
 
 //Remove making sampler for each image,add a feature to initialize bunch of samplers at first and assigned them to different images
-PGEResourceTypes::Texture VBuffer::createTexturefromBuffer(VulkanTexture& texture,void *pixels) {
+ResourceTypes::Texture VBuffer::createTexturefromBuffer(VulkanTexture& texture,void *pixels) {
     VkDeviceSize imageSize = texture.width * texture.height * 4;
     VkFormat format = VK_FORMAT_R8G8B8A8_SRGB;
 
@@ -254,7 +254,7 @@ PGEResourceTypes::Texture VBuffer::createTexturefromBuffer(VulkanTexture& textur
     texture.imageView = vimage.imageView;
     texture.imageMemory = vimage.imageMemory;
     texture.imageSampler = createTextureSampler(texture.mipLevels);
-    PGEResourceTypes::Texture Ptexture;
+    ResourceTypes::Texture Ptexture;
     Ptexture.id =  ResourceManager::addTexture(texture);
     Ptexture.width = texture.width;
     Ptexture.height = texture.height;
@@ -263,7 +263,7 @@ PGEResourceTypes::Texture VBuffer::createTexturefromBuffer(VulkanTexture& textur
     // createBuffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
 }
 
-PGEResourceTypes::Texture3D VBuffer::createTexture3DfromBuffer(VulkanTexture3D& texture, void* pixels) {
+ResourceTypes::Texture3D VBuffer::createTexture3DfromBuffer(VulkanTexture3D& texture, void* pixels) {
     VkDeviceSize imageSize = texture.width * texture.height * texture.depth * 4;
     VkFormat format = VK_FORMAT_R8G8B8A8_SRGB;
 
@@ -289,7 +289,7 @@ PGEResourceTypes::Texture3D VBuffer::createTexture3DfromBuffer(VulkanTexture3D& 
     texture.imageView = vimage.imageView;
     texture.imageMemory = vimage.imageMemory;
     texture.imageSampler = createTextureSampler(texture.mipLevels);
-    PGEResourceTypes::Texture3D Ptexture;
+    ResourceTypes::Texture3D Ptexture;
     Ptexture.id = ResourceManager::addTexture(texture);
     Ptexture.width = texture.width;
     Ptexture.height = texture.height;
@@ -300,7 +300,7 @@ PGEResourceTypes::Texture3D VBuffer::createTexture3DfromBuffer(VulkanTexture3D& 
 }
 
 
-PGEResourceTypes::Texture3D VBuffer::createTexture3DGeneral(int w, int h, int d) {
+ResourceTypes::Texture3D VBuffer::createTexture3DGeneral(int w, int h, int d) {
     VulkanTexture3D texture;
     int width = w;
     int height = h;
@@ -326,7 +326,7 @@ PGEResourceTypes::Texture3D VBuffer::createTexture3DGeneral(int w, int h, int d)
     texture.imageView = image.imageView;
     texture.imageMemory = image.imageMemory;
     texture.imageSampler = createTextureSampler(1);//miplevels as parameter btw
-    PGEResourceTypes::Texture3D Ptexture;
+    ResourceTypes::Texture3D Ptexture;
     Ptexture.id = ResourceManager::addTexture(texture);
     Ptexture.width = texture.width;
     Ptexture.height = texture.height;

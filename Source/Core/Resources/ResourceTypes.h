@@ -1,5 +1,5 @@
 #pragma once
-namespace PGEResourceTypes
+namespace ResourceTypes
 {
 	struct Texture {
 		__int64 id;
