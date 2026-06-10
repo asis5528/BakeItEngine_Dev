@@ -1,0 +1,45 @@
+#version 450
+
+// SdfDrawListCS - builds the editable chunk's draw list on the GPU.
+//
+// One thread per block: every allocated block (blocks[i] >= 0) appends its
+// ID to the instance buffer and bumps the indirect command's instanceCount.
+// The count is reset to 0 by a vkCmdFillBuffer recorded just before this
+// dispatch (ComputePipeline::submitDrawListBuild).
+//
+// This produces the broad "allocated" set used while the brush is editing -
+// the strict surface-filtered set still comes from the CPU release-path scan,
+// which writes the same buffers through updateIndirectInstanceList.
+// IDs land in atomic order (unordered); instance order does not matter for
+// the depth-tested opaque brick draw.
+
+layout(local_size_x = 256) in;
+
+layout(std430, binding = 0) readonly buffer BlockBuffer {
+    int blocks[];   // 64^3 block table: brick index | flags, negative = empty
+};
+layout(std430, binding = 1) writeonly buffer InstanceIds {
+    int instanceIds[];
+};
+layout(std430, binding = 2) buffer DrawCommand {
+    uint indexCount;
+    uint instanceCount;
+    uint firstIndex;
+    int  vertexOffset;
+    uint firstInstance;
+};
+
+const uint TOTAL_BLOCKS = 64u * 64u * 64u;
+
+void main()
+{
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= TOTAL_BLOCKS) {
+        return;
+    }
+    if (blocks[i] < 0) {
+        return;
+    }
+    uint slot = atomicAdd(instanceCount, 1u);
+    instanceIds[slot] = int(i);
+}

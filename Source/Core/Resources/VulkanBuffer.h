@@ -16,6 +16,13 @@ struct VBuffer {
 	void createIndexBuffer(Mesh& mesh);
 	void createInstanceIdBuffer(Mesh& mesh, uint32_t instanceCount);
 	void updateInstanceIdBuffer(Mesh& mesh, const std::vector<int32_t>& instanceIds);
+	// GPU-driven draw list: host-visible VkDrawIndexedIndirectCommand the
+	// compaction compute (or the CPU helpers below) writes the instance
+	// count into; Mesh::draw consumes it via vkCmdDrawIndexedIndirect.
+	void createIndirectDrawBuffer(Mesh& mesh);
+	void setIndirectInstanceCount(Mesh& mesh, uint32_t count);
+	uint32_t readIndirectInstanceCount(Mesh& mesh);
+	void updateIndirectInstanceList(Mesh& mesh, const std::vector<int32_t>& instanceIds);
 	std::vector<UBO> createUniformBuffers(std::vector<uint64_t> Buffersize);
 	std::vector<SBO> createStorageBuffers(std::vector<uint64_t> bufferSizes);
 //	std::vector 

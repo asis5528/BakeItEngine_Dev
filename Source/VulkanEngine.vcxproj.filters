@@ -19,6 +19,7 @@
   <ItemGroup>
     <None Include="shaders\Sdf\SdfBrushCS.comp" />
     <None Include="shaders\Sdf\SdfLod1CS.comp" />
+    <None Include="shaders\Sdf\SdfDrawListCS.comp" />
     <None Include="shaders\Fluid\GaussianFluidSimCS.comp" />
     <None Include="shaders\Sdf\MeshToSdfCS.comp" />
   </ItemGroup>

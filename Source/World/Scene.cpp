@@ -222,6 +222,10 @@ void Scene::clean() {
             vkDestroyBuffer(base->device, mesh.instanceIdBuffer, nullptr);
             vkFreeMemory(base->device, mesh.instanceIdBufferMemory, nullptr);
         }
+        if (mesh.indirectDrawBuffer != VK_NULL_HANDLE) {
+            vkDestroyBuffer(base->device, mesh.indirectDrawBuffer, nullptr);
+            vkFreeMemory(base->device, mesh.indirectDrawBufferMemory, nullptr);
+        }
     }
 
     renderer->clean();

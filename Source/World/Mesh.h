@@ -88,6 +88,13 @@ struct Mesh {
     uint32_t instanceCount = 0;
     uint32_t instanceCapacity = 0;
     bool hasInstanceIdBuffer = false;
+    // GPU-driven draw: a VkDrawIndexedIndirectCommand whose instanceCount is
+    // written on the GPU (or by the CPU helpers); draw() uses
+    // vkCmdDrawIndexedIndirect so command buffers never re-record for count
+    // changes. instanceCount above is only a CPU-side mirror for the UI then.
+    VkBuffer indirectDrawBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory indirectDrawBufferMemory = VK_NULL_HANDLE;
+    bool useIndirectDraw = false;
     glm::vec4 color;
     int texID = -1;
     int matID = 0;

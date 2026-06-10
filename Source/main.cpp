@@ -243,7 +243,7 @@ private:
             scene->SBOs[0][3],
             scene->SBOs[0][5]
         };
-        base->vbuffer->updateInstanceIdBuffer(scene->meshes[scene->objects[0].meshID[0]], {});
+        base->vbuffer->updateIndirectInstanceList(scene->meshes[scene->objects[0].meshID[0]], {});
         clines->createLodObjects();
        // clines->createStaticFloorObject();
         //scene->meshes[scene->objects[0].meshID[0]].matID =

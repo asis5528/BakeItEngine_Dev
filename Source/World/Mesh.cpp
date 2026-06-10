@@ -13,10 +13,14 @@ void Mesh::draw(VkCommandBuffer commandBuffer) {
 
     vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
-  
-    if(hasInstanceIdBuffer){
-    vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(indices.size()), 
-        hasInstanceIdBuffer ? instanceCount : (64u * 64u * 64u), 
+
+    if (hasInstanceIdBuffer && useIndirectDraw && indirectDrawBuffer != VK_NULL_HANDLE) {
+        // Instance count comes from the GPU-written indirect command.
+        vkCmdDrawIndexedIndirect(commandBuffer, indirectDrawBuffer, 0, 1, sizeof(VkDrawIndexedIndirectCommand));
+    }
+    else if(hasInstanceIdBuffer){
+    vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(indices.size()),
+        hasInstanceIdBuffer ? instanceCount : (64u * 64u * 64u),
         //1,
         0, 0, 0);
     }

@@ -30,6 +30,11 @@ public:
 	std::vector<SBO> lod1SBO;
 	ComputePipeline* comp;
 	ComputePipeline* lod1Builder;
+	// Builds the editable chunk's draw list on the GPU from blocks[] during
+	// brush drags (no CPU readback, no command re-record); the release-path
+	// strict scan still uploads its filtered list through the same indirect
+	// command.
+	ComputePipeline* drawListBuilder = nullptr;
 	VulkanBase* base;
 	Scene* scene;
 	glm::vec3 chunkTranslationWS = glm::vec3(0.0f);
@@ -51,6 +56,10 @@ public:
 	std::vector<int32_t> strictScanRenderableIds;
 	std::vector<int32_t> fineActiveIds;
 	std::vector<int32_t> lod1ActiveIds;
+	// True while the editable mesh's instance list was last written by the
+	// GPU compaction pass (during/after a drag, until the strict scan
+	// uploads its filtered list) - fineActiveIds is stale in that window.
+	bool fineListGpuOwned = false;
 	int lod1ObjectIndex = -1;
 	int lod1MeshIndex = -1;
 	bool coarseLodSelected = false;
@@ -67,5 +76,6 @@ public:
 	void finalizeStrokeChunk(float time);
 	void updateSnapshotChunks(float time);
 	void clearEditableChunk();
+	Mesh* findEditableMesh();
 };
 

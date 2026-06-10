@@ -241,6 +241,36 @@ SdfEditor::SdfEditor(EngineContext& ctx)
 	comp->setupDescriptors(computeUBO, {}, computeDescriptorSBOs);
 	comp->dispatch(1, 1, 1);
 
+	// GPU-driven draw list for the editable chunk: a compaction pass writes
+	// active block IDs + the instance count straight from blocks[]; the mesh
+	// draws via vkCmdDrawIndexedIndirect, so brush edits never need a CPU
+	// readback or a command-buffer re-record to change what is drawn.
+	if (Mesh* fineMesh = findEditableMesh()) {
+		if (fineMesh->hasInstanceIdBuffer) {
+			base->vbuffer->createIndirectDrawBuffer(*fineMesh);
+
+			ComputeInput drawListInput;
+			drawListInput.computeShaderPath = "shaders/Sdf/SdfDrawListCS.spv";
+			drawListInput.descriptorTypes = {
+				VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+				VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+				VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+			};
+			drawListBuilder = new ComputePipeline(base, drawListInput);
+
+			SBO instanceSbo{};
+			instanceSbo.buffer = fineMesh->instanceIdBuffer;
+			instanceSbo.bufferMemory = fineMesh->instanceIdBufferMemory;
+			instanceSbo.size = sizeof(int32_t) * fineMesh->instanceCapacity;
+			SBO indirectSbo{};
+			indirectSbo.buffer = fineMesh->indirectDrawBuffer;
+			indirectSbo.bufferMemory = fineMesh->indirectDrawBufferMemory;
+			indirectSbo.size = sizeof(VkDrawIndexedIndirectCommand);
+			drawListBuilder->setupDescriptors({}, {}, { computeSBO[1], instanceSbo, indirectSbo });
+			drawListBuilder->ensureCommandResources();
+		}
+	}
+
 	const uint32_t lod1TotalBlocks = lod1BlocksPerAxis * lod1BlocksPerAxis * lod1BlocksPerAxis;
 	const uint32_t lod1AtlasCapacityBricks = lod1TotalBlocks;
 	lod1SBO = base->vbuffer->createStorageBuffers({
@@ -345,6 +375,19 @@ void SdfEditor::uploadChunkSpatialData()
 	uploadedChunkTranslationWS = chunkTranslationWS;
 }
 
+Mesh* SdfEditor::findEditableMesh()
+{
+	for (Object& obj : scene->objects) {
+		if (!obj.hasMesh) continue;
+		for (size_t i = 0; i < obj.meshID.size(); ++i) {
+			if (i >= obj.shader.size()) continue;
+			if (obj.shader[i].graphicsPipeline != scene->pipelines[4]) continue;
+			return &scene->meshes[obj.meshID[i]];
+		}
+	}
+	return nullptr;
+}
+
 void SdfEditor::clearEditableChunk()
 {
 	const uint32_t totalBlocks = chunkBlocksPerAxis * chunkBlocksPerAxis * chunkBlocksPerAxis;
@@ -365,6 +408,10 @@ void SdfEditor::clearEditableChunk()
 	strictScanRenderableIds.clear();
 	fineActiveIds.clear();
 	lod1ActiveIds.clear();
+	if (Mesh* fineMesh = findEditableMesh()) {
+		base->vbuffer->setIndirectInstanceCount(*fineMesh, 0);
+	}
+	fineListGpuOwned = false;
 }
 
 void SdfEditor::rebuildLod1()
@@ -400,7 +447,9 @@ void SdfEditor::updateLodSelection()
 
 	Mesh& fineMesh = scene->meshes[scene->objects[0].meshID[0]];
 	Mesh& coarseMesh = scene->meshes[static_cast<size_t>(lod1MeshIndex)];
-	const uint32_t desiredFineCount = desiredCoarse ? 0u : static_cast<uint32_t>(fineActiveIds.size());
+	const uint32_t desiredFineCount = desiredCoarse
+		? 0u
+		: (fineListGpuOwned ? fineMesh.instanceCount : static_cast<uint32_t>(fineActiveIds.size()));
 	const uint32_t desiredCoarseCount = desiredCoarse ? static_cast<uint32_t>(lod1ActiveIds.size()) : 0u;
 	const bool needsRefresh =
 		(coarseLodSelected != desiredCoarse) ||
@@ -411,7 +460,27 @@ void SdfEditor::updateLodSelection()
 		return;
 	}
 
-	base->vbuffer->updateInstanceIdBuffer(fineMesh, desiredCoarse ? std::vector<int32_t>{} : fineActiveIds);
+	if (fineMesh.useIndirectDraw) {
+		if (desiredCoarse) {
+			base->vbuffer->setIndirectInstanceCount(fineMesh, 0);
+		}
+		else if (fineListGpuOwned && drawListBuilder) {
+			// fineActiveIds is stale while the GPU owns the list; rebuild it
+			// straight from blocks[] instead of uploading the stale copy.
+			const uint32_t totalBlocks = chunkBlocksPerAxis * chunkBlocksPerAxis * chunkBlocksPerAxis;
+			drawListBuilder->submitDrawListBuild(
+				fineMesh.indirectDrawBuffer,
+				offsetof(VkDrawIndexedIndirectCommand, instanceCount),
+				0,
+				(totalBlocks + 255u) / 256u, 1, 1);
+		}
+		else {
+			base->vbuffer->updateIndirectInstanceList(fineMesh, fineActiveIds);
+		}
+	}
+	else {
+		base->vbuffer->updateInstanceIdBuffer(fineMesh, desiredCoarse ? std::vector<int32_t>{} : fineActiveIds);
+	}
 	base->vbuffer->updateInstanceIdBuffer(coarseMesh, desiredCoarse ? lod1ActiveIds : std::vector<int32_t>{});
 	coarseLodSelected = desiredCoarse;
 
@@ -823,27 +892,7 @@ void SdfEditor::update(float time)
 		const glm::ivec3 dispatchBlockCount = dispatchBlockMax - dispatchBlockMin + glm::ivec3(1);
 		const bool computeReady = (vkGetFenceStatus(base->device, comp->computeFence) == VK_SUCCESS);
 
-		Mesh* targetMesh = nullptr;
-		for (Object& obj : scene->objects) {
-			if (!obj.hasMesh) continue;
-			for (size_t i = 0; i < obj.meshID.size(); ++i) {
-				if (i >= obj.shader.size()) continue;
-				if (obj.shader[i].graphicsPipeline != scene->pipelines[4]) continue;
-				targetMesh = &scene->meshes[obj.meshID[i]];
-				break;
-			}
-			if (targetMesh) break;
-		}
-		
-		if (computeReady && targetMesh && targetMesh->hasInstanceIdBuffer) {
-			const uint32_t totalBlocks = chunkBlocksPerAxis * chunkBlocksPerAxis * chunkBlocksPerAxis;
-			std::vector<int32_t> blockState(totalBlocks, -1);
-			computeSBO[1].read(base->device, sizeof(int32_t) * blockState.size(), blockState.data());
-			fineActiveIds = BuildAllocatedActiveIds(blockState);
-			base->vbuffer->updateInstanceIdBuffer(*targetMesh, fineActiveIds);
-			volume.stats.dirtyBlockCount = static_cast<int>(fineActiveIds.size());
-			scene->renderer->renderPassDirty = true;
-		}
+		Mesh* targetMesh = findEditableMesh();
 
 		if (computeReady) {
 			pubo.DispatchBaseBlock = glm::ivec4(dispatchBlockMin, 0);
@@ -854,6 +903,23 @@ void SdfEditor::update(float time)
 				static_cast<uint32_t>(dispatchBlockCount.x),
 				static_cast<uint32_t>(dispatchBlockCount.y),
 				static_cast<uint32_t>(dispatchBlockCount.z));
+
+			// Rebuild the draw list on the GPU right behind the brush pass:
+			// blocks[] -> compacted instance IDs + indirect instance count.
+			// No CPU readback, no instance upload, no command re-record.
+			if (drawListBuilder && targetMesh && targetMesh->useIndirectDraw) {
+				const uint32_t totalBlocks = chunkBlocksPerAxis * chunkBlocksPerAxis * chunkBlocksPerAxis;
+				drawListBuilder->submitDrawListBuild(
+					targetMesh->indirectDrawBuffer,
+					offsetof(VkDrawIndexedIndirectCommand, instanceCount),
+					0,
+					(totalBlocks + 255u) / 256u, 1, 1);
+				fineListGpuOwned = true;
+
+				// HUD mirror: last completed list's count (host-visible).
+				volume.stats.dirtyBlockCount = static_cast<int>(
+					base->vbuffer->readIndirectInstanceCount(*targetMesh));
+			}
 		}
 	}
 
@@ -917,19 +983,18 @@ void SdfEditor::update(float time)
 			if (strictSurfaceScanCursor >= totalBlocks) {
 				fineActiveIds.swap(strictScanRenderableIds);
 
-				Mesh* targetMesh = nullptr;
-				for (Object& obj : scene->objects) {
-					if (!obj.hasMesh) continue;
-					for (size_t i = 0; i < obj.meshID.size(); ++i) {
-						if (i >= obj.shader.size()) continue;
-						if (obj.shader[i].graphicsPipeline != scene->pipelines[4]) continue;
-						targetMesh = &scene->meshes[obj.meshID[i]];
-						break;
-					}
-					if (targetMesh) break;
-				}
+				Mesh* targetMesh = findEditableMesh();
 				if (targetMesh && targetMesh->hasInstanceIdBuffer) {
-					base->vbuffer->updateInstanceIdBuffer(*targetMesh, fineActiveIds);
+					if (targetMesh->useIndirectDraw) {
+						// Strict surface-filtered list replaces the broad
+						// GPU-built drag list; CPU owns it again until the
+						// next drag.
+						base->vbuffer->updateIndirectInstanceList(*targetMesh, fineActiveIds);
+						fineListGpuOwned = false;
+					}
+					else {
+						base->vbuffer->updateInstanceIdBuffer(*targetMesh, fineActiveIds);
+					}
 				}
 				volume.stats.dirtyBlockCount = static_cast<int>(fineActiveIds.size());
 

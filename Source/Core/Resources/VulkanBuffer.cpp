@@ -101,7 +101,8 @@ void VBuffer::createInstanceIdBuffer(Mesh& mesh, uint32_t instanceCount) {
 
     vulkandevice->createBuffer(
         bufferSize,
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        // STORAGE so a compaction compute can write the list GPU-side.
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
         mesh.instanceIdBuffer,
         mesh.instanceIdBufferMemory
@@ -152,6 +153,69 @@ void VBuffer::updateInstanceIdBuffer(Mesh& mesh, const std::vector<int32_t>& ins
     vkFreeMemory(vulkandevice->device, stagingBufferMemory, nullptr);
 
     mesh.instanceCount = clampedCount;
+}
+
+void VBuffer::createIndirectDrawBuffer(Mesh& mesh) {
+    if (mesh.indirectDrawBuffer != VK_NULL_HANDLE) {
+        return;
+    }
+
+    // Host-visible so the CPU can write/read the count directly while the
+    // compaction compute writes it as a storage buffer.
+    vulkandevice->createBuffer(
+        sizeof(VkDrawIndexedIndirectCommand),
+        VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        mesh.indirectDrawBuffer,
+        mesh.indirectDrawBufferMemory
+    );
+
+    VkDrawIndexedIndirectCommand cmd{};
+    cmd.indexCount = static_cast<uint32_t>(mesh.indices.size());
+    cmd.instanceCount = 0;
+    cmd.firstIndex = 0;
+    cmd.vertexOffset = 0;
+    cmd.firstInstance = 0;
+
+    void* data = nullptr;
+    vkMapMemory(vulkandevice->device, mesh.indirectDrawBufferMemory, 0, sizeof(cmd), 0, &data);
+    memcpy(data, &cmd, sizeof(cmd));
+    vkUnmapMemory(vulkandevice->device, mesh.indirectDrawBufferMemory);
+
+    mesh.useIndirectDraw = true;
+}
+
+void VBuffer::setIndirectInstanceCount(Mesh& mesh, uint32_t count) {
+    if (mesh.indirectDrawBuffer == VK_NULL_HANDLE) {
+        return;
+    }
+    void* data = nullptr;
+    vkMapMemory(vulkandevice->device, mesh.indirectDrawBufferMemory, offsetof(VkDrawIndexedIndirectCommand, instanceCount), sizeof(uint32_t), 0, &data);
+    memcpy(data, &count, sizeof(uint32_t));
+    vkUnmapMemory(vulkandevice->device, mesh.indirectDrawBufferMemory);
+    mesh.instanceCount = count;
+}
+
+uint32_t VBuffer::readIndirectInstanceCount(Mesh& mesh) {
+    if (mesh.indirectDrawBuffer == VK_NULL_HANDLE) {
+        return mesh.instanceCount;
+    }
+    uint32_t count = 0;
+    void* data = nullptr;
+    vkMapMemory(vulkandevice->device, mesh.indirectDrawBufferMemory, offsetof(VkDrawIndexedIndirectCommand, instanceCount), sizeof(uint32_t), 0, &data);
+    memcpy(&count, data, sizeof(uint32_t));
+    vkUnmapMemory(vulkandevice->device, mesh.indirectDrawBufferMemory);
+    mesh.instanceCount = count; // CPU-side mirror for the UI
+    return count;
+}
+
+void VBuffer::updateIndirectInstanceList(Mesh& mesh, const std::vector<int32_t>& instanceIds) {
+    updateInstanceIdBuffer(mesh, instanceIds);
+    uint32_t count = static_cast<uint32_t>(instanceIds.size());
+    if (count > mesh.instanceCapacity) {
+        count = mesh.instanceCapacity;
+    }
+    setIndirectInstanceCount(mesh, count);
 }
 
 std::vector<UBO> VBuffer::createUniformBuffers(std::vector<uint64_t> Buffersize) {
