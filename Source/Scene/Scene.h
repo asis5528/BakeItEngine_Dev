@@ -7,6 +7,7 @@
 #include "Render/PostProcess/PostProcessingManager.h"
 #include "Core/Resources/PGEResourceTypes.h"
 #include "Platform/Desktop/Input.h"
+#include "World/Camera/Camera.h"
 #include <array>
 
 
@@ -25,7 +26,6 @@ public:
 	std::vector<Object> objects;
 	int selectedID;
 	std::vector<Quad*> quads;
-	glm::vec2 viewport_resolution;
 	Node rootNode;
 	std::vector<Framebuffer*> framebuffers;
 	VkDescriptorPool descriptorPool;
@@ -34,15 +34,9 @@ public:
 	PostProcessingManager* postprocessingManager;
 	VulkanBase* base;
 	ScenePipelines *scenePipelines;
-	 glm::mat4 proj[2];
-	 glm::mat4 view[2];
-	 float camFovDegrees = 45.0f;
-	 float camNearPlane = 0.001f;
-	float camFarPlane = 100.0f;
-	glm::vec3 camPos;
-	float offset = 2.;
 	bool dispatch = false;
 	const Input* input = nullptr; // routed input, owned by Platform (wired in main.cpp)
+	Camera* camera = nullptr;     // world camera, owned by the engine root (wired in main.cpp)
 	 glm::vec4 brushData = glm::vec4(0.0f, 0.0f, 0.2f, 0.01f);
 	 glm::vec4 brushColor = glm::vec4(1.0f, 0.35f, 0.75f, 1.0f);
 	 bool brushUseSphere = false;

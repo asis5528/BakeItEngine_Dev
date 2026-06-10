@@ -131,6 +131,9 @@
     <ClCompile Include="Core\Resources\ResourceManager.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="World\Camera\Camera.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="Platform\Desktop\Input.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -200,6 +203,7 @@
     <ClInclude Include="Features\Volumetric\Edit\Pottery.h" />
     <ClInclude Include="Features\Volumetric\SdfVolume.h" />
     <ClInclude Include="Platform\Desktop\Input.h" />
+    <ClInclude Include="World\Camera\Camera.h" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="REMAINDER.txt" />

@@ -118,6 +118,7 @@ private:
 
     ComputeShaderPipelines *clines;
     DesktopInput input;
+    Camera camera;
     void initWindow() {
         glfwInit();
 
@@ -180,6 +181,7 @@ private:
         // ResourceManager& resourceManager = ResourceManager::getInstance();
         scene = new Scene(base);
         scene->input = &input.state;
+        scene->camera = &camera;
         loader = new Loader(base, scene);
         editorGui = new EditorGui(scene, base);
 
@@ -268,7 +270,6 @@ private:
             current_ticks = clock();
             glfwPollEvents();
             input.update();
-            scene->offset -= float(input.state.scrollDelta) * (input.state.altDown ? 0.001f : 0.1f);
 
             drawFrame();
             delta_ticks = clock() - current_ticks; //the time, in ms, that took to render the scene
@@ -531,7 +532,7 @@ private:
 
             glm::decompose(viewpos, scale, rot, position, skew, pers);
             //std::cout << position.x << " " << position.y << " " << position.z << "\n";
-            scene->camPos = glm::vec3(position.x,position.z,-position.y);
+            scene->camera->position = glm::vec3(position.x,position.z,-position.y);
             //  std::cout << position.x << " " << position.y << " " << position.z << "\n";
              // scene->objects[0].finalMatrix = glm::translate(glm::mat4(1.),glm::vec3(position.x,position.y, position.z));
 
@@ -619,11 +620,11 @@ private:
 
 
 
-        scene->proj[0] = proj[0];
-        scene->view[0] = view[0];
+        scene->camera->proj[0] = proj[0];
+        scene->camera->view[0] = view[0];
 
-        scene->proj[1] = proj[1];
-        scene->view[1] = view[1];
+        scene->camera->proj[1] = proj[1];
+        scene->camera->view[1] = view[1];
     }
 
     void renderVR() {
@@ -635,8 +636,8 @@ private:
         vData.m_pInstance = (VkInstance_T*)base->vkinstance;
         vData.m_pQueue = (VkQueue_T*)base->queue;
         vData.m_nQueueFamilyIndex = base->vulkandevice->queueID;
-        vData.m_nWidth = scene->viewport_resolution.x;
-        vData.m_nHeight = scene->viewport_resolution.y;
+        vData.m_nWidth = scene->camera->viewportResolution.x;
+        vData.m_nHeight = scene->camera->viewportResolution.y;
         vData.m_nFormat = VK_FORMAT_R8G8B8A8_SRGB;
         vData.m_nSampleCount = 1;
         vData.m_unArraySize = 2;
@@ -650,8 +651,8 @@ private:
         vulkanData.m_pInstance = (VkInstance_T*)base->vkinstance;
         vulkanData.m_pQueue = (VkQueue_T*)base->queue;
         vulkanData.m_nQueueFamilyIndex = base->vulkandevice->queueID;
-        vulkanData.m_nWidth = scene->viewport_resolution.x;
-        vulkanData.m_nHeight = scene->viewport_resolution.y;
+        vulkanData.m_nWidth = scene->camera->viewportResolution.x;
+        vulkanData.m_nHeight = scene->camera->viewportResolution.y;
         vulkanData.m_nFormat = base->swapChain->swapChainImageFormat;
         vulkanData.m_nSampleCount = 1;
 
@@ -679,8 +680,8 @@ private:
         vData_right.m_pInstance = (VkInstance_T*)base->vkinstance;
         vData_right.m_pQueue = (VkQueue_T*)base->queue;
         vData_right.m_nQueueFamilyIndex = base->vulkandevice->queueID;
-        vData_right.m_nWidth = scene->viewport_resolution.x;
-        vData_right.m_nHeight = scene->viewport_resolution.y;
+        vData_right.m_nWidth = scene->camera->viewportResolution.x;
+        vData_right.m_nHeight = scene->camera->viewportResolution.y;
         vData_right.m_nFormat = base->swapChain->swapChainImageFormat;
         vData_right.m_nSampleCount = 1;
         vData_right.m_unArraySize = 2;

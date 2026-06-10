@@ -150,8 +150,8 @@ void DrawSdfAtlasUsageBar(const char* label, float fraction, int usedBricks, int
  void EditorGui::setupGui() {
      /*
     if(frameID<3){
-   m_scene->viewport_resolution.x = 512;
-   m_scene->viewport_resolution.y = 512;
+   m_scene->camera->viewportResolution.x = 512;
+   m_scene->camera->viewportResolution.y = 512;
    vkDeviceWaitIdle(m_base->device);
    m_scene->recreate();
    m_scene->renderPass();
@@ -213,9 +213,9 @@ void DrawSdfAtlasUsageBar(const char* label, float fraction, int usedBricks, int
      ImGui::Begin("Viewport", &k1, ImGuiWindowFlags_NoTitleBar);
      ImVec2 viewport_size = ImGui::GetWindowSize();
 
-     if (viewport_size.x != m_scene->viewport_resolution.x || viewport_size.y != m_scene->viewport_resolution.y) {
-         m_scene->viewport_resolution.x = viewport_size.x;
-         m_scene->viewport_resolution.y = viewport_size.y;
+     if (viewport_size.x != m_scene->camera->viewportResolution.x || viewport_size.y != m_scene->camera->viewportResolution.y) {
+         m_scene->camera->viewportResolution.x = viewport_size.x;
+         m_scene->camera->viewportResolution.y = viewport_size.y;
          vkDeviceWaitIdle(m_base->device);
          m_scene->recreate();
          m_scene->renderPass();

@@ -5,7 +5,7 @@ PostProcessingManager::PostProcessingManager(VulkanBase* base, Scene* scene, Fra
 {
 	this->base = base;
 	this->previousFB = previousFB;
-	scene->view[0] = glm::mat4(1.0f);
+	scene->camera->view[0] = glm::mat4(1.0f);
 	postPass = new PostProcessPass(base, scene, previousFB);
 	// Expose only the final output framebuffer (what the Editor viewport shows).
 	if (!postPass->framebuffers.empty()) {

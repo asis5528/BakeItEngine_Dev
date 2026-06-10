@@ -175,6 +175,7 @@ if exist "$(SolutionDir)ThirdParty\Libs\glfw3.dll" copy /Y "$(SolutionDir)ThirdP
     <ClCompile Include="Features\Fluid\GaussianFluidSim.cpp" />
     <ClCompile Include="Features\Volumetric\Edit\Pottery.cpp" />
     <ClCompile Include="Platform\Desktop\Input.cpp" />
+    <ClCompile Include="World\Camera\Camera.cpp" />
     <ClCompile Include="Core\Pipelines\ComputePipeline.cpp" />
     <ClCompile Include="Editor\EditorGui.cpp" />
     <ClCompile Include="Core\Pipelines\GraphicsPipeline.cpp" />
@@ -217,6 +218,7 @@ if exist "$(SolutionDir)ThirdParty\Libs\glfw3.dll" copy /Y "$(SolutionDir)ThirdP
     <ClInclude Include="Features\Volumetric\Edit\Pottery.h" />
     <ClInclude Include="Features\Volumetric\SdfVolume.h" />
     <ClInclude Include="Platform\Desktop\Input.h" />
+    <ClInclude Include="World\Camera\Camera.h" />
     <ClInclude Include="Core\Pipelines\ComputePipeline.h" />
     <ClInclude Include="Editor\EditorGui.h" />
     <ClInclude Include="Core\Pipelines\GraphicsPipeline.h" />

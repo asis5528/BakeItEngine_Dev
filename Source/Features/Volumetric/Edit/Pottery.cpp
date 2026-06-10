@@ -394,7 +394,7 @@ void Pottery::updateLodSelection()
 	glm::vec3 boundsMax;
 	ComputeChunkBounds(chunkBlocksPerAxis, chunkBlockSizeWS, chunkTranslationWS, boundsMin, boundsMax);
 	const glm::vec3 chunkCenter = 0.5f * (boundsMin + boundsMax);
-	const float camDistance = glm::distance(scene->camPos, chunkCenter);
+	const float camDistance = glm::distance(scene->camera->position, chunkCenter);
 	const bool desiredCoarse = kForceCoarseLodDebug || (camDistance > 1.35f);
 
 	Mesh& fineMesh = scene->meshes[scene->objects[0].meshID[0]];
@@ -740,8 +740,8 @@ void Pottery::update(float time)
 		if (BrushDistanceFromCamera < 0.02f) BrushDistanceFromCamera = 0.02f;
 		if (BrushDistanceFromCamera > 3.0f) BrushDistanceFromCamera = 3.0f;
 	}
-	glm::mat4 invProj = glm::inverse(scene->proj[0]);
-	glm::mat4 invView = glm::inverse(scene->view[0]);
+	glm::mat4 invProj = glm::inverse(scene->camera->proj[0]);
+	glm::mat4 invView = glm::inverse(scene->camera->view[0]);
 	float ndcX = msx * 2.0f - 1.0f;
 	float ndcY = 1.0f - msy * 2.0f;
 
@@ -749,7 +749,7 @@ void Pottery::update(float time)
 	glm::vec4 rayView = invProj * rayClip;
 	rayView = glm::vec4(rayView.x, rayView.y, -1.0f, 0.0f);
 	glm::vec3 rayDir = glm::normalize(glm::vec3(invView * rayView));
-	glm::vec3 rayOrigin = scene->camPos;
+	glm::vec3 rayOrigin = scene->camera->position;
 
 	float tEnter = 0.0f, tExit = 0.0f;
 	glm::vec3 brushCenter = rayOrigin + rayDir * BrushDistanceFromCamera; // fallback

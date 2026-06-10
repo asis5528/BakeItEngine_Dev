@@ -100,60 +100,6 @@ void Scene::renderPass() {
    
 }
 
-static float an;
-
-struct FreeCam
-{
-    glm::vec3 pos = glm::vec3(0, 0, 0);
-    float yaw = -90.0f;
-    float pitch = 0.0f;
-    float roll = 0.0f;
-};
-
-void UpdateFreeCamera(
-    FreeCam& cam,
-    glm::mat4& outView,
-    float dx, float dy,            // mouse delta (pixels)
-    float moveF, float moveR, float moveU, // movement intent (-1..1)
-    float rollInput,               // roll intent (-1..1)
-    float dt,
-    float mouseSens = 0.1f,
-    float moveSpeed = 5.0f,
-    float rollSpeed = 90.0f
-)
-{
-    // --- mouse look ---
-    cam.yaw += dx * mouseSens;
-    cam.pitch += dy * mouseSens;
-    cam.pitch = glm::clamp(cam.pitch, -89.0f, 89.0f);
-    cam.roll += rollInput * rollSpeed * dt;
-
-    // --- forward vector ---
-    glm::vec3 forward;
-    forward.x = cos(glm::radians(cam.yaw)) * cos(glm::radians(cam.pitch));
-    forward.y = sin(glm::radians(cam.pitch));
-    forward.z = sin(glm::radians(cam.yaw)) * cos(glm::radians(cam.pitch));
-    forward = glm::normalize(forward);
-
-    // --- basis ---
-    glm::vec3 worldUp = glm::vec3(0, 1, 0);
-    glm::vec3 right = glm::normalize(glm::cross(forward, worldUp));
-    glm::vec3 up = glm::normalize(glm::cross(right, forward));
-
-    if (glm::abs(cam.roll) > 0.0001f) {
-        glm::mat4 rollRot = glm::rotate(glm::mat4(1.0f), glm::radians(cam.roll), forward);
-        up = glm::normalize(glm::vec3(rollRot * glm::vec4(up, 0.0f)));
-        right = glm::normalize(glm::cross(forward, up));
-    }
-
-    // --- movement (camera space) ---
-    cam.pos += forward * moveF * moveSpeed * dt;
-    cam.pos += right * moveR * moveSpeed * dt;
-    cam.pos += up * moveU * moveSpeed * dt;
-
-    // --- view matrix ---
-    outView = glm::lookAt(cam.pos, cam.pos + forward, up);
-}
 void Scene::update(float iTime) {
     if (renderPassDirty) {
         renderPass();
@@ -172,88 +118,21 @@ void Scene::update(float iTime) {
     for (Animation& animation : animations) {
         animation.boneTransform(time);
     }
-#ifndef VR
-    ///for non vr////////
-
-    const float viewportWidth = glm::max(viewport_resolution.x, 1.0f);
-    const float viewportHeight = glm::max(viewport_resolution.y, 1.0f);
-
-    proj[0] = glm::perspective(glm::radians(camFovDegrees), viewportWidth / viewportHeight, camNearPlane,camFarPlane);
-    // offset =1.5;
-    
-    ///for non vr////////
-    
     float angle = (sin(iTime/3.)*3.1415)*0.;
- //   float an = iTime*0.;
-    const Input& in = *input;
-
-    float msx = in.mousePos.x / base->swapChain->swapChainExtent.width;
-    float msy = in.mousePos.y / base->swapChain->swapChainExtent.height;
-    static float msxold = 0.0;
-	static float msyold = 0.0;
-	float msxdelta = msx - msxold;
-	float msydelta = msy - msyold;
-	msxold = msx;
-	msyold = msy;
-
-
-    //std::cout << msx<<"\n";
-    if(in.cameraMoveMode){
-
-        an += (msx-0.5)*0.03;
-        //std::cout << an << "\n";
-	}
-   // angle = 1.4;
-   //camPos = glm::vec3(glm::sin(an) * offset,  glm::cos(an)*0., glm::cos(an ) * offset);
-   if (in.cameraMoveMode) {
-	   std::cout << "camPos: " << camPos.x << " " << camPos.y << " " << camPos.z << "\n";
-   }
- //  view[0] = glm::lookAt(camPos, glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-
-   float dx = msxdelta* base->swapChain->swapChainExtent.width*4.;
-   float dy = -msydelta* base->swapChain->swapChainExtent.height*4.;
-   static float forwardKey = 0;
-   static float backwardKey = 0;
-   static float rightKey = 0;
-   static float leftKey = 0;
-   float cameraStep = 0.005;
-   if (in.altDown) cameraStep = 0.0001;
-   forwardKey += in.wDown ? cameraStep : 0.0;
-   backwardKey += in.sDown ? cameraStep : 0.0;
-   forwardKey *= in.wDown ? 1.0 : 0.0;
-   backwardKey *= in.sDown ? 1.0 : 0.0;
-   rightKey += in.dDown ? cameraStep : 0.0;
-   leftKey += in.aDown ? cameraStep : 0.0;
-   rightKey *= in.dDown ? 1.0 : 0.0;
-   leftKey *= in.aDown ? 1.0 : 0.0;
-
-   float upKey = 0;
-   float downKey = 0;
-   float moveF = forwardKey - backwardKey; // W/S
-   float moveR = rightKey - leftKey;      // D/A
-   float moveU = upKey - downKey;      // Space/Shift
-   float rollInput = 0.0f;
-   rollInput += in.leftArrowDown ? 1.0f : 0.0f;
-   rollInput -= in.rightArrowDown ? 1.0f : 0.0f;
-   static FreeCam cam;
-   if (in.cameraMoveMode || in.leftArrowDown || in.rightArrowDown) {
-       float mouseDx = in.cameraMoveMode ? dx : 0.0f;
-       float mouseDy = in.cameraMoveMode ? dy : 0.0f;
-       UpdateFreeCamera(cam, view[0], mouseDx, mouseDy, moveF, moveR, moveU, rollInput, delTime);
-       camPos = cam.pos;
-   }
-
+#ifndef VR
+    camera->update(*input, delTime,
+        float(base->swapChain->swapChainExtent.width),
+        float(base->swapChain->swapChainExtent.height));
 #endif
-  //  glm::vec3 camPos;
     UniformBufferObject ubo{};
     glm::mat4 k;
 
-    ubo.view[0] = view[0];
-    ubo.proj[0] = proj[0];
+    ubo.view[0] = camera->view[0];
+    ubo.proj[0] = camera->proj[0];
     ubo.proj[0][1][1] *= -1;
 
-    ubo.view[1] = view[1];
-    ubo.proj[1] = proj[1];
+    ubo.view[1] = camera->view[1];
+    ubo.proj[1] = camera->proj[1];
     ubo.proj[1][1][1] *= -1;
 
     
@@ -351,7 +230,7 @@ void Scene::update(float iTime) {
                                 bubo.color = glm::vec4(1.0f, 0.35f, 0.75f, iTime);
                             } else {
                                 // Legacy behavior for non-volumetric basic materials.
-                                bubo.color = glm::inverse(ubo.model) * glm::vec4(camPos, 1.);
+                                bubo.color = glm::inverse(ubo.model) * glm::vec4(camera->position, 1.);
                                 bubo.color.a = iTime;
                             }
                             object.shader[i].ubos[1].map(base->device, sizeof(bubo), &bubo);
@@ -523,8 +402,8 @@ void Scene::recreate()
 {
    
     VkExtent2D ex;
-    ex.width = viewport_resolution.x;
-    ex.height = viewport_resolution.y;
+    ex.width = camera->viewportResolution.x;
+    ex.height = camera->viewportResolution.y;
 
     for (Framebuffer*& framebuffer : framebuffers) {
 
