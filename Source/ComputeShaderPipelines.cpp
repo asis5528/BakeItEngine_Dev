@@ -11,12 +11,12 @@ struct computeUbo {
 };
 
 
-ComputeShaderPipelines::ComputeShaderPipelines(VulkanBase* base,Scene *scene) {
-    this->base = base;
-    this->scene = scene;
-    meshtosdf = new MeshToSdf(base, scene);
-    fluidSim = new GaussianFluidSim(base,scene, meshtosdf->computeTexture); 
-	pottery = new Pottery(base, scene);
+ComputeShaderPipelines::ComputeShaderPipelines(EngineContext& ctx) {
+    this->base = ctx.base;
+    this->scene = ctx.scene;
+    meshtosdf = new MeshToSdf(ctx);
+    fluidSim = new GaussianFluidSim(ctx, meshtosdf->computeTexture);
+	pottery = new Pottery(ctx);
   //  ct3D = fluidSim->computeTexture;
 	scene->SBOs.push_back(pottery->computeSBO);
 	scene->SBOs.push_back(pottery->lod1SBO);

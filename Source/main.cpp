@@ -79,6 +79,7 @@ const bool enableValidationLayers = true;
 #include "Core/Resources/ResourceManager.h"
 #include "Platform/Desktop/Input.h"
 #include "Render/Renderer.h"
+#include "EngineContext.h"
 
 
 
@@ -121,6 +122,7 @@ private:
     DesktopInput input;
     Camera camera;
     Renderer* renderer;
+    EngineContext ctx;
     void initWindow() {
         glfwInit();
 
@@ -186,8 +188,13 @@ private:
         scene->camera = &camera;
         renderer = new Renderer(base);
         scene->renderer = renderer;
-        loader = new Loader(base, scene);
-        editorGui = new EditorGui(scene, base);
+        ctx.base = base;
+        ctx.scene = scene;
+        ctx.renderer = renderer;
+        ctx.camera = &camera;
+        ctx.input = &input.state;
+        loader = new Loader(ctx);
+        editorGui = new EditorGui(ctx);
 
         //ResourceManager::addTexture(createTexture(TEXTURE_PATH.c_str()));
         scene->ptextures.push_back(createTexture(TEXTURE_PATH.c_str()));
@@ -208,8 +215,7 @@ private:
           // scene->materials[0].materialData = &dat;
 
 
-        clines = new ComputeShaderPipelines(base, scene);
-        editorGui->renderer = renderer;
+        clines = new ComputeShaderPipelines(ctx);
         editorGui->sdfVolume = &clines->pottery->volume;
         editorGui->brush = &clines->pottery->brush;
         // prepareCompute();

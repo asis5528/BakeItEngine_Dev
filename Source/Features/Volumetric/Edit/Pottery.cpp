@@ -163,10 +163,10 @@ uint32_t FlattenBlockIndex(uint32_t x, uint32_t y, uint32_t z, uint32_t blocksPe
 
 }
 
-Pottery::Pottery(VulkanBase* base, Scene* scene)
+Pottery::Pottery(EngineContext& ctx)
 {
-	this->base = base;
-	this->scene = scene;
+	this->base = ctx.base;
+	this->scene = ctx.scene;
 	//int size = 64*8;
 
 	int blocksPerAxis = static_cast<int>(chunkBlocksPerAxis);

@@ -2,6 +2,7 @@
 #include "Core/Vulkan/VulkanBase.h"
 #include "World/Scene.h"
 #include "Core/Pipelines/ComputePipeline.h"
+#include "EngineContext.h"
 class GaussianFluidSim
 {
 
@@ -21,7 +22,7 @@ public:
     ComputePipeline* comp3;
 
     int Frame = 0;
-    GaussianFluidSim(VulkanBase* base, Scene* scene, PGEResourceTypes::Texture3D sdftex);
+    GaussianFluidSim(EngineContext& ctx, PGEResourceTypes::Texture3D sdftex);
     ~GaussianFluidSim();
     void update(float time);
 };

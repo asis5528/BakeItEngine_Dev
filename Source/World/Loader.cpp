@@ -4,9 +4,9 @@
 #include <glm/gtx/matrix_decompose.hpp>
 #include "Core/Resources/ResourceManager.h"
 
-Loader::Loader(VulkanBase* base, Scene* scene) {
-	this->base = base;
-	this->scene = scene;
+Loader::Loader(EngineContext& ctx) {
+	this->base = ctx.base;
+	this->scene = ctx.scene;
 }
 
 void Loader::load(int path_count, const char* paths[])

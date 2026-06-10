@@ -3,6 +3,7 @@
 #include "Core/Pipelines/ComputePipeline.h"
 #include "Features/Volumetric/SdfVolume.h"
 #include "Features/Volumetric/Edit/BrushState.h"
+#include "EngineContext.h"
 #include <glm/glm.hpp>
 #include <vector>
 class Pottery
@@ -55,7 +56,7 @@ public:
 	bool coarseLodSelected = false;
 	std::vector<SnapshotChunk> snapshotChunks;
 	std::vector<std::vector<SBO>> snapshotChunkSBOs;
-	Pottery(VulkanBase* base, Scene* scene);
+	Pottery(EngineContext& ctx);
 	~Pottery();
 	void update(float time);
 	void uploadChunkSpatialData();

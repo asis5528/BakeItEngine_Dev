@@ -196,6 +196,7 @@
     <ClInclude Include="World\Material.h" />
     <ClInclude Include="Core\Pipelines\ComputePipeline.h" />
     <ClInclude Include="ComputeShaderPipelines.h" />
+    <ClInclude Include="EngineContext.h" />
     <ClInclude Include="Features\Fluid\GaussianFluidSim.h" />
     <ClInclude Include="Render\ScenePipelines.h" />
     <ClInclude Include="Render\PostProcess\PostProcessPass.h" />

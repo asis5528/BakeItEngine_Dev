@@ -2,10 +2,10 @@
 #include "Core/Resources/ResourceManager.h"
 
 
-MeshToSdf::MeshToSdf(VulkanBase* base, Scene* scene)
+MeshToSdf::MeshToSdf(EngineContext& ctx)
 {
-	this->base = base;
-	this->scene = scene;
+	this->base = ctx.base;
+	this->scene = ctx.scene;
 	int size = 128;
 	computeTexture = base->vbuffer->createTexture3DGeneral(size, size, size);
 	ComputeInput input;

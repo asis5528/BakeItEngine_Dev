@@ -94,10 +94,10 @@ void DrawSdfAtlasUsageBar(const char* label, float fraction, int usedBricks, int
 }
 
 
- EditorGui::EditorGui(Scene *scene,VulkanBase *base)
-     : m_scene(scene),
-     m_base(base){
-	//this->scene = scene;
+ EditorGui::EditorGui(EngineContext& ctx)
+     : m_scene(ctx.scene),
+     m_base(ctx.base){
+     renderer = ctx.renderer;
 }
  void EditorGui::createdescriptor(VulkanTexture &tex) {
      ds.push_back(ImGui_ImplVulkan_AddTexture(tex.imageSampler,tex.imageView,tex.imageLayout));

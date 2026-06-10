@@ -5,6 +5,7 @@
 #include "Features/Fluid/GaussianFluidSim.h"
 #include "Features/Volumetric/Bake/MeshToSdf.h"
 #include "Features/Volumetric/Edit/Pottery.h"
+#include "EngineContext.h"
 class ComputeShaderPipelines
 {
 
@@ -26,7 +27,7 @@ public:
     GaussianFluidSim *fluidSim;
     MeshToSdf *meshtosdf;
     Pottery* pottery;
-    ComputeShaderPipelines(VulkanBase* base, Scene* scene);
+    ComputeShaderPipelines(EngineContext& ctx);
     ~ComputeShaderPipelines();
     void update(float time);
     void createLodObjects();

@@ -7,10 +7,10 @@ struct fluidUBO {
 	int Frame;
 
 };
-GaussianFluidSim::GaussianFluidSim(VulkanBase* base, Scene* scene, PGEResourceTypes::Texture3D sdftex)
+GaussianFluidSim::GaussianFluidSim(EngineContext& ctx, PGEResourceTypes::Texture3D sdftex)
 {
-	this->base = base;
-	this->scene = scene;
+	this->base = ctx.base;
+	this->scene = ctx.scene;
 	int size = 128;
 	computeTexture = base->vbuffer->createTexture3DGeneral(size, size, size);
 	computeTexture2 = base->vbuffer->createTexture3DGeneral(size, size, size);

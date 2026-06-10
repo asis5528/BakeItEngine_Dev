@@ -2,6 +2,7 @@
 #include "World/Scene.h"
 #include "Features/Volumetric/SdfVolume.h"
 #include "Features/Volumetric/Edit/BrushState.h"
+#include "EngineContext.h"
 class Renderer;
 class EditorGui
 {
@@ -14,7 +15,7 @@ public:
 	int frameID = 0;
 	std::vector<VkDescriptorSet> ds;
 	VkSampler texturesamp;
-	EditorGui(Scene *scene, VulkanBase* base);
+	EditorGui(EngineContext& ctx);
 	void createdescriptor(VulkanTexture& tex);
 	void run();
 
