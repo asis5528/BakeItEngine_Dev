@@ -1,6 +1,7 @@
 #include "Framebuffer.h"
 #include "VulkanUtils.h"
 #include <stdexcept>
+#include <vector>
 //REMEMBER TO NO APPLY MULTISAMPLED COLOR FOR NO MSAA SAMPLES FRAMEBUFFERS FOR OPTIMIZATION
 Framebuffer::Framebuffer(VulkanDevice *vulkandevice , uint32_t width, uint32_t height, VkSampleCountFlagBits msaaSamples, VkFormat colorFormat, VkFormat depthFormat,int MultiLayerView) {
 	this->width = width;
@@ -23,10 +24,14 @@ void Framebuffer::clean() {
     AuxColorImage->destroy();
     MotionVectorImage->destroy();
     DepthImage->destroy();
-    MultisampledColorImage->destroy();
-    MultisampledAuxColorImage->destroy();
-    MultisampledMotionVectorImage->destroy();
-    MultisampledDepthImage->destroy();
+    // In 1-sample mode the Multisampled* pointers alias the base images
+    // (no resolve targets exist) - avoid destroying them twice.
+    if (MultisampledColorImage != ColorImage) {
+        MultisampledColorImage->destroy();
+        MultisampledAuxColorImage->destroy();
+        MultisampledMotionVectorImage->destroy();
+        MultisampledDepthImage->destroy();
+    }
     vkDestroyFramebuffer(vulkandevice->device, framebuffer, nullptr);
     vkDestroyRenderPass(vulkandevice->device, renderPass, nullptr);
 }
@@ -303,8 +308,11 @@ void Framebuffer::createRenderPass() {
     depthAttachmentResolveRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
     depthAttachmentResolveRef.pNext = nullptr;
 
-    VkSubpassDescriptionDepthStencilResolve st;
-    VkSubpassDescription ssss{};
+    // Resolve attachments are only legal when the color/depth attachments are
+    // actually multisampled; in 1-sample mode we render straight into the
+    // base images (createFrameBuffer aliases the Multisampled* pointers).
+    const bool msaaEnabled = (msaaSamples != VK_SAMPLE_COUNT_1_BIT);
+
     VkSubpassDescription2 subpass{};
     subpass.sType = VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_2;
     subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
@@ -313,22 +321,23 @@ void Framebuffer::createRenderPass() {
     subpass.colorAttachmentCount = static_cast<uint32_t>(colorAttachments.size());
     subpass.pColorAttachments = colorAttachments.data();
     subpass.pDepthStencilAttachment = &depthAttachmentRef;
-    subpass.pResolveAttachments = colorResolveAttachments.data();
+    subpass.pResolveAttachments = msaaEnabled ? colorResolveAttachments.data() : nullptr;
     subpass.pInputAttachments = nullptr;
     subpass.preserveAttachmentCount = 0;
     subpass.inputAttachmentCount = 0;
     subpass.pPreserveAttachments = nullptr;
     subpass.pNext = nullptr;
-    
+
     VkSubpassDescriptionDepthStencilResolve DSR;
     DSR.sType = VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_DEPTH_STENCIL_RESOLVE;
     DSR.pNext = nullptr;
     DSR.depthResolveMode = VK_RESOLVE_MODE_AVERAGE_BIT;
     DSR.stencilResolveMode = VK_RESOLVE_MODE_NONE;
     DSR.pDepthStencilResolveAttachment = &depthAttachmentResolveRef;
-    subpass.pNext = &DSR;
-    //VkSubpassDescription2 ss{};
-    
+    if (msaaEnabled) {
+        subpass.pNext = &DSR;
+    }
+
     
     std::array<VkSubpassDependency2, 2> dependencies;
     dependencies[0].sType = VK_STRUCTURE_TYPE_SUBPASS_DEPENDENCY_2;
@@ -353,17 +362,19 @@ void Framebuffer::createRenderPass() {
     dependencies[1].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
     dependencies[1].viewOffset = 0;
 
-    std::array<VkAttachmentDescription2, 8> attachments = {
+    std::vector<VkAttachmentDescription2> attachments = {
         colorAttachment,
         auxColorAttachment,
         motionAttachment,
-        depthAttachment,
-        colorAttachmentResolve,
-        auxColorAttachmentResolve,
-        motionAttachmentResolve,
-        depthAttachmentResolve
+        depthAttachment
     };
-   
+    if (msaaEnabled) {
+        attachments.push_back(colorAttachmentResolve);
+        attachments.push_back(auxColorAttachmentResolve);
+        attachments.push_back(motionAttachmentResolve);
+        attachments.push_back(depthAttachmentResolve);
+    }
+
     VkRenderPassCreateInfo2 renderPassInfo{};
     renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2;
     renderPassInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
@@ -372,24 +383,16 @@ void Framebuffer::createRenderPass() {
     renderPassInfo.pSubpasses = &subpass;
     renderPassInfo.dependencyCount = dependencies.size();
     renderPassInfo.pDependencies = dependencies.data();
-   
-    //renderPassInfo.pCorrelatedViewMasks = nullptr;
-    //renderPassInfo.correlatedViewMaskCount = 1;
-    
     renderPassInfo.pNext = nullptr;
-    if(multiLayerView>1){
-        const uint32_t viewMask = 0b00000011;
 
-    const uint32_t correlationMask = 0b00000011;
+    // Multiview note: VkRenderPassMultiviewCreateInfo is renderpass1-only and
+    // was previously passed here illegally (and ignored by the driver - no
+    // multiview rendering actually happened; only layer 0 is drawn). With
+    // vkCreateRenderPass2, multiview is enabled by setting subpass.viewMask
+    // (e.g. 0b11) plus renderPassInfo.pCorrelatedViewMasks - and the
+    // framebuffer must then be created with layers = 1. Do that when the
+    // VR/OpenXR path actually renders both eyes.
 
-    VkRenderPassMultiviewCreateInfo renderPassMultiviewCI{};
-    renderPassMultiviewCI.sType = VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO;
-    renderPassMultiviewCI.subpassCount = 1;
-    renderPassMultiviewCI.pViewMasks = &viewMask;
-    renderPassMultiviewCI.correlationMaskCount = 1;
-    renderPassMultiviewCI.pCorrelationMasks = &correlationMask;
-    renderPassInfo.pNext = &renderPassMultiviewCI;
-    }
     if (vkCreateRenderPass2(vulkandevice->device, &renderPassInfo, nullptr, &renderPass) != VK_SUCCESS) {
         throw std::runtime_error("failed to create render pass!");
     }
@@ -420,36 +423,51 @@ void Framebuffer::createFrameBuffer() {
     MotionVectorImage->createImage(width, height, 1, VK_IMAGE_TYPE_2D, 1, this->msaaSamples, VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, multiLayerView);
     MotionVectorImage->createImageView(VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, 1, viewType, multiLayerView);
 
-    MultisampledColorImage = new VulkanImage(vulkandevice->device, vulkandevice->physicalDevice);
-    MultisampledColorImage->createImage(width, height,1, VK_IMAGE_TYPE_2D, 1, VK_SAMPLE_COUNT_1_BIT, colorFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT , VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, multiLayerView);
-    MultisampledColorImage->createImageView(colorFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1, viewType, multiLayerView);
-
-    MultisampledAuxColorImage = new VulkanImage(vulkandevice->device, vulkandevice->physicalDevice);
-    MultisampledAuxColorImage->createImage(width, height, 1, VK_IMAGE_TYPE_2D, 1, VK_SAMPLE_COUNT_1_BIT, VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, multiLayerView);
-    MultisampledAuxColorImage->createImageView(VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, 1, viewType, multiLayerView);
-
-    MultisampledMotionVectorImage = new VulkanImage(vulkandevice->device, vulkandevice->physicalDevice);
-    MultisampledMotionVectorImage->createImage(width, height, 1, VK_IMAGE_TYPE_2D, 1, VK_SAMPLE_COUNT_1_BIT, VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, multiLayerView);
-    MultisampledMotionVectorImage->createImageView(VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, 1, viewType, multiLayerView);
-    
     DepthImage = new VulkanImage(vulkandevice->device, vulkandevice->physicalDevice);
     DepthImage->createImage(width, height,1, VK_IMAGE_TYPE_2D, 1,this->msaaSamples, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, multiLayerView);
     DepthImage->createImageView(depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT, 1, viewType, multiLayerView);
 
-    MultisampledDepthImage = new VulkanImage(vulkandevice->device, vulkandevice->physicalDevice);
-    MultisampledDepthImage->createImage(width, height, 1, VK_IMAGE_TYPE_2D, 1, VK_SAMPLE_COUNT_1_BIT, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, multiLayerView);
-    MultisampledDepthImage->createImageView(depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT, 1, viewType, multiLayerView);
+    const bool msaaEnabled = (msaaSamples != VK_SAMPLE_COUNT_1_BIT);
+    if (msaaEnabled) {
+        // 1-sample resolve targets; consumers sample these. (Misnamed for
+        // historical reasons: "Multisampled*" here means "the resolved image".)
+        MultisampledColorImage = new VulkanImage(vulkandevice->device, vulkandevice->physicalDevice);
+        MultisampledColorImage->createImage(width, height,1, VK_IMAGE_TYPE_2D, 1, VK_SAMPLE_COUNT_1_BIT, colorFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT , VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, multiLayerView);
+        MultisampledColorImage->createImageView(colorFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1, viewType, multiLayerView);
 
-    std::array<VkImageView, 8>attachments = {
+        MultisampledAuxColorImage = new VulkanImage(vulkandevice->device, vulkandevice->physicalDevice);
+        MultisampledAuxColorImage->createImage(width, height, 1, VK_IMAGE_TYPE_2D, 1, VK_SAMPLE_COUNT_1_BIT, VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, multiLayerView);
+        MultisampledAuxColorImage->createImageView(VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, 1, viewType, multiLayerView);
+
+        MultisampledMotionVectorImage = new VulkanImage(vulkandevice->device, vulkandevice->physicalDevice);
+        MultisampledMotionVectorImage->createImage(width, height, 1, VK_IMAGE_TYPE_2D, 1, VK_SAMPLE_COUNT_1_BIT, VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, multiLayerView);
+        MultisampledMotionVectorImage->createImageView(VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, 1, viewType, multiLayerView);
+
+        MultisampledDepthImage = new VulkanImage(vulkandevice->device, vulkandevice->physicalDevice);
+        MultisampledDepthImage->createImage(width, height, 1, VK_IMAGE_TYPE_2D, 1, VK_SAMPLE_COUNT_1_BIT, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, multiLayerView);
+        MultisampledDepthImage->createImageView(depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT, 1, viewType, multiLayerView);
+    }
+    else {
+        // No resolve in 1-sample mode: consumers sample the base attachments
+        // directly. Alias the pointers so the rest of the engine is unchanged.
+        MultisampledColorImage = ColorImage;
+        MultisampledAuxColorImage = AuxColorImage;
+        MultisampledMotionVectorImage = MotionVectorImage;
+        MultisampledDepthImage = DepthImage;
+    }
+
+    std::vector<VkImageView> attachments = {
         ColorImage->imageView,
         AuxColorImage->imageView,
         MotionVectorImage->imageView,
-        DepthImage->imageView,
-        MultisampledColorImage->imageView,
-        MultisampledAuxColorImage->imageView,
-        MultisampledMotionVectorImage->imageView,
-        MultisampledDepthImage->imageView
+        DepthImage->imageView
     };
+    if (msaaEnabled) {
+        attachments.push_back(MultisampledColorImage->imageView);
+        attachments.push_back(MultisampledAuxColorImage->imageView);
+        attachments.push_back(MultisampledMotionVectorImage->imageView);
+        attachments.push_back(MultisampledDepthImage->imageView);
+    }
     VkFramebufferCreateInfo framebufferInfo{};
     framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
     framebufferInfo.renderPass = renderPass;

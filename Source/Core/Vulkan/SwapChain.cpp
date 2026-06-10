@@ -233,19 +233,17 @@ void SwapChain::createRenderPass() {
     colorAttachmentResolveRef.attachment = 2;
     colorAttachmentResolveRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
+    // A resolve attachment is only legal with a multisampled color attachment.
+    // In 1-sample mode render directly into the swapchain image instead
+    // (createFrameBuffer uses the swapchain view as attachment 0 then).
+    const bool msaaEnabled = (msaaSamples != VK_SAMPLE_COUNT_1_BIT);
+
     VkSubpassDescription subpass{};
     subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
     subpass.colorAttachmentCount = 1;
     subpass.pColorAttachments = &colorAttachmentRef;
     subpass.pDepthStencilAttachment = &depthAttachmentRef;
-    subpass.pResolveAttachments = &colorAttachmentResolveRef;
-
-
-    VkSubpassDescriptionDepthStencilResolve subp{};
-
-
-    VkSubpassDescription2 subp1{};
-
+    subpass.pResolveAttachments = msaaEnabled ? &colorAttachmentResolveRef : nullptr;
 
     VkSubpassDependency dependency{};
     dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
@@ -255,7 +253,10 @@ void SwapChain::createRenderPass() {
     dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
     dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
 
-    std::array<VkAttachmentDescription, 3> attachments = { colorAttachment, depthAttachment, colorAttachmentResolve };
+    std::vector<VkAttachmentDescription> attachments = { colorAttachment, depthAttachment };
+    if (msaaEnabled) {
+        attachments.push_back(colorAttachmentResolve);
+    }
     VkRenderPassCreateInfo renderPassInfo{};
     renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
     renderPassInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
@@ -288,12 +289,17 @@ void SwapChain::createFrameBuffer()
     framebufferDepthImage->createImage(swapChainExtent.width, swapChainExtent.height,1, VK_IMAGE_TYPE_2D, 1, msaaSamples, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     framebufferDepthImage->createImageView(depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT, 1, VK_IMAGE_VIEW_TYPE_2D);
     
+    const bool msaaEnabled = (msaaSamples != VK_SAMPLE_COUNT_1_BIT);
     for (size_t i = 0; i < swapChainImageViews.size(); i++) {
-        std::array<VkImageView, 3> attachments = {
-            framebufferColorImage->imageView,
-            framebufferDepthImage->imageView,
-            swapChainImageViews[i]
-        };
+        // MSAA: render into the transient color image, resolve to the
+        // swapchain image. 1-sample: render into the swapchain image directly.
+        std::vector<VkImageView> attachments;
+        if (msaaEnabled) {
+            attachments = { framebufferColorImage->imageView, framebufferDepthImage->imageView, swapChainImageViews[i] };
+        }
+        else {
+            attachments = { swapChainImageViews[i], framebufferDepthImage->imageView };
+        }
 
         VkFramebufferCreateInfo framebufferInfo{};
         framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
