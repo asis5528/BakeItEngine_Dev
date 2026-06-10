@@ -10,12 +10,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Shader compilation
 
-Two batch scripts both invoke `glslc.exe`, but they are **not** equivalents — they differ by working directory and by which shaders they include:
+Both batch scripts recursively compile every `*.vert/*.frag/*.comp` under `shaders/` with `glslc.exe` — **adding a new shader file requires no compile.bat edit**:
 
-- `../compile.bat` (repo root, run automatically by `main()` at startup) — paths are relative to repo root, e.g. `shaders/ObjectShaders/...`. This is the canonical list; **add new shaders here** or they won't get rebuilt at startup.
-- `Source/compile.bat` — same shaders but paths are prefixed with `Source/`, for invoking manually from a different cwd. Keep both lists in sync when adding a shader.
+- `../compile.bat` (repo root) is canonical; `main()` runs it automatically at startup.
+- `Source/compile.bat` is the same loop for invoking manually from inside `Source/`.
 
-`glslc.exe` is expected on `PATH`. SPIR-V outputs sit next to the `.vert/.frag/.comp` sources; the C++ code loads the `.spv` files directly.
+`glslc.exe` is expected on `PATH`. SPIR-V outputs sit next to the `.vert/.frag/.comp` sources (same basename, `.spv` extension, gitignored); the C++ code loads the `.spv` files directly. Shader naming convention: `<Feature><What><Stage>` with stage suffix `VS`/`FS`/`CS` (e.g. `VolumetricBrushCS.comp`, `ObjectVolumetricFS.frag`).
 
 ## Engine direction (read this before changing the edit/render path)
 
@@ -56,7 +56,7 @@ Top-level systems owned by `Vulkan`:
 - **Block sets** — `strictScanBlockState`, `strictScanRenderableIds`, `fineActiveIds`, `lod1ActiveIds`. These are *different sets* (recompute / store / render); do not unify them.
 - **Phased pipeline flags** — `pendingFullChunkResolve`, `pendingStrictSurfaceScan`, `pendingLod1Rebuild`, `lod1RebuildSubmitted`, `strictSurfaceScanCursor`. The brush release path sets these and `Pottery::update` chips at them across frames. Anything new that mutates the chunk should plug into this phasing rather than stalling.
 - **LOD** — `rebuildLod1`, `updateLodSelection`, `coarseLodSelected`, `lod1ObjectIndex/MeshIndex`. LOD selection lives in compute; rebuild must not run in the drag path.
-- Compute shaders: `shaders/ComputeShaders/sdfCompute _pottery.comp` (note the space in the filename — preserved everywhere) and `sdfCompute_lod1.comp` are Pottery's GPU side.
+- Compute shaders: `shaders/ComputeShaders/VolumetricBrushCS.comp` and `VolumetricLod1CS.comp` are Pottery's GPU side.
 
 ## Conventions & gotchas
 
@@ -65,5 +65,4 @@ Top-level systems owned by `Vulkan`:
 - **Resize path**: any change that affects framebuffers / pipelines / descriptors must work through `Scene::recreate` and `PostProcessingManager::recreate`, plus rebuild the ImGui viewport descriptor in `editorGui->ds[0]`. The drop callback uses a similar but *not identical* refresh sequence — both must stay coherent.
 - **Texture loading**: `stb_image` is single-translation-unit (`STB_IMAGE_IMPLEMENTATION` in `main.cpp`); don't redefine.
 - **ResourceManager** is a static-style global (`ResourceManager::setVulkanBase`, `ResourceManager::cleanTextures`). Created textures and samplers tracked here are cleaned at shutdown — keep new long-lived GPU resources registered there or clean them yourself.
-- **The shader filename `sdfCompute _pottery.comp` contains a literal space.** It is referenced that way in both `compile.bat` files and in C++; don't rename without updating every reference.
 - **`REMAINDER.txt`** holds informal author TODOs (postprocessing quad refactor, sampler destruction, viewport texture refresh unification). Treat as low-priority hints, not specs.
