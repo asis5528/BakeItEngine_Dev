@@ -206,6 +206,7 @@ private:
 
         clines = new ComputeShaderPipelines(base, scene);
         editorGui->sdfVolume = &clines->pottery->volume;
+        editorGui->brush = &clines->pottery->brush;
         // prepareCompute();
 
       //   scene->computeTexture = ct;

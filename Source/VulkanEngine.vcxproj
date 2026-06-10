@@ -217,6 +217,7 @@ if exist "$(SolutionDir)ThirdParty\Libs\glfw3.dll" copy /Y "$(SolutionDir)ThirdP
     <ClInclude Include="Features\Fluid\GaussianFluidSim.h" />
     <ClInclude Include="Features\Volumetric\Edit\Pottery.h" />
     <ClInclude Include="Features\Volumetric\SdfVolume.h" />
+    <ClInclude Include="Features\Volumetric\Edit\BrushState.h" />
     <ClInclude Include="Platform\Desktop\Input.h" />
     <ClInclude Include="World\Camera\Camera.h" />
     <ClInclude Include="Core\Pipelines\ComputePipeline.h" />

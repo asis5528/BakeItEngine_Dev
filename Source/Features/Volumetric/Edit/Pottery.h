@@ -2,12 +2,14 @@
 #include "Scene/Scene.h"
 #include "Core/Pipelines/ComputePipeline.h"
 #include "Features/Volumetric/SdfVolume.h"
+#include "Features/Volumetric/Edit/BrushState.h"
 #include <glm/glm.hpp>
 #include <vector>
 class Pottery
 {
 public:
 	SdfVolume volume;
+	BrushState brush;
 	struct SnapshotChunk
 	{
 		size_t objectIndex = 0;

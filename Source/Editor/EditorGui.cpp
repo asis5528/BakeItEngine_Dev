@@ -261,17 +261,19 @@ void DrawSdfAtlasUsageBar(const char* label, float fraction, int usedBricks, int
          m_scene->dispatch = true;
      }
      ImGui::Separator();
-     ImGui::Text("Brush");
-     const char* brushShapeName = "Cube";
-     if (m_scene->brushShapeMode == 1) brushShapeName = "Sphere";
-     else if (m_scene->brushShapeMode == 2) brushShapeName = "Plane";
-     ImGui::Text("Shape   : %s (U to toggle)", brushShapeName);
-     ImGui::Text("Radius  : %.4f (A/D)", m_scene->brushRadius);
-     ImGui::Text("Smooth  : %.4f (Q/E)", m_scene->brushSmoothness);
-     ImGui::ColorEdit3("Color", &m_scene->brushColor.x);
-     ImGui::Text("Z Offset: %.4f (W/S)", m_scene->brushZAxis);
-     ImGui::Text("Action  : %s", (m_scene->brushAction < 0.5f) ? "Remove (RMB)" : "Add (LMB)");
-     ImGui::Text("Emissive Paint: %s (I)", m_scene->emissiveMode ? "On" : "Off");
+     if (brush) {
+         ImGui::Text("Brush");
+         const char* brushShapeName = "Cube";
+         if (brush->shapeMode == 1) brushShapeName = "Sphere";
+         else if (brush->shapeMode == 2) brushShapeName = "Plane";
+         ImGui::Text("Shape   : %s (U to toggle)", brushShapeName);
+         ImGui::Text("Radius  : %.4f (A/D)", brush->radius);
+         ImGui::Text("Smooth  : %.4f (Q/E)", brush->smoothness);
+         ImGui::ColorEdit3("Color", &brush->color.x);
+         ImGui::Text("Z Offset: %.4f (W/S)", brush->zAxis);
+         ImGui::Text("Action  : %s", (brush->action < 0.5f) ? "Remove (RMB)" : "Add (LMB)");
+         ImGui::Text("Emissive Paint: %s (I)", brush->emissive ? "On" : "Off");
+     }
      if (sdfVolume) {
          const SdfVolumeStats& atlas = sdfVolume->stats;
          ImGui::Text("Dirty Blocks: %d", atlas.dirtyBlockCount);

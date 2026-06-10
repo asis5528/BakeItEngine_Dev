@@ -37,15 +37,6 @@ public:
 	bool dispatch = false;
 	const Input* input = nullptr; // routed input, owned by Platform (wired in main.cpp)
 	Camera* camera = nullptr;     // world camera, owned by the engine root (wired in main.cpp)
-	 glm::vec4 brushData = glm::vec4(0.0f, 0.0f, 0.2f, 0.01f);
-	 glm::vec4 brushColor = glm::vec4(1.0f, 0.35f, 0.75f, 1.0f);
-	 bool brushUseSphere = false;
-	 int brushShapeMode = 0; // 0 cube, 1 sphere, 2 plane
-	 float brushRadius = 0.01f;
-	 float brushSmoothness = 0.001f;
-	 float brushZAxis = 0.2f;
-	 float brushAction = 1.0f; // 1.0 add (LMB), 0.0 remove (RMB)
-	 bool emissiveMode = false; // toggled with I
 	 bool renderPassDirty = true;
 	 float fps = 0.0;
 	Scene(VulkanBase *vbase);

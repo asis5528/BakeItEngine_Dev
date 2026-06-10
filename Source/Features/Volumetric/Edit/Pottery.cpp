@@ -765,20 +765,20 @@ void Pottery::update(float time)
 	}
 	const glm::vec3 brushCenterLocal = brushCenter - chunkTranslationWS;
 	pubo.BrushData = glm::vec4(-brushCenterLocal, BrushRadius);
-	pubo.BrushColor = scene->brushColor;
+	pubo.BrushColor = brush.color;
 	pubo.BrushAction = leftBut; // 1.0 add, 0.0 remove
 	pubo.BrushShape = static_cast<float>(BrushShapeMode);
 	pubo.BrushSmoothness = BrushSmoothness;
 	pubo.BrushEmissive = EmissiveMode ? 1.0f : 0.0f;
 	pubo.BrushRecolor = (in.shiftDown && in.leftButtonDown && !in.cameraMoveMode) ? 1.0f : 0.0f;
-	scene->brushData = glm::vec4(-brushCenter, BrushRadius);
-	scene->brushUseSphere = (BrushShapeMode == 1);
-	scene->brushShapeMode = BrushShapeMode;
-	scene->brushRadius = BrushRadius;
-	scene->brushSmoothness = BrushSmoothness;
-	scene->brushZAxis = BrushDistanceFromCamera;
-	scene->brushAction = leftBut;
-	scene->emissiveMode = EmissiveMode;
+	brush.data = glm::vec4(-brushCenter, BrushRadius);
+	brush.useSphere = (BrushShapeMode == 1);
+	brush.shapeMode = BrushShapeMode;
+	brush.radius = BrushRadius;
+	brush.smoothness = BrushSmoothness;
+	brush.zAxis = BrushDistanceFromCamera;
+	brush.action = leftBut;
+	brush.emissive = EmissiveMode;
 	computeUBO[0].map(base->device, sizeof(potteryUBO), &pubo);
 
 

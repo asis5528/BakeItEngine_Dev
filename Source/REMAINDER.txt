@@ -1,3 +1,4 @@
 1)Make separate quad class for postprocessing that includes framebuffers and stuff and maybe inheritance from basic quad class
 2)For destorying errors,maybe texture samplers are not destroyed,work on that
-3)Have imgui viewport texture get the new texture automatically when viewport size is changed,currently there are like 2 different code to change the texture ...
+3)Have imgui viewport texture get the new texture automatically when viewport size is changed,currently there are like 2 different code to change the texture
+4)Re-add brush indicator: the old VolumePass postprocess raymarched a procedural brush SDF (used brushData/brushMeta). Reimplement as a small fullscreen quad in PostProcessPass, or draw it in the volumetric object pass.
