@@ -2,13 +2,8 @@
 #extension GL_EXT_multiview : enable
 layout(binding = 0) uniform SkinnedUniformBufferObject {
     mat4 model;
-    mat4 prevModel;
     mat4 view[2];
     mat4 proj[2];
-    mat4 prevProj[2];
-    mat4 projNoJitter[2];
-    mat4 prevView[2];
-    mat4 prevProjNoJitter[2];
     mat4 boneMatrices[100];
 } subo;
 

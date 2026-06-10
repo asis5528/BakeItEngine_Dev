@@ -4,13 +4,8 @@
 
 layout(binding = 0) uniform UniformBufferObject {
     mat4 model;
-    mat4 prevModel;
     mat4 view[2];
     mat4 proj[2];
-    mat4 prevProj[2];
-    mat4 projNoJitter[2];
-    mat4 prevView[2];
-    mat4 prevProjNoJitter[2];
 } ubo;
 
 layout(binding = 2) uniform sampler3D texSampler;
@@ -1092,19 +1087,7 @@ ivec3 ires = ivec3(blockPerAxis,blockPerAxis,blockPerAxis);
        outColor.rgb = baseColor * (1.8 + 0.2 * dif);
        }
        outWorldPos = vec4(hitWorldPos, 1.0);
-       vec4 currClip = ubo.projNoJitter[gl_ViewIndex] *
-                       ubo.view[gl_ViewIndex] *
-                       ubo.model *
-                       vec4(hitObjectPos, 1.0);
-       vec4 prevClip = ubo.prevProjNoJitter[gl_ViewIndex] *
-                       ubo.prevView[gl_ViewIndex] *
-                       ubo.prevModel *
-                       vec4(hitObjectPos, 1.0);
-       if (currClip.w > 0.000001 && prevClip.w > 0.000001) {
-           vec2 currUv = vec2(currClip.x / currClip.w, -(currClip.y / currClip.w)) * 0.5 + 0.5;
-           vec2 prevUv = vec2(prevClip.x / prevClip.w, -(prevClip.y / prevClip.w)) * 0.5 + 0.5;
-           outMotion = vec4(currUv - prevUv, 0.0, 1.0);
-       }
+       outMotion = vec4(0.0);
       //  outColor.rgb = n;
         //outColor.rgb = vec3(1.,0.1,0.1);
 //outColor.rgb = normalize(n);

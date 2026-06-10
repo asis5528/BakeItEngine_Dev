@@ -260,7 +260,6 @@ void DrawSdfAtlasUsageBar(const char* label, float fraction, int usedBricks, int
      if (ImGui::Button("MeshToSDF Dispatch")) {
          m_scene->dispatch = true;
      }
-     ImGui::Checkbox("Enable TAA", &m_scene->taaEnabled);
      ImGui::Separator();
      ImGui::Text("Brush");
      const char* brushShapeName = "Cube";

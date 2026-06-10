@@ -3,13 +3,8 @@
 
 layout(binding = 0) uniform UniformBufferObject {
     mat4 model;
-    mat4 prevModel;
     mat4 view[2];
     mat4 proj[2];
-    mat4 prevProj[2];
-    mat4 projNoJitter[2];
-    mat4 prevView[2];
-    mat4 prevProjNoJitter[2];
 } ubo;
 layout( std430,binding = 4) readonly buffer BlockBuffer {
     int blocks[];   // single int

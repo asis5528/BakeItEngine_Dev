@@ -14,7 +14,6 @@ class Scene
 {
 	
 public:
-	static constexpr int MaxFloorBlobShadows = 64;
 	std::vector<GraphicsPipeline*> pipelines;
 	//std::vector<VulkanTexture> textures;
 	std::vector<PGEResourceTypes::Texture> ptextures;
@@ -36,13 +35,7 @@ public:
 	VulkanBase* base;
 	ScenePipelines *scenePipelines;
 	 glm::mat4 proj[2];
-	 glm::mat4 projNoJitter[2];
 	 glm::mat4 view[2];
-	 glm::mat4 prevProjForMotion[2] = { glm::mat4(1.0f), glm::mat4(1.0f) };
-	 glm::mat4 prevViewForMotion[2] = { glm::mat4(1.0f), glm::mat4(1.0f) };
-	 glm::mat4 prevProjNoJitterForMotion[2] = { glm::mat4(1.0f), glm::mat4(1.0f) };
-	 bool motionHistoryValid = false;
-	 glm::vec2 taaJitter = glm::vec2(0.0f);
 	 float camFovDegrees = 45.0f;
 	 float camNearPlane = 0.001f;
 	float camFarPlane = 100.0f;
@@ -59,11 +52,7 @@ public:
 	 float brushZAxis = 0.2f;
 	 float brushAction = 1.0f; // 1.0 add (LMB), 0.0 remove (RMB)
 	 bool emissiveMode = false; // toggled with I
-	 bool taaEnabled = true;
 	 bool renderPassDirty = true;
-	 std::array<glm::vec4, MaxFloorBlobShadows> floorBlobShadows{};
-	 std::array<glm::vec4, MaxFloorBlobShadows> floorBlobBounceColors{};
-	 int floorBlobShadowCount = 0;
 	 float fps = 0.0;
 	Scene(VulkanBase *vbase);
 	void init();

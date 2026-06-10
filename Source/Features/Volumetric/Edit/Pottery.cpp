@@ -497,7 +497,6 @@ void Pottery::createStaticFloorObject()
 
 void Pottery::updateSnapshotChunks(float time)
 {
-	scene->floorBlobShadowCount = 0;
 	for (const SnapshotChunk& snapshot : snapshotChunks) {
 		if (snapshot.objectIndex >= scene->objects.size()) {
 			continue;
@@ -507,15 +506,6 @@ void Pottery::updateSnapshotChunks(float time)
 		const float fallOffsetY = glm::max(-0.5f * kSnapshotGravity * t * t, snapshot.stopOffsetY);
 		scene->objects[snapshot.objectIndex].ModelMatrix =
 			glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, fallOffsetY, 0.0f));
-		if (scene->floorBlobShadowCount < Scene::MaxFloorBlobShadows) {
-			const glm::vec3 shadowCenter =
-				snapshot.baseShadowCenterWS + glm::vec3(0.0f, fallOffsetY, 0.0f);
-			scene->floorBlobShadows[scene->floorBlobShadowCount] =
-				glm::vec4(shadowCenter, snapshot.shadowRadius);
-			scene->floorBlobBounceColors[scene->floorBlobShadowCount] =
-				glm::vec4(snapshot.bounceColor, 1.0f);
-			scene->floorBlobShadowCount++;
-		}
 	}
 }
 
@@ -710,7 +700,6 @@ static bool intersectAabb(const glm::vec3& ro, const glm::vec3& rd, const glm::v
 void Pottery::update(float time)
 {
 	uploadChunkSpatialData();
-	scene->floorBlobShadowCount = 0;
 
 	const Input& in = *scene->input;
 	const glm::dvec2 currentCursorPos = in.mousePos;
@@ -751,7 +740,7 @@ void Pottery::update(float time)
 		if (BrushDistanceFromCamera < 0.02f) BrushDistanceFromCamera = 0.02f;
 		if (BrushDistanceFromCamera > 3.0f) BrushDistanceFromCamera = 3.0f;
 	}
-	glm::mat4 invProj = glm::inverse(scene->projNoJitter[0]);
+	glm::mat4 invProj = glm::inverse(scene->proj[0]);
 	glm::mat4 invView = glm::inverse(scene->view[0]);
 	float ndcX = msx * 2.0f - 1.0f;
 	float ndcY = 1.0f - msy * 2.0f;
