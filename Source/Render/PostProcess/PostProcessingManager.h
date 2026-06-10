@@ -1,7 +1,7 @@
 #pragma once
 #include <vector>
 #include "Core/Vulkan/Framebuffer.h"
-#include "../quad.h"
+#include "Quad.h"
 #include "VolumeRendering.h"
 class Scene;
 class PostProcessingManager

@@ -2,9 +2,9 @@
 #include "Core/Vulkan/VulkanBase.h"
 #include "Scene/Scene.h"
 #include "Core/Pipelines/ComputePipeline.h"
-#include "ComputeShaderPipelines/GaussianFluidSim.h"
-#include "ComputeShaderPipelines/MeshToSdf.h"
-#include "ComputeShaderPipelines/Pottery.h"
+#include "Features/Fluid/GaussianFluidSim.h"
+#include "Features/Volumetric/Bake/MeshToSdf.h"
+#include "Features/Volumetric/Edit/Pottery.h"
 class ComputeShaderPipelines
 {
 

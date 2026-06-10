@@ -1,5 +1,5 @@
 #pragma once
-#include "../Scene/Scene.h"
+#include "Scene/Scene.h"
 #include "Core/Pipelines/ComputePipeline.h"
 #include <glm/glm.hpp>
 #include <vector>

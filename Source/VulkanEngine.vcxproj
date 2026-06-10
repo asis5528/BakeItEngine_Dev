@@ -170,12 +170,12 @@ if exist "$(SolutionDir)ThirdParty\Libs\glfw3.dll" copy /Y "$(SolutionDir)ThirdP
     <None Include="shaders\ComputeShaders\VolumetricLod1CS.comp" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="Animation.cpp" />
+    <ClCompile Include="World\Animation.cpp" />
     <ClCompile Include="ComputeShaderPipelines.cpp" />
-    <ClCompile Include="ComputeShaderPipelines\GaussianFluidSim.cpp" />
-    <ClCompile Include="ComputeShaderPipelines\Pottery.cpp" />
+    <ClCompile Include="Features\Fluid\GaussianFluidSim.cpp" />
+    <ClCompile Include="Features\Volumetric\Edit\Pottery.cpp" />
     <ClCompile Include="Core\Pipelines\ComputePipeline.cpp" />
-    <ClCompile Include="GUI\EditorGui.cpp" />
+    <ClCompile Include="Editor\EditorGui.cpp" />
     <ClCompile Include="Core\Pipelines\GraphicsPipeline.cpp" />
     <ClCompile Include="Core\Vulkan\Framebuffer.cpp" />
     <ClCompile Include="Imgui\imgui.cpp" />
@@ -185,7 +185,7 @@ if exist "$(SolutionDir)ThirdParty\Libs\glfw3.dll" copy /Y "$(SolutionDir)ThirdP
     <ClCompile Include="Imgui\imgui_impl_vulkan.cpp" />
     <ClCompile Include="Imgui\imgui_tables.cpp" />
     <ClCompile Include="Imgui\imgui_widgets.cpp" />
-    <ClCompile Include="Loader.cpp" />
+    <ClCompile Include="World\Loader.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="Core\Vulkan\VulkanBase.cpp" />
     <ClCompile Include="Core\Vulkan\VulkanDevice.cpp" />
@@ -195,27 +195,27 @@ if exist "$(SolutionDir)ThirdParty\Libs\glfw3.dll" copy /Y "$(SolutionDir)ThirdP
     <ClCompile Include="Core\Resources\VulkanBuffer.cpp" />
     <ClCompile Include="World\Mesh.cpp" />
     <ClCompile Include="Core\Resources\VulkanDescriptor.cpp" />
-    <ClCompile Include="Graphics\IMGUI\VulkanImgui.cpp" />
-    <ClCompile Include="Material.cpp" />
+    <ClCompile Include="Editor\VulkanImgui.cpp" />
+    <ClCompile Include="World\Material.cpp" />
     <ClCompile Include="Core\Math\MathUtils.cpp" />
-    <ClCompile Include="ComputeShaderPipelines\MeshToSdf.cpp" />
-    <ClCompile Include="Model.cpp" />
-    <ClCompile Include="Object.cpp" />
-    <ClCompile Include="PostProcessing\PostProcessingManager.cpp" />
-    <ClCompile Include="quad.cpp" />
+    <ClCompile Include="Features\Volumetric\Bake\MeshToSdf.cpp" />
+    <ClCompile Include="World\Model.cpp" />
+    <ClCompile Include="World\Object.cpp" />
+    <ClCompile Include="Render\PostProcess\PostProcessingManager.cpp" />
+    <ClCompile Include="Render\PostProcess\Quad.cpp" />
     <ClCompile Include="Core\Resources\ResourceManager.cpp" />
     <ClCompile Include="Scene\ScenePipelines.cpp" />
     <ClCompile Include="Scene\Scene.cpp" />
-    <ClCompile Include="PostProcessing\VolumeRendering.cpp" />
+    <ClCompile Include="Render\PostProcess\VolumeRendering.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Animation.h" />
-    <ClInclude Include="AnimationData.h" />
+    <ClInclude Include="World\Animation.h" />
+    <ClInclude Include="World\AnimationData.h" />
     <ClInclude Include="ComputeShaderPipelines.h" />
-    <ClInclude Include="ComputeShaderPipelines\GaussianFluidSim.h" />
-    <ClInclude Include="ComputeShaderPipelines\Pottery.h" />
+    <ClInclude Include="Features\Fluid\GaussianFluidSim.h" />
+    <ClInclude Include="Features\Volumetric\Edit\Pottery.h" />
     <ClInclude Include="Core\Pipelines\ComputePipeline.h" />
-    <ClInclude Include="GUI\EditorGui.h" />
+    <ClInclude Include="Editor\EditorGui.h" />
     <ClInclude Include="Core\Pipelines\GraphicsPipeline.h" />
     <ClInclude Include="Core\Vulkan\Framebuffer.h" />
     <ClInclude Include="Imgui\imconfig.h" />
@@ -235,21 +235,21 @@ if exist "$(SolutionDir)ThirdParty\Libs\glfw3.dll" copy /Y "$(SolutionDir)ThirdP
     <ClInclude Include="Core\Resources\VulkanBuffer.h" />
     <ClInclude Include="World\Mesh.h" />
     <ClInclude Include="Core\Resources\VulkanDescriptor.h" />
-    <ClInclude Include="Graphics\IMGUI\VulkanImgui.h" />
-    <ClInclude Include="Loader.h" />
-    <ClInclude Include="Material.h" />
+    <ClInclude Include="Editor\VulkanImgui.h" />
+    <ClInclude Include="World\Loader.h" />
+    <ClInclude Include="World\Material.h" />
     <ClInclude Include="Core\Math\MathUtils.h" />
-    <ClInclude Include="ComputeShaderPipelines\MeshToSdf.h" />
-    <ClInclude Include="Model.h" />
-    <ClInclude Include="Object.h" />
+    <ClInclude Include="Features\Volumetric\Bake\MeshToSdf.h" />
+    <ClInclude Include="World\Model.h" />
+    <ClInclude Include="World\Object.h" />
     <ClInclude Include="Core\Resources\PGEResourceTypes.h" />
-    <ClInclude Include="PostProcessing\PostProcessingManager.h" />
-    <ClInclude Include="quad.h" />
+    <ClInclude Include="Render\PostProcess\PostProcessingManager.h" />
+    <ClInclude Include="Render\PostProcess\Quad.h" />
     <ClInclude Include="Core\Resources\ResourceManager.h" />
     <ClInclude Include="Scene\ScenePipelines.h" />
     <ClInclude Include="Scene\Scene.h" />
     <ClInclude Include="Core\Pipelines\Shader.h" />
-    <ClInclude Include="PostProcessing\VolumeRendering.h" />
+    <ClInclude Include="Render\PostProcess\VolumeRendering.h" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="REMAINDER.txt" />

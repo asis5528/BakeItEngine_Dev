@@ -1,4 +1,4 @@
-#include "quad.h"
+#include "Quad.h"
 
 Quad::Quad(VulkanBase* vbase,Framebuffer *fr)
 {

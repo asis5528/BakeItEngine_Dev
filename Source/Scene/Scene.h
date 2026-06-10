@@ -1,10 +1,10 @@
 #pragma once
 #include "Core/Vulkan/VulkanBase.h"
-#include "../Object.h"
-#include "../quad.h"
-#include "../Material.h"
+#include "World/Object.h"
+#include "Render/PostProcess/Quad.h"
+#include "World/Material.h"
 #include "ScenePipelines.h"
-#include "../PostProcessing/PostProcessingManager.h"
+#include "Render/PostProcess/PostProcessingManager.h"
 #include "Core/Resources/PGEResourceTypes.h"
 #include <array>
 

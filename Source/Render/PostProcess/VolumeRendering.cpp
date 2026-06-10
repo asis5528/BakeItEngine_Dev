@@ -1,6 +1,6 @@
 #include "VolumeRendering.h"
 #include "Core/Vulkan/VulkanUtils.h"
-#include "../Scene/Scene.h"
+#include "Scene/Scene.h"
 struct alignas(16) voulUBO {
     float val;
 

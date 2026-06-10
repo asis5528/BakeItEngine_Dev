@@ -63,16 +63,16 @@ const bool enableValidationLayers = true;
 #endif
 #include "World/Mesh.h"
 #include "Core/Vulkan/VulkanBase.h"
-#include "Graphics/IMGUI/VulkanImgui.h"
+#include "Editor/VulkanImgui.h"
 
-#include "Object.h"
-#include "quad.h"
+#include "World/Object.h"
+#include "Render/PostProcess/Quad.h"
 //uncomment to enable VR
  //#define VR
 #include "Core/Pipelines/ComputePipeline.h"
 #include "Scene/Scene.h"
-#include "Loader.h"
-#include "GUI/EditorGui.h"
+#include "World/Loader.h"
+#include "Editor/EditorGui.h"
 #include <glm/gtx/matrix_decompose.hpp>
 #include "Core/Vulkan/VulkanUtils.h"
 #include "ComputeShaderPipelines.h"

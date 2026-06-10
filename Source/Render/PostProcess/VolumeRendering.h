@@ -2,7 +2,7 @@
 #include <vector>
 #include <glm/glm.hpp>
 #include "Core/Vulkan/Framebuffer.h"
-#include "../quad.h"
+#include "Quad.h"
 
 class Scene;
 class VolumeRendering

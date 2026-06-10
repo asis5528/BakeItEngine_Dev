@@ -1,5 +1,5 @@
 #include "PostProcessingManager.h"
-#include "../Scene/Scene.h"
+#include "Scene/Scene.h"
 
 PostProcessingManager::PostProcessingManager(VulkanBase* base, Scene* scene, Framebuffer* previousFB)
 {
