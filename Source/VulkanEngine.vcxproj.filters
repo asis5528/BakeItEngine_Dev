@@ -17,12 +17,8 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <None Include="shaders\PostProcessing\quad.vert" />
-    <None Include="shaders\PostProcessing\quad.frag" />
-    <None Include="..\..\engine\game-engine\imgui.ini" />
-    <None Include="shaders\ComputeShaders\simple.comp" />
-    <None Include="shaders\ComputeShaders\sdfCompute.comp" />
     <None Include="shaders\ComputeShaders\sdfCompute _pottery.comp" />
+    <None Include="shaders\ComputeShaders\sdfCompute_lod1.comp" />
     <None Include="shaders\ComputeShaders\GaussianFluidSim.comp" />
     <None Include="shaders\ComputeShaders\MeshtoSdf.comp" />
   </ItemGroup>

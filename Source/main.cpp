@@ -396,22 +396,6 @@ private:
         return t;
 
     }
-    //remove below function
-    /*
-    void prepareCompute() {
-
-        ct3D = createComputeTexture3D();
-        computeUBO = base->vbuffer->createUniformBuffers({sizeof(computeUbo)});
-
-        ComputeInput input;
-        input.computeShaderPath = "shaders/sdfCompute.spv";
-        input.descriptorTypes = { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ,VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER};
-        
-        comp = new ComputePipeline(base,input);
-        comp->setupDescriptors(computeUBO,{ct3D,scene->textures[0]});
-        comp->dispatch(ct3D.width / 8, ct3D.height / 8, ct3D.depth / 8);
-    }
-  */
 
     //VulkanTexture3D createComputeTexture3D() {
     //    VulkanTexture3D texture;

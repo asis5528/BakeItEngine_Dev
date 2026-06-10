@@ -63,87 +63,8 @@ void Scene::init()
    
     Framebuffer* frameBuffer = new Framebuffer(base->vulkandevice, base->swapChain->swapChainExtent.width, base->swapChain->swapChainExtent.height, base->vulkandevice->getMaxUsableSampleCount(), base->swapChain->swapChainImageFormat, utils::findDepthFormat(base->vulkandevice->physicalDevice),2);
     framebuffers.push_back(frameBuffer);
-    /*
-    Framebuffer* frameBuffer_quad = new Framebuffer(base->vulkandevice, base->swapChain->swapChainExtent.width, base->swapChain->swapChainExtent.height, base->vulkandevice->getMaxUsableSampleCount(), base->swapChain->swapChainImageFormat, utils::findDepthFormat(base->vulkandevice->physicalDevice));
-    framebuffers.push_back(frameBuffer_quad);
-
-    Quad* quad = new Quad(base,framebuffers[1]);
-    quad->fr2 = &frameBuffer[0];
-    quad->createGraphicsPipeline("shaders/quadvert.spv", "shaders/quadfrag.spv");
-    VulkanTexture quadtex;
-    // quadtex.imageView = base->offscreenbuffer->MultisampledColorImage->imageView;
-    quadtex.imageView = framebuffers[0]->MultisampledColorImage->imageView;
-    quadtex.imageSampler = base->vbuffer->createTextureSampler(1);
-    quadtex.imageViewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
-    quad->textures.push_back(quadtex);
-    quad->createdescriptors();
-    quads.push_back(quad);
-    */
     postprocessingManager = new PostProcessingManager(base,this,framebuffers[0]);
     scenePipelines = new ScenePipelines(base, framebuffers[0]->renderPass);
-   
-    /*
-    GraphicsPipeline* opipe = new GraphicsPipeline();
-    pipelines.push_back(opipe);
-    PipelineInput input;
-    input.vertexShaderpath = "shaders/vert.spv";
-    input.fragmentShaderpath = "shaders/frag.spv";
-    input.renderPass = framebuffers[0]->renderPass;
- //   input.MultiviewLayer = frameBuffer[0].multiLayerView;
-    input.device = base->device;
-    input.msaaSamples = base->msaaSamples;
-    input.viewportExtent = base->swapChain->swapChainExtent;
-    input.descriptorTypes = { descriptorTypes{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_SHADER_STAGE_VERTEX_BIT},
-        descriptorTypes{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_SHADER_STAGE_VERTEX_BIT},
-        descriptorTypes{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,VK_SHADER_STAGE_FRAGMENT_BIT} };
-    pipelines[0]->bufferSize = { sizeof(UniformBufferObject),sizeof(ubo1) };
-    pipelines[0]->setupPipeline(input);
-    pipelines[0]->createGraphicsPipeline();
-
-
-    GraphicsPipeline* skinned = new GraphicsPipeline();
-    pipelines.push_back(skinned);
-    input.skinned = true;
-    input.vertexShaderpath = "shaders/skinned.spv";
-    pipelines[1]->bufferSize = { sizeof(SkinnedUniformBufferObject),sizeof(ubo1) };
-    pipelines[1]->setupPipeline(input);
-    pipelines[1]->createGraphicsPipeline();
-
-
-    GraphicsPipeline* basic = new GraphicsPipeline();
-    pipelines.push_back(basic);
-    input.skinned = false;
-    input.vertexShaderpath = "shaders/vert.spv";
-    input.fragmentShaderpath = "shaders/Basic.spv";
-
-    input.descriptorTypes = { descriptorTypes{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_SHADER_STAGE_VERTEX_BIT},
-       descriptorTypes{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_SHADER_STAGE_FRAGMENT_BIT} };
-    pipelines[2]->bufferSize = { sizeof(UniformBufferObject) ,sizeof(BasicUbo) };
-    pipelines[2]->setupPipeline(input);
-    pipelines[2]->createGraphicsPipeline();
-    float k = 1.;
-    
-    GraphicsPipeline* skinnedBasic = new GraphicsPipeline();
-    pipelines.push_back(skinnedBasic);
-    input.skinned = true;
-    input.vertexShaderpath = "shaders/skinned.spv";
-    pipelines[3]->bufferSize = { sizeof(SkinnedUniformBufferObject),sizeof(BasicUbo) };
-    pipelines[3]->setupPipeline(input);
-    pipelines[3]->createGraphicsPipeline();
-    
-    GraphicsPipeline* volumetric = new GraphicsPipeline();
-    pipelines.push_back(volumetric);
-    input.skinned = false;
-    input.vertexShaderpath = "shaders/volumetricvert.spv";
-    input.fragmentShaderpath = "shaders/volumetric.spv";
-
-    input.descriptorTypes = { descriptorTypes{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_SHADER_STAGE_VERTEX_BIT},
-         descriptorTypes{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_SHADER_STAGE_FRAGMENT_BIT},
-         descriptorTypes{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,VK_SHADER_STAGE_FRAGMENT_BIT} };
-    pipelines[4]->bufferSize = { sizeof(UniformBufferObject),sizeof(BasicUbo) };
-    pipelines[4]->setupPipeline(input);
-    pipelines[4]->createGraphicsPipeline();
-    */
     pipelines = scenePipelines->pipelines;
 }
 
