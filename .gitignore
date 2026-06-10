@@ -21,3 +21,6 @@ Source/Debug/
 
 # Local backups
 local_backup_*/
+
+# CMake out-of-source build
+build/
