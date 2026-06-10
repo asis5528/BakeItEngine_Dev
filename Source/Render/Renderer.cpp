@@ -23,6 +23,15 @@ void Renderer::init(Scene* scene)
 
 void Renderer::recordCommandBuffers(Scene& scene)
 {
+	// The command buffers being re-recorded may still be executing on the
+	// GPU (two frames in flight); a command buffer must not be in the
+	// pending state when vkBeginCommandBuffer is called
+	// (VUID-vkBeginCommandBuffer-commandBuffer-00049). The fences are
+	// created signaled, so this returns immediately when the GPU is idle.
+	if (!base->inFlightFences.empty()) {
+		vkWaitForFences(base->device, static_cast<uint32_t>(base->inFlightFences.size()), base->inFlightFences.data(), VK_TRUE, UINT64_MAX);
+	}
+
 	for (size_t i = 0; i < base->commandBuffers.size(); i++) {
 		VkCommandBufferBeginInfo beginInfo{};
 		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
