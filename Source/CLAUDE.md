@@ -7,15 +7,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Build (two equivalent ways)**:
   - Hand-maintained solution: open `../BakeItEngine.sln` in Visual Studio 2022 (PlatformToolset `v143`), project `Source/VulkanEngine.vcxproj`, configs `Debug|x64` / `Release|x64`. CLI: `MSBuild.exe ..\BakeItEngine.sln /p:Configuration=Debug /p:Platform=x64` (MSBuild from VS2022 Community, locatable via vswhere). **File moves/adds must update the vcxproj + filters.**
   - CMake (portable; all deps bundled in `../ThirdParty/`): `cmake -S .. -B ../build -G "Visual Studio 17 2022" -A x64` then `cmake --build ../build --config Debug`, or open `build/BakeItEngine.sln`. Sources are globbed — new files only need a CMake regenerate. Debugger working dir is preset to the repo root.
-- **Run**: launch from Visual Studio. The exe's working directory must be the repo root (parent of `Source/`) — at startup `main()` calls `system("compile.bat")` and the engine loads assets via relative paths like `models/ube.glb`, `textures/...`, `shaders/.../*.spv`.
+- **Run**: launch from Visual Studio. The exe's working directory must be `Source/` (the vcxproj sets `LocalDebuggerWorkingDirectory` to `$(ProjectDir)`) — at startup `main()` calls `system("compile.bat")` (i.e. `Source/compile.bat`) and the engine loads assets via relative paths like `models/ube.glb`, `textures/...`, `shaders/.../*.spv`, all of which live under `Source/`.
 - **Tests**: there are no automated tests.
 
 ## Shader compilation
 
 Both batch scripts recursively compile every `*.vert/*.frag/*.comp` under `shaders/` with `glslc.exe` — **adding a new shader file requires no compile.bat edit**:
 
-- `../compile.bat` (repo root) is canonical; `main()` runs it automatically at startup.
-- `Source/compile.bat` is the same loop for invoking manually from inside `Source/`.
+- `Source/compile.bat` is canonical; `main()` runs it automatically at startup (working dir is `Source/`).
+- `../compile.bat` (repo root) is the same loop for invoking manually from the repo root.
 
 `glslc.exe` is expected on `PATH`. SPIR-V outputs sit next to the `.vert/.frag/.comp` sources (same basename, `.spv` extension, gitignored); the C++ code loads the `.spv` files directly. Shader naming convention: `<Feature><What><Stage>` with stage suffix `VS`/`FS`/`CS` (e.g. `SdfBrushCS.comp`, `SdfBrickFS.frag`).
 

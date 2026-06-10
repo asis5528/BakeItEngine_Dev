@@ -10,8 +10,8 @@ project(BakeItEngine LANGUAGES CXX)
 #
 # (or open build/BakeItEngine.sln in Visual Studio).
 #
-# Run from the repo root: main() invokes compile.bat at startup (needs
-# glslc.exe on PATH) and loads models/textures/shaders via relative paths.
+# Run from Source/: main() invokes compile.bat at startup (needs glslc.exe
+# on PATH) and loads models/textures/shaders via paths relative to Source/.
 # The Visual Studio debugger working directory is set up accordingly.
 
 set(CMAKE_CXX_STANDARD 17)
@@ -67,10 +67,10 @@ if(MSVC)
     target_compile_definitions(BakeItEngine PRIVATE _CONSOLE UNICODE _UNICODE)
 endif()
 
-# Debugging from Visual Studio: working directory must be the repo root so
+# Debugging from Visual Studio: working directory must be Source/ so
 # compile.bat and the relative asset paths resolve.
 set_target_properties(BakeItEngine PROPERTIES
-    VS_DEBUGGER_WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    VS_DEBUGGER_WORKING_DIRECTORY ${SOURCE_DIR}
 )
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT BakeItEngine)
 
