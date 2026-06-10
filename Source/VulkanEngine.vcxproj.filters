@@ -20,7 +20,7 @@
     <None Include="shaders\ComputeShaders\VolumetricBrushCS.comp" />
     <None Include="shaders\ComputeShaders\VolumetricLod1CS.comp" />
     <None Include="shaders\ComputeShaders\GaussianFluidSim.comp" />
-    <None Include="shaders\ComputeShaders\MeshtoSdf.comp" />
+    <None Include="shaders\ComputeShaders\MeshToSdfCS.comp" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp">

@@ -9,7 +9,7 @@ MeshToSdf::MeshToSdf(VulkanBase* base, Scene* scene)
 	int size = 128;
 	computeTexture = base->vbuffer->createTexture3DGeneral(size, size, size);
 	ComputeInput input;
-	input.computeShaderPath = "shaders/ComputeShaders/MeshtoSdf.spv";
+	input.computeShaderPath = "shaders/ComputeShaders/MeshToSdfCS.spv";
 	input.descriptorTypes = { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ,VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,VK_DESCRIPTOR_TYPE_STORAGE_BUFFER };
 	comp = new ComputePipeline(base, input);
 }
