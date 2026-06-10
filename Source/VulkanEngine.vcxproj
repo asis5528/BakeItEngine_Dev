@@ -204,9 +204,10 @@ if exist "$(SolutionDir)ThirdParty\Libs\glfw3.dll" copy /Y "$(SolutionDir)ThirdP
     <ClCompile Include="World\Model.cpp" />
     <ClCompile Include="World\Object.cpp" />
     <ClCompile Include="Render\PostProcess\PostProcessingManager.cpp" />
+    <ClCompile Include="Render\Renderer.cpp" />
     <ClCompile Include="Render\PostProcess\Quad.cpp" />
     <ClCompile Include="Core\Resources\ResourceManager.cpp" />
-    <ClCompile Include="Scene\ScenePipelines.cpp" />
+    <ClCompile Include="Render\ScenePipelines.cpp" />
     <ClCompile Include="Scene\Scene.cpp" />
     <ClCompile Include="Render\PostProcess\PostProcessPass.cpp" />
   </ItemGroup>
@@ -250,9 +251,10 @@ if exist "$(SolutionDir)ThirdParty\Libs\glfw3.dll" copy /Y "$(SolutionDir)ThirdP
     <ClInclude Include="World\Object.h" />
     <ClInclude Include="Core\Resources\PGEResourceTypes.h" />
     <ClInclude Include="Render\PostProcess\PostProcessingManager.h" />
+    <ClInclude Include="Render\Renderer.h" />
     <ClInclude Include="Render\PostProcess\Quad.h" />
     <ClInclude Include="Core\Resources\ResourceManager.h" />
-    <ClInclude Include="Scene\ScenePipelines.h" />
+    <ClInclude Include="Render\ScenePipelines.h" />
     <ClInclude Include="Scene\Scene.h" />
     <ClInclude Include="Core\Pipelines\Shader.h" />
     <ClInclude Include="Render\PostProcess\PostProcessPass.h" />

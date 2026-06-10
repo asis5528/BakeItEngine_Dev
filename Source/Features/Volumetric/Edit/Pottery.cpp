@@ -1,5 +1,6 @@
 #include "Pottery.h"
 #include "Core/Resources/ResourceManager.h"
+#include "Render/Renderer.h"
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
@@ -414,7 +415,7 @@ void Pottery::updateLodSelection()
 	base->vbuffer->updateInstanceIdBuffer(coarseMesh, desiredCoarse ? lod1ActiveIds : std::vector<int32_t>{});
 	coarseLodSelected = desiredCoarse;
 
-	scene->renderPassDirty = true;
+	scene->renderer->renderPassDirty = true;
 }
 
 void Pottery::createStaticFloorObject()
@@ -634,7 +635,7 @@ void Pottery::finalizeStrokeChunk(float time)
 	vkDeviceWaitIdle(base->device);
 	scene->cleanDescriptors();
 	scene->createSceneDescriptor();
-	scene->renderPassDirty = true;
+	scene->renderer->renderPassDirty = true;
 }
 
 Pottery::~Pottery() {
@@ -841,7 +842,7 @@ void Pottery::update(float time)
 			fineActiveIds = BuildAllocatedActiveIds(blockState);
 			base->vbuffer->updateInstanceIdBuffer(*targetMesh, fineActiveIds);
 			volume.stats.dirtyBlockCount = static_cast<int>(fineActiveIds.size());
-			scene->renderPassDirty = true;
+			scene->renderer->renderPassDirty = true;
 		}
 
 		if (computeReady) {
@@ -946,7 +947,7 @@ void Pottery::update(float time)
 				strictSurfaceScanCursor = 0;
 				strictScanBlockState.clear();
 				strictScanRenderableIds.clear();
-				scene->renderPassDirty = true;
+				scene->renderer->renderPassDirty = true;
 			}
 		}
 	}
@@ -968,7 +969,7 @@ void Pottery::update(float time)
 			vkUnmapMemory(base->device, lod1SBO[0].bufferMemory);
 			pendingLod1Rebuild = false;
 			lod1RebuildSubmitted = false;
-			scene->renderPassDirty = true;
+			scene->renderer->renderPassDirty = true;
 		}
 	}
 

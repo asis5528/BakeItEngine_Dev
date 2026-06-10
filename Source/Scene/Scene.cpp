@@ -3,107 +3,27 @@
 #include <iostream>
 #include "Core/Vulkan/VulkanUtils.h"
 #include "Core/Resources/ResourceManager.h"
+#include "Render/Renderer.h"
 
 Scene::Scene(VulkanBase* vbase) {
 	this->base = vbase;
-   
+
 }
 
-
-
-
+// Legacy forwarders: render resources and recording live in Render/Renderer.
 void Scene::init()
 {
-    printf("Setting mouse callback to my function\n");
-    //glfwSetWindowUserPointer(base->window, this);
-    //glfwSetMouseButtonCallback(base->window, mouse_button_cbb);
-    standardSampler = base->vbuffer->createTextureSampler(1);
-    
-   
-    Framebuffer* frameBuffer = new Framebuffer(base->vulkandevice, base->swapChain->swapChainExtent.width, base->swapChain->swapChainExtent.height, base->vulkandevice->getMaxUsableSampleCount(), base->swapChain->swapChainImageFormat, utils::findDepthFormat(base->vulkandevice->physicalDevice),2);
-    framebuffers.push_back(frameBuffer);
-    postprocessingManager = new PostProcessingManager(base,this,framebuffers[0]);
-    scenePipelines = new ScenePipelines(base, framebuffers[0]->renderPass);
-    pipelines = scenePipelines->pipelines;
+    renderer->init(this);
 }
 
 void Scene::renderPass() {
-
-
-    for (size_t i = 0; i < base->commandBuffers.size(); i++) {
-        VkCommandBufferBeginInfo beginInfo{};
-        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-
-        if (vkBeginCommandBuffer(base->commandBuffers[i], &beginInfo) != VK_SUCCESS) {
-            throw std::runtime_error("failed to begin recording command buffer!");
-        }
-
-        // Image memory barrier to make sure that compute shader writes are finished before sampling from the texture
-        //dont need this if compute isnt rendering realtime,its only for syncing the work between compute and graphics
-        /*
-        VkImageMemoryBarrier imageMemoryBarrier = {};
-        imageMemoryBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-        imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-        imageMemoryBarrier.image = computeTexture.image;
-        imageMemoryBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 1, 1, 0, 1 };
-        imageMemoryBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        imageMemoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        vkCmdPipelineBarrier(
-            base->commandBuffers[i],
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-            0,
-            0, nullptr,
-            0, nullptr,
-            1, &imageMemoryBarrier);
-*/
-        framebuffers[0]->beginRenderPass(base->commandBuffers[i]);
-        
-
-
-
-        for (unsigned int j = 0; j < objects.size(); j++) {
-            if (objects[j].hasMesh) {
-                for (int meshI = 0; meshI < objects[j].meshID.size(); meshI++) {
-                    Mesh mesh = meshes[objects[j].meshID[meshI]];
-                    vkCmdBindPipeline(base->commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, objects[j].shader[meshI].graphicsPipeline->graphicsPipeline);
-                    vkCmdBindDescriptorSets(base->commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, objects[j].shader[meshI].graphicsPipeline->pipelineLayout, 0, 1, &objects[j].shader[meshI].descriptorSet, 0, nullptr);
-                    mesh.draw(base->commandBuffers[i]);
-                }
-
-
-            }
-        }
-
-        vkCmdEndRenderPass(base->commandBuffers[i]);
-
-        /*
-        framebuffers[1]->beginRenderPass(base->commandBuffers[i]);
-        quads[0]->draw(base->commandBuffers[i]);
-        vkCmdEndRenderPass(base->commandBuffers[i]);
-        */
-        postprocessingManager->renderPass(base->commandBuffers[i]);
-
-
-        base->swapChain->beginRenderPass(base->commandBuffers[i], i);
-         //quads[0]->draw(base->commandBuffers[i]);
-        vkCmdEndRenderPass(base->commandBuffers[i]);
-
-
-
-        if (vkEndCommandBuffer(base->commandBuffers[i]) != VK_SUCCESS) {
-            throw std::runtime_error("failed to record command buffer!");
-        }
-    }
-
-   
+    renderer->recordCommandBuffers(*this);
 }
 
 void Scene::update(float iTime) {
-    if (renderPassDirty) {
+    if (renderer->renderPassDirty) {
         renderPass();
-        renderPassDirty = false;
+        renderer->renderPassDirty = false;
     }
    
 
@@ -258,81 +178,12 @@ void Scene::update(float iTime) {
     }*/
     }
 
-	postprocessingManager->update();
+	renderer->update();
 }
 
 void Scene::createSceneDescriptor()
 {
-    unsigned int objectWithMeshSize = objects.size();
-    for (Object&object:objects) {
-        if (!object.hasMesh) {
-            objectWithMeshSize -=1;
-        }
-        else {
-            objectWithMeshSize += object.meshID.size()-1;
-        }
-    }
-    base->vulkandescriptor->createDescriptorPool(objectWithMeshSize,
-        {
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
-        },
-        objectWithMeshSize + 10, &descriptorPool);
-
-    //std::vector<VkDescriptorSetLayout> layouts(objects.size(), base->objectPipeline->descriptorSetLayout);
-    std::vector<VkDescriptorSetLayout> layouts;
-    for (int i = 0; i < objects.size(); i++) {
-        if(objects[i].hasMesh){
-            for (int meshID = 0; meshID < objects[i].meshID.size(); meshID++) {
-                layouts.push_back(objects[i].shader[meshID].graphicsPipeline->descriptorSetLayout);
-            }
-            
-        }
-    }
-    std::vector<VkDescriptorSet> descriptorSets = base->vulkandescriptor->createDescriptorSets(objectWithMeshSize, layouts, descriptorPool);
-   
-    int j = 0;
-    for (int i = 0; i < objects.size(); i++) {
-        if (objects[i].hasMesh) {
-            for (int meshID = 0; meshID < objects[i].meshID.size(); meshID++) {
-                objects[i].shader[meshID].descriptorSet = descriptorSets[j];
-                j += 1;
-            }
-        }
-    }
-
-
-    for (size_t i = 0; i < objects.size(); i++) {
-        if (objects[i].hasMesh){
-            Object* object = &objects[i];
-            VulkanTexture tex;
-         
-          
-           for (int meshID = 0; meshID < objects[i].meshID.size(); meshID++) {
-
-             //  int texID = meshes[object->meshID[meshID]].texID;
-        
-               std::vector<VulkanTexture> descriptorsTextures{};
-               Material mat = materials[meshes[object->meshID[meshID]].matID];
-               if (mat.type == TexturedMaterial) {
-                   MaterialTexturedData *dat = (struct MaterialTexturedData*)mat.materialData;
-                  // MaterialTexturedData k = *dat;
-                   descriptorsTextures.push_back(ResourceManager::getTexture(ptextures[dat->DiffuseTexture].id));
-               }
-               base->vulkandescriptor->updateDescriptorSets(object->shader[meshID].descriptorSet, { object->shader[meshID].ubos }, descriptorsTextures, object->shader[meshID].sbos);
-           }
-        }
-    }
-	postprocessingManager->createDescriptors();
-
-   rootNode.updateTransoformation(glm::mat4(1.0),objects);
-
+    renderer->createSceneDescriptor(*this);
 }
 
 void Scene::cleanUniforms()
@@ -361,7 +212,7 @@ void Scene::clean() {
   //  }
 
     for (Mesh& mesh : meshes) {
-        
+
         vkDestroyBuffer(base->device, mesh.indexBuffer, nullptr);
         vkFreeMemory(base->device, mesh.indexBufferMemory, nullptr);
 
@@ -372,23 +223,8 @@ void Scene::clean() {
             vkFreeMemory(base->device, mesh.instanceIdBufferMemory, nullptr);
         }
     }
-  /*
-    for (GraphicsPipeline*& pipeline : pipelines) {
-        delete pipeline;
-    }
-    */
-    delete scenePipelines;
-    /*
-    for (Quad*& quad : quads) {
-        delete quad->graphicsPipeline;
-        delete quad;
-    }
-    */
-    delete postprocessingManager;
-    for (Framebuffer*& fb : framebuffers) {
-        delete fb;
-    }
 
+    renderer->clean();
 
     for (Material& mat : materials) {
         if (mat.materialData!=NULL) {
@@ -400,59 +236,8 @@ void Scene::clean() {
 }
 void Scene::recreate()
 {
-   
-    VkExtent2D ex;
-    ex.width = camera->viewportResolution.x;
-    ex.height = camera->viewportResolution.y;
-
-    for (Framebuffer*& framebuffer : framebuffers) {
-
-        framebuffer->clean();
-        framebuffer->width = ex.width;
-        framebuffer->height = ex.height;
-        framebuffer->recreate();
-    }
-    /*
-    framebuffers[0]->clean();
-    framebuffers[0]->width = viewport_resolution.x;
-    framebuffers[0]->height = viewport_resolution.y;
-    framebuffers[0]->recreate();
-    //framebuffers[0]->colorFormat = VK_FORMAT_B8G8R8A8_SRGB;
-
-
-    framebuffers[1]->clean();
-    framebuffers[1]->width = viewport_resolution.x;
-    framebuffers[1]->height = viewport_resolution.y;
-    framebuffers[1]->recreate();
-    //framebuffers[1]->colorFormat = VK_FORMAT_B8G8R8A8_SRGB;
-    */
-
-    scenePipelines->recreate(framebuffers[0]->renderPass, ex);
-    /*
-    for (GraphicsPipeline* &pipeline : pipelines) {
-        pipeline->clean();
-        pipeline->recreatePipeline(ex, framebuffers[0]->renderPass);
-    }
-    */
-    //uncomment this when needs actual updating the frame texture
-   // quads[0]->textures[0].imageView = quads[0]->fr2->MultisampledColorImage->imageView;
-    /*
-    for (Quad* &quad : quads) {
-        quad->textures[0].imageView = quad->fr2->MultisampledColorImage->imageView;
-        quad->graphicsPipeline->clean();
-        quad->recreateGraphicsPipeline(ex);
-        quad->cleandescriptors();
-        quad->createdescriptors();
-    }
-    */
-    postprocessingManager->recreate(ex);
- 
-
-    cleanDescriptors();
-    createSceneDescriptor();
-
+    renderer->recreate(*this);
 }
 void Scene::cleanDescriptors() {
-    
-    vkDestroyDescriptorPool(base->device, descriptorPool, nullptr);
+    renderer->cleanDescriptors();
 }

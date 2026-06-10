@@ -116,10 +116,13 @@
     <ClCompile Include="Features\Fluid\GaussianFluidSim.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Scene\ScenePipelines.cpp">
+    <ClCompile Include="Render\ScenePipelines.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Render\PostProcess\PostProcessPass.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Render\Renderer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Render\PostProcess\PostProcessingManager.cpp">
@@ -194,9 +197,10 @@
     <ClInclude Include="Core\Pipelines\ComputePipeline.h" />
     <ClInclude Include="ComputeShaderPipelines.h" />
     <ClInclude Include="Features\Fluid\GaussianFluidSim.h" />
-    <ClInclude Include="Scene\ScenePipelines.h" />
+    <ClInclude Include="Render\ScenePipelines.h" />
     <ClInclude Include="Render\PostProcess\PostProcessPass.h" />
     <ClInclude Include="Render\PostProcess\PostProcessingManager.h" />
+    <ClInclude Include="Render\Renderer.h" />
     <ClInclude Include="Features\Volumetric\Bake\MeshToSdf.h" />
     <ClInclude Include="Core\Resources\ResourceManager.h" />
     <ClInclude Include="Core\Resources\PGEResourceTypes.h" />

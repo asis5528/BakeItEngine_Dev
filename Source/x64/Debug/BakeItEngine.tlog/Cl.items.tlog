@@ -32,8 +32,9 @@ C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\Features\Vol
 C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\World\Model.cpp;C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\x64\Debug\Model.obj
 C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\World\Object.cpp;C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\x64\Debug\Object.obj
 C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\Render\PostProcess\PostProcessingManager.cpp;C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\x64\Debug\PostProcessingManager.obj
+C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\Render\Renderer.cpp;C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\x64\Debug\Renderer.obj
 C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\Render\PostProcess\Quad.cpp;C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\x64\Debug\Quad.obj
 C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\Core\Resources\ResourceManager.cpp;C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\x64\Debug\ResourceManager.obj
-C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\Scene\ScenePipelines.cpp;C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\x64\Debug\ScenePipelines.obj
+C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\Render\ScenePipelines.cpp;C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\x64\Debug\ScenePipelines.obj
 C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\Scene\Scene.cpp;C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\x64\Debug\Scene.obj
 C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\Render\PostProcess\PostProcessPass.cpp;C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\x64\Debug\PostProcessPass.obj
