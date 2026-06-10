@@ -17,7 +17,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <None Include="shaders\ComputeShaders\sdfCompute _pottery.comp" />
+    <None Include="shaders\ComputeShaders\VolumetricBrushCS.comp" />
     <None Include="shaders\ComputeShaders\sdfCompute_lod1.comp" />
     <None Include="shaders\ComputeShaders\GaussianFluidSim.comp" />
     <None Include="shaders\ComputeShaders\MeshtoSdf.comp" />

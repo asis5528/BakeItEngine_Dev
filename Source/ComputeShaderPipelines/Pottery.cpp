@@ -173,7 +173,7 @@ Pottery::Pottery(VulkanBase* base, Scene* scene)
 	int size = blocksPerAxis * blockDim; // 64 * 8 = 512
 
 	ComputeInput input;
-	input.computeShaderPath = "shaders/ComputeShaders/sdfCompute _pottery.spv";
+	input.computeShaderPath = "shaders/ComputeShaders/VolumetricBrushCS.spv";
 	input.descriptorTypes = {
 		VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
 		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,

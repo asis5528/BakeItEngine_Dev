@@ -166,7 +166,7 @@ if exist "$(SolutionDir)ThirdParty\Libs\glfw3.dll" copy /Y "$(SolutionDir)ThirdP
   <ItemGroup>
     <None Include="shaders\ComputeShaders\GaussianFluidSim.comp" />
     <None Include="shaders\ComputeShaders\MeshtoSdf.comp" />
-    <None Include="shaders\ComputeShaders\sdfCompute _pottery.comp" />
+    <None Include="shaders\ComputeShaders\VolumetricBrushCS.comp" />
     <None Include="shaders\ComputeShaders\sdfCompute_lod1.comp" />
   </ItemGroup>
   <ItemGroup>
