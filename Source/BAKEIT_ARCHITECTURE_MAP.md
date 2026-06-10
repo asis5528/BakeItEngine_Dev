@@ -33,7 +33,7 @@ Source/
 ├── Imgui/                     # vendored third-party — leave alone
 ├── shaders/                   # mirrors features; compiled by recursive compile.bat
 │   ├── World/                 # ObjectShaderVS/SkinnedVS/TexturedFS/BasicFS
-│   ├── Sdf/            # ObjectVolumetricVS/FS, SdfBrushCS,
+│   ├── Sdf/            # SdfBrickVS/FS, SdfBrushCS,
 │   │                          # SdfLod1CS, MeshToSdfCS
 │   ├── Fluid/                 # GaussianFluidSimCS
 │   └── Render/                # PostPassVS/FS

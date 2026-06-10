@@ -17,7 +17,7 @@ Both batch scripts recursively compile every `*.vert/*.frag/*.comp` under `shade
 - `../compile.bat` (repo root) is canonical; `main()` runs it automatically at startup.
 - `Source/compile.bat` is the same loop for invoking manually from inside `Source/`.
 
-`glslc.exe` is expected on `PATH`. SPIR-V outputs sit next to the `.vert/.frag/.comp` sources (same basename, `.spv` extension, gitignored); the C++ code loads the `.spv` files directly. Shader naming convention: `<Feature><What><Stage>` with stage suffix `VS`/`FS`/`CS` (e.g. `SdfBrushCS.comp`, `ObjectVolumetricFS.frag`).
+`glslc.exe` is expected on `PATH`. SPIR-V outputs sit next to the `.vert/.frag/.comp` sources (same basename, `.spv` extension, gitignored); the C++ code loads the `.spv` files directly. Shader naming convention: `<Feature><What><Stage>` with stage suffix `VS`/`FS`/`CS` (e.g. `SdfBrushCS.comp`, `SdfBrickFS.frag`).
 
 ## Engine direction (read this before changing the edit/render path)
 
