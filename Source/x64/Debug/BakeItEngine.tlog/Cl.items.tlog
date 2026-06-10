@@ -35,4 +35,4 @@ C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\Render\PostP
 C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\Core\Resources\ResourceManager.cpp;C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\x64\Debug\ResourceManager.obj
 C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\Scene\ScenePipelines.cpp;C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\x64\Debug\ScenePipelines.obj
 C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\Scene\Scene.cpp;C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\x64\Debug\Scene.obj
-C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\Render\PostProcess\VolumeRendering.cpp;C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\x64\Debug\VolumeRendering.obj
+C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\Render\PostProcess\PostProcessPass.cpp;C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\x64\Debug\PostProcessPass.obj

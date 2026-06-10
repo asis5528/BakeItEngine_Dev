@@ -2,7 +2,7 @@
 #include <vector>
 #include "Core/Vulkan/Framebuffer.h"
 #include "Quad.h"
-#include "VolumeRendering.h"
+#include "PostProcessPass.h"
 class Scene;
 class PostProcessingManager
 {
@@ -12,7 +12,7 @@ class PostProcessingManager
 		Framebuffer* previousFB;
 		std::vector<Framebuffer*> framebuffers;
 		VulkanBase* base;
-		VolumeRendering *volumeRendering;
+		PostProcessPass *postPass;
 		int bufferSize;
 
 		PostProcessingManager(VulkanBase *base,Scene *scene,Framebuffer *previousFB);
@@ -22,4 +22,3 @@ class PostProcessingManager
 		void recreate(VkExtent2D ex);
 		~PostProcessingManager();
 };
-

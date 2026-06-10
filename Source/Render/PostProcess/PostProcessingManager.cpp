@@ -6,34 +6,33 @@ PostProcessingManager::PostProcessingManager(VulkanBase* base, Scene* scene, Fra
 	this->base = base;
 	this->previousFB = previousFB;
 	scene->view[0] = glm::mat4(1.0f);
-	volumeRendering = new VolumeRendering(base, scene,previousFB);
-	// Expose only final output framebuffer; history buffers stay internal to VolumeRendering.
-	if (!volumeRendering->framebuffers.empty()) {
-		framebuffers.push_back(volumeRendering->framebuffers[0]);
+	postPass = new PostProcessPass(base, scene, previousFB);
+	// Expose only the final output framebuffer (what the Editor viewport shows).
+	if (!postPass->framebuffers.empty()) {
+		framebuffers.push_back(postPass->framebuffers[0]);
 	}
 	bufferSize = framebuffers.size();
 }
 
 void PostProcessingManager::createDescriptors()
 {
-	volumeRendering->createDescriptors();
+	postPass->createDescriptors();
 }
 
 void PostProcessingManager::renderPass(VkCommandBuffer commandBuffer)
 {
-	volumeRendering->renderPass(commandBuffer);
+	postPass->renderPass(commandBuffer);
 }
 void PostProcessingManager::update()
 {
-	//update UBOs if any
-	volumeRendering->update();
+	postPass->update();
 }
 void PostProcessingManager::recreate(VkExtent2D ex)
 {
-	volumeRendering->recreate(ex);
+	postPass->recreate(ex);
 }
 
 PostProcessingManager::~PostProcessingManager()
 {
-	delete volumeRendering;
+	delete postPass;
 }

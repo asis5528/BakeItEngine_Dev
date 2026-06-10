@@ -119,7 +119,7 @@
     <ClCompile Include="Scene\ScenePipelines.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Render\PostProcess\VolumeRendering.cpp">
+    <ClCompile Include="Render\PostProcess\PostProcessPass.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Render\PostProcess\PostProcessingManager.cpp">
@@ -192,7 +192,7 @@
     <ClInclude Include="ComputeShaderPipelines.h" />
     <ClInclude Include="Features\Fluid\GaussianFluidSim.h" />
     <ClInclude Include="Scene\ScenePipelines.h" />
-    <ClInclude Include="Render\PostProcess\VolumeRendering.h" />
+    <ClInclude Include="Render\PostProcess\PostProcessPass.h" />
     <ClInclude Include="Render\PostProcess\PostProcessingManager.h" />
     <ClInclude Include="Features\Volumetric\Bake\MeshToSdf.h" />
     <ClInclude Include="Core\Resources\ResourceManager.h" />

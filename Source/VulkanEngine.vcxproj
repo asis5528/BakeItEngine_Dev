@@ -207,7 +207,7 @@ if exist "$(SolutionDir)ThirdParty\Libs\glfw3.dll" copy /Y "$(SolutionDir)ThirdP
     <ClCompile Include="Core\Resources\ResourceManager.cpp" />
     <ClCompile Include="Scene\ScenePipelines.cpp" />
     <ClCompile Include="Scene\Scene.cpp" />
-    <ClCompile Include="Render\PostProcess\VolumeRendering.cpp" />
+    <ClCompile Include="Render\PostProcess\PostProcessPass.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="World\Animation.h" />
@@ -252,7 +252,7 @@ if exist "$(SolutionDir)ThirdParty\Libs\glfw3.dll" copy /Y "$(SolutionDir)ThirdP
     <ClInclude Include="Scene\ScenePipelines.h" />
     <ClInclude Include="Scene\Scene.h" />
     <ClInclude Include="Core\Pipelines\Shader.h" />
-    <ClInclude Include="Render\PostProcess\VolumeRendering.h" />
+    <ClInclude Include="Render\PostProcess\PostProcessPass.h" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="REMAINDER.txt" />
