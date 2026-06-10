@@ -272,7 +272,7 @@ private:
 
         VulkanTexture guitex;
         guitex.imageSampler = renderer->standardSampler;
-        guitex.imageView = renderer->postprocessingManager->framebuffers[renderer->postprocessingManager->bufferSize - 1]->MultisampledColorImage->imageView;
+        guitex.imageView = renderer->postprocessingManager->framebuffers[renderer->postprocessingManager->bufferSize - 1]->displayImageView;
         guitex.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         editorGui->createdescriptor(guitex);
     }
@@ -789,7 +789,7 @@ private:
         if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebufferResized) {
             framebufferResized = false;
             recreateSwapChain();
-            editorGui->ds[0] = ImGui_ImplVulkan_AddTexture(renderer->standardSampler, renderer->postprocessingManager->framebuffers[renderer->postprocessingManager->bufferSize - 1]->MultisampledColorImage->imageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            editorGui->ds[0] = ImGui_ImplVulkan_AddTexture(renderer->standardSampler, renderer->postprocessingManager->framebuffers[renderer->postprocessingManager->bufferSize - 1]->displayImageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         }
         else if (result != VK_SUCCESS) {
             throw std::runtime_error("failed to present swap chain image!");

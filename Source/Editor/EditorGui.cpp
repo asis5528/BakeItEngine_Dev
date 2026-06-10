@@ -220,7 +220,7 @@ void DrawSdfAtlasUsageBar(const char* label, float fraction, int usedBricks, int
          vkDeviceWaitIdle(m_base->device);
          m_scene->recreate();
          m_scene->renderPass();
-         ds[0] = ImGui_ImplVulkan_AddTexture(renderer->standardSampler, renderer->postprocessingManager->framebuffers[renderer->postprocessingManager->bufferSize-1]->MultisampledColorImage->imageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+         ds[0] = ImGui_ImplVulkan_AddTexture(renderer->standardSampler, renderer->postprocessingManager->framebuffers[renderer->postprocessingManager->bufferSize-1]->displayImageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
          //  vkDeviceWaitIdle(base->device);
            //cleanCommandBuffers();
          //  scene->framebuffers[0]->clean();

@@ -20,6 +20,10 @@ Framebuffer::~Framebuffer()
     clean();
 }
 void Framebuffer::clean() {
+    if (displayImageView != VK_NULL_HANDLE) {
+        vkDestroyImageView(vulkandevice->device, displayImageView, nullptr);
+        displayImageView = VK_NULL_HANDLE;
+    }
     ColorImage->destroy();
     AuxColorImage->destroy();
     MotionVectorImage->destroy();
@@ -481,7 +485,21 @@ void Framebuffer::createFrameBuffer() {
         throw std::runtime_error("failed to create framebuffer!");
     }
 
-
+    // Single-layer 2D view over the display image for plain-sampler2D
+    // consumers (the ImGui viewport texture).
+    VkImageViewCreateInfo displayViewInfo{};
+    displayViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    displayViewInfo.image = MultisampledColorImage->image;
+    displayViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    displayViewInfo.format = colorFormat;
+    displayViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    displayViewInfo.subresourceRange.baseMipLevel = 0;
+    displayViewInfo.subresourceRange.levelCount = 1;
+    displayViewInfo.subresourceRange.baseArrayLayer = 0;
+    displayViewInfo.subresourceRange.layerCount = 1;
+    if (vkCreateImageView(vulkandevice->device, &displayViewInfo, nullptr, &displayImageView) != VK_SUCCESS) {
+        throw std::runtime_error("failed to create display image view!");
+    }
 }
 void Framebuffer::beginRenderPass(VkCommandBuffer commandBuffer) {
     VkRenderPassBeginInfo renderPassInfo{};
