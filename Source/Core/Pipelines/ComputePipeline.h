@@ -34,12 +34,5 @@ public:
      void dispatch(uint32_t group_x, uint32_t group_y, uint32_t group_z);
      void submit();
      void submit(uint32_t group_x, uint32_t group_y, uint32_t group_z);
-     // Records and submits: [barrier, fill 4 bytes of fillBuffer at fillOffset
-     // with fillValue, barrier, dispatch, barrier(compute -> indirect draw +
-     // vertex input)]. For compute passes that build a GPU draw list (reset
-     // the instance count, compact, then hand off to vkCmdDrawIndexedIndirect
-     // and per-instance vertex fetch). The barriers also order against the
-     // surrounding queue submissions (earlier compute writes, later draws).
-     void submitDrawListBuild(VkBuffer fillBuffer, VkDeviceSize fillOffset, uint32_t fillValue, uint32_t group_x, uint32_t group_y, uint32_t group_z);
 };
 

@@ -18,8 +18,9 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="shaders\Sdf\SdfBrushCS.comp" />
-    <None Include="shaders\Sdf\SdfLod1CS.comp" />
-    <None Include="shaders\Sdf\SdfDrawListCS.comp" />
+    <None Include="shaders\Sdf\SdfDrawListCountCS.comp" />
+    <None Include="shaders\Sdf\SdfDrawListScanCS.comp" />
+    <None Include="shaders\Sdf\SdfDrawListScatterCS.comp" />
     <None Include="shaders\Fluid\GaussianFluidSimCS.comp" />
     <None Include="shaders\Sdf\MeshToSdfCS.comp" />
   </ItemGroup>
@@ -141,6 +142,9 @@
     <ClCompile Include="Platform\Desktop\Input.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Features\Sdf\Edit\SdfDrawList.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="Features\Sdf\Edit\SdfEditor.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -209,6 +213,7 @@
     <ClInclude Include="Features\Sdf\Edit\SdfEditor.h" />
     <ClInclude Include="Features\Sdf\SdfVolume.h" />
     <ClInclude Include="Features\Sdf\Edit\BrushState.h" />
+    <ClInclude Include="Features\Sdf\Edit\SdfDrawList.h" />
     <ClInclude Include="Platform\Desktop\Input.h" />
     <ClInclude Include="World\Camera\Camera.h" />
   </ItemGroup>

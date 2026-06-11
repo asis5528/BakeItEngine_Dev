@@ -167,14 +167,16 @@ if exist "$(SolutionDir)ThirdParty\Libs\glfw3.dll" copy /Y "$(SolutionDir)ThirdP
     <None Include="shaders\Fluid\GaussianFluidSimCS.comp" />
     <None Include="shaders\Sdf\MeshToSdfCS.comp" />
     <None Include="shaders\Sdf\SdfBrushCS.comp" />
-    <None Include="shaders\Sdf\SdfLod1CS.comp" />
-    <None Include="shaders\Sdf\SdfDrawListCS.comp" />
+    <None Include="shaders\Sdf\SdfDrawListCountCS.comp" />
+    <None Include="shaders\Sdf\SdfDrawListScanCS.comp" />
+    <None Include="shaders\Sdf\SdfDrawListScatterCS.comp" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="World\Animation.cpp" />
     <ClCompile Include="ComputeShaderPipelines.cpp" />
     <ClCompile Include="Features\Fluid\GaussianFluidSim.cpp" />
     <ClCompile Include="Features\Sdf\Edit\SdfEditor.cpp" />
+    <ClCompile Include="Features\Sdf\Edit\SdfDrawList.cpp" />
     <ClCompile Include="Platform\Desktop\Input.cpp" />
     <ClCompile Include="World\Camera\Camera.cpp" />
     <ClCompile Include="Core\Pipelines\ComputePipeline.cpp" />
@@ -221,6 +223,7 @@ if exist "$(SolutionDir)ThirdParty\Libs\glfw3.dll" copy /Y "$(SolutionDir)ThirdP
     <ClInclude Include="Features\Sdf\Edit\SdfEditor.h" />
     <ClInclude Include="Features\Sdf\SdfVolume.h" />
     <ClInclude Include="Features\Sdf\Edit\BrushState.h" />
+    <ClInclude Include="Features\Sdf\Edit\SdfDrawList.h" />
     <ClInclude Include="Platform\Desktop\Input.h" />
     <ClInclude Include="World\Camera\Camera.h" />
     <ClInclude Include="Core\Pipelines\ComputePipeline.h" />

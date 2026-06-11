@@ -1,0 +1,66 @@
+#version 450
+
+// SdfDrawList pass 1/3 (count): each active block inside the view frustum
+// computes its camera-distance bucket and bumps that bucket's counter.
+// Buckets give the draw list an approximate front-to-back order so early-Z
+// (depth_greater in SdfBrickFS) kills occluded bricks before their raymarch
+// runs. Distance from the camera is monotonic along any view ray, so bucket
+// order == per-ray near-to-far.
+
+layout(local_size_x = 256) in;
+
+layout(std430, binding = 0) readonly buffer BlockBuffer {
+    int blocks[];   // 64^3 block table: brick index | flags, negative = empty
+};
+layout(std430, binding = 1) buffer Buckets {
+    uint bucketCounts[]; // NUM_BUCKETS counters, zeroed before this pass
+};
+layout(binding = 2) uniform SortParams {
+    vec4 camAndScale;      // xyz: camera position in block units, w: dist -> bucket scale
+    vec4 frustumPlanes[6]; // view frustum in block units, normalized, inward-facing
+};
+
+const uint BLOCKS_PER_AXIS = 64u;
+const uint TOTAL_BLOCKS = BLOCKS_PER_AXIS * BLOCKS_PER_AXIS * BLOCKS_PER_AXIS;
+const int NUM_BUCKETS = 256;
+
+vec3 blockCenter(uint i)
+{
+    return vec3(
+        float(i % BLOCKS_PER_AXIS),
+        float((i / BLOCKS_PER_AXIS) % BLOCKS_PER_AXIS),
+        float(i / (BLOCKS_PER_AXIS * BLOCKS_PER_AXIS))) + vec3(0.5);
+}
+
+// View-frustum test of the block's bounding sphere (half diagonal of a unit
+// cube). Culled blocks are simply absent from the draw list; the scatter
+// pass applies the identical test so counts and slots agree.
+bool inFrustum(vec3 center)
+{
+    const float radius = 0.8660254; // sqrt(3)/2
+    for (int p = 0; p < 6; ++p) {
+        if (dot(frustumPlanes[p].xyz, center) + frustumPlanes[p].w < -radius) {
+            return false;
+        }
+    }
+    return true;
+}
+
+int bucketFor(vec3 center)
+{
+    float d = distance(center, camAndScale.xyz);
+    return clamp(int(d * camAndScale.w), 0, NUM_BUCKETS - 1);
+}
+
+void main()
+{
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= TOTAL_BLOCKS || blocks[i] < 0) {
+        return;
+    }
+    vec3 center = blockCenter(i);
+    if (!inFrustum(center)) {
+        return;
+    }
+    atomicAdd(bucketCounts[bucketFor(center)], 1u);
+}

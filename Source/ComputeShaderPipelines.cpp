@@ -19,7 +19,6 @@ ComputeShaderPipelines::ComputeShaderPipelines(EngineContext& ctx) {
 	sdfEditor = new SdfEditor(ctx);
   //  ct3D = fluidSim->computeTexture;
 	scene->SBOs.push_back(sdfEditor->computeSBO);
-	scene->SBOs.push_back(sdfEditor->lod1SBO);
    // scene->ptextures.push_back(fluidSim->computeTexture);
 }
 ComputeShaderPipelines::~ComputeShaderPipelines() {
@@ -37,10 +36,3 @@ void ComputeShaderPipelines::update(float time) {
    // }
 }
 
-void ComputeShaderPipelines::createStaticFloorObject() {
-    sdfEditor->createStaticFloorObject();
-}
-
-void ComputeShaderPipelines::createLodObjects() {
-    sdfEditor->createLodObjects();
-}

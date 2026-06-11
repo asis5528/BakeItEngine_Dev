@@ -1,0 +1,67 @@
+#version 450
+
+// SdfDrawList pass 3/3 (scatter): each active block inside the view frustum
+// takes a slot inside its distance bucket (offsets from the scan pass) and
+// writes its ID there. The resulting instance buffer is bucket-ordered
+// near-to-far, so instances rasterize roughly front-to-back and early-Z can
+// reject occluded bricks. The frustum test must match the count pass exactly.
+
+layout(local_size_x = 256) in;
+
+layout(std430, binding = 0) readonly buffer BlockBuffer {
+    int blocks[];
+};
+layout(std430, binding = 1) buffer Buckets {
+    uint bucketOffsets[]; // running write cursors per bucket (from scan)
+};
+layout(std430, binding = 2) writeonly buffer InstanceIds {
+    int instanceIds[];
+};
+layout(binding = 3) uniform SortParams {
+    vec4 camAndScale;      // xyz: camera position in block units, w: dist -> bucket scale
+    vec4 frustumPlanes[6]; // view frustum in block units, normalized, inward-facing
+};
+
+const uint BLOCKS_PER_AXIS = 64u;
+const uint TOTAL_BLOCKS = BLOCKS_PER_AXIS * BLOCKS_PER_AXIS * BLOCKS_PER_AXIS;
+const int NUM_BUCKETS = 256;
+
+vec3 blockCenter(uint i)
+{
+    return vec3(
+        float(i % BLOCKS_PER_AXIS),
+        float((i / BLOCKS_PER_AXIS) % BLOCKS_PER_AXIS),
+        float(i / (BLOCKS_PER_AXIS * BLOCKS_PER_AXIS))) + vec3(0.5);
+}
+
+// Identical test to the count pass - see the comment there.
+bool inFrustum(vec3 center)
+{
+    const float radius = 0.8660254; // sqrt(3)/2
+    for (int p = 0; p < 6; ++p) {
+        if (dot(frustumPlanes[p].xyz, center) + frustumPlanes[p].w < -radius) {
+            return false;
+        }
+    }
+    return true;
+}
+
+int bucketFor(vec3 center)
+{
+    float d = distance(center, camAndScale.xyz);
+    return clamp(int(d * camAndScale.w), 0, NUM_BUCKETS - 1);
+}
+
+void main()
+{
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= TOTAL_BLOCKS || blocks[i] < 0) {
+        return;
+    }
+    vec3 center = blockCenter(i);
+    if (!inFrustum(center)) {
+        return;
+    }
+    uint slot = atomicAdd(bucketOffsets[bucketFor(center)], 1u);
+    instanceIds[slot] = int(i);
+}
