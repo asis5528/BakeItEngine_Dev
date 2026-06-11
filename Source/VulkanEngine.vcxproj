@@ -225,6 +225,7 @@ if exist "$(SolutionDir)ThirdParty\Libs\glfw3.dll" copy /Y "$(SolutionDir)ThirdP
     <ClInclude Include="Features\Sdf\Edit\BrushState.h" />
     <ClInclude Include="Features\Sdf\Edit\SdfDrawList.h" />
     <ClInclude Include="Platform\Desktop\Input.h" />
+    <ClInclude Include="Platform\Platform.h" />
     <ClInclude Include="World\Camera\Camera.h" />
     <ClInclude Include="Core\Pipelines\ComputePipeline.h" />
     <ClInclude Include="Editor\EditorGui.h" />

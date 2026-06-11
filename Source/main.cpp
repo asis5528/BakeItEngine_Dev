@@ -2,6 +2,7 @@
 
 
 #pragma once
+#include "Platform/Platform.h"
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
@@ -802,7 +803,12 @@ private:
 
 int main() {
     Vulkan app;
+#ifdef BAKEIT_PLATFORM_DESKTOP
+    // Dev convenience: recompile every shader at startup (needs glslc on
+    // PATH). The Quest build has no shell and no glslc - it ships the
+    // precompiled .spv files as APK assets instead.
     system("compile.bat");
+#endif
     try {
         app.run();
     }
