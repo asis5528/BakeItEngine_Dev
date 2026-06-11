@@ -20,6 +20,7 @@ void VulkanBase::init(GLFWwindow* window) {
     pickPhysicalDevice();
    
     vulkandevice = new VulkanDevice(vkPhysicalDevice);
+    vulkandevice->platformHooks = &platformHooks;
     VkPhysicalDeviceFeatures2KHR deviceFeatures2{};
     VkPhysicalDeviceMultiviewFeaturesKHR extFeatures{};
     extFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES_KHR;
@@ -123,12 +124,25 @@ void VulkanBase::createInstance() {
         createInfo.pNext = nullptr;
     }
 
-    if (vkCreateInstance(&createInfo, nullptr, &vkinstance) != VK_SUCCESS) {
+    VkResult result = platformHooks.createInstance
+        ? platformHooks.createInstance(createInfo, vkinstance)
+        : vkCreateInstance(&createInfo, nullptr, &vkinstance);
+    if (result != VK_SUCCESS) {
         throw std::runtime_error("failed to create instance!");
     }
 }
 
 void VulkanBase::pickPhysicalDevice() {
+    // The platform may dictate the GPU (OpenXR: xrGetVulkanGraphicsDevice2KHR
+    // returns the one the headset is wired to - using any other is invalid).
+    if (platformHooks.pickPhysicalDevice) {
+        vkPhysicalDevice = platformHooks.pickPhysicalDevice(vkinstance);
+        if (vkPhysicalDevice == VK_NULL_HANDLE) {
+            throw std::runtime_error("platform returned no physical device!");
+        }
+        return;
+    }
+
     uint32_t deviceCount = 0;
     vkEnumeratePhysicalDevices(vkinstance, &deviceCount, nullptr);
 

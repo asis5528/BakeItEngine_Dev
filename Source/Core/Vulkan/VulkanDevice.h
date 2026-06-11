@@ -1,10 +1,14 @@
 #pragma once
 #include <vulkan/vulkan.h>
 #include <vector>
+#include "VulkanPlatformHooks.h"
 
 struct VulkanDevice
 {
-	
+	// Set by VulkanBase before createLogicalDevice(); may carry a device
+	// creation wrapper and an extension-list override (Quest/OpenXR).
+	const VulkanPlatformHooks* platformHooks = nullptr;
+
 	VkPhysicalDevice physicalDevice;
 	VulkanDevice(VkPhysicalDevice physicalDevice);
 	~VulkanDevice();

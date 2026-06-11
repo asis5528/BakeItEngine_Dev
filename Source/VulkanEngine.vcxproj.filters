@@ -182,6 +182,7 @@
     <ClInclude Include="Core\Vulkan\SwapChain.h" />
     <ClInclude Include="Core\Resources\VulkanImage.h" />
     <ClInclude Include="Core\Vulkan\Framebuffer.h" />
+    <ClInclude Include="Core\Vulkan\VulkanPlatformHooks.h" />
     <ClInclude Include="Core\Vulkan\VulkanUtils.h" />
     <ClInclude Include="Core\Resources\VulkanBuffer.h" />
     <ClInclude Include="Core\Pipelines\GraphicsPipeline.h" />

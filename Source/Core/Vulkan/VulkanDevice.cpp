@@ -92,8 +92,12 @@ void VulkanDevice::createLogicalDevice() {
     
     createInfo.pEnabledFeatures = &deviceFeatures;
 
-    createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
-    createInfo.ppEnabledExtensionNames = deviceExtensions.data();
+    const std::vector<const char*>& extensions =
+        (platformHooks && !platformHooks->deviceExtensionOverride.empty())
+            ? platformHooks->deviceExtensionOverride
+            : deviceExtensions;
+    createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
+    createInfo.ppEnabledExtensionNames = extensions.data();
 
     if (enableValidationLayers) {
         createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
@@ -103,7 +107,10 @@ void VulkanDevice::createLogicalDevice() {
         createInfo.enabledLayerCount = 0;
     }
 
-    if (vkCreateDevice(physicalDevice, &createInfo, nullptr, &device) != VK_SUCCESS) {
+    VkResult result = (platformHooks && platformHooks->createDevice)
+        ? platformHooks->createDevice(physicalDevice, createInfo, device)
+        : vkCreateDevice(physicalDevice, &createInfo, nullptr, &device);
+    if (result != VK_SUCCESS) {
         throw std::runtime_error("failed to create logical device!");
     }
 

@@ -2,6 +2,7 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 #include <vector>
+#include "VulkanPlatformHooks.h"
 #include "VulkanDevice.h"
 #include "SwapChain.h"
 #include "Framebuffer.h"
@@ -11,6 +12,10 @@
 class VulkanBase {
 
 public:
+	// Platform-owned bootstrap hooks; fill before init() (Quest/OpenXR).
+	// Left defaulted on desktop - see VulkanPlatformHooks.h.
+	VulkanPlatformHooks platformHooks;
+
 	VkInstance vkinstance;
 	VkSurfaceKHR vksurface;
 	VkPhysicalDevice vkPhysicalDevice;

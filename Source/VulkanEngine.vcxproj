@@ -231,6 +231,7 @@ if exist "$(SolutionDir)ThirdParty\Libs\glfw3.dll" copy /Y "$(SolutionDir)ThirdP
     <ClInclude Include="Editor\EditorGui.h" />
     <ClInclude Include="Core\Pipelines\GraphicsPipeline.h" />
     <ClInclude Include="Core\Vulkan\Framebuffer.h" />
+    <ClInclude Include="Core\Vulkan\VulkanPlatformHooks.h" />
     <ClInclude Include="Imgui\imconfig.h" />
     <ClInclude Include="Imgui\imgui.h" />
     <ClInclude Include="Imgui\imgui_impl_glfw.h" />
