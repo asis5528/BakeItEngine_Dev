@@ -5,14 +5,17 @@
 
 class Scene;
 
-// The post-processing pass. Currently a plain passthrough (offscreen color
-// copied to the output framebuffer the Editor viewport displays); effects
-// plug in here as fullscreen quads when they earn their place.
+// The post-processing pass. Passthrough of the offscreen scene color to the
+// output framebuffer the Editor viewport displays, plus the brush indicator
+// overlay (analytic outline of the active brush shape, ray-traced in
+// PostPassFS); further effects plug in here as fullscreen quads when they
+// earn their place.
 class PostProcessPass
 {
 	public:
 		std::vector<Quad*> quads;
 		std::vector<Framebuffer*> framebuffers;
+		std::vector<UBO> indicatorUbo; // camera + brush data for the overlay
 		VulkanBase *base;
 		Scene* scene;
 		Framebuffer* previousFB;

@@ -215,18 +215,17 @@ private:
           // scene->materials[0].materialData = &dat;
 
 
-        clines = new ComputeShaderPipelines(ctx);
-        editorGui->sdfVolume = &clines->sdfEditor->volume;
-        editorGui->brush = &clines->sdfEditor->brush;
-        // prepareCompute();
-
-      //   scene->computeTexture = ct;
-
-
-        //scene->textures.push_back(clines->ct3D);
+        // The volumetric pipeline must be assigned BEFORE ComputeShaderPipelines:
+        // SdfEditor's constructor locates the editable mesh by this pipeline to
+        // create the indirect draw buffer and the GPU draw-list builder.
         scene->objects[0].shader[0].graphicsPipeline = scene->pipelines[4];
         scene->objects[0].ModelMatrix = glm::mat4(1.0f);
         scene->objects[0].finalMatrix = glm::mat4(1.0f);
+
+        clines = new ComputeShaderPipelines(ctx);
+        editorGui->sdfVolume = &clines->sdfEditor->volume;
+        editorGui->brush = &clines->sdfEditor->brush;
+        scene->brush = &clines->sdfEditor->brush; // brush indicator overlay (post pass)
         scene->ptextures.push_back(base->vbuffer->createTexture3DGeneral(1, 1, 1));
         Material material;
         material.type = TexturedMaterial;
@@ -244,9 +243,6 @@ private:
             scene->SBOs[0][5]
         };
         base->vbuffer->updateIndirectInstanceList(scene->meshes[scene->objects[0].meshID[0]], {});
-        clines->createLodObjects();
-       // clines->createStaticFloorObject();
-        //scene->meshes[scene->objects[0].meshID[0]].matID =
        
         scene->createSceneDescriptor();
 

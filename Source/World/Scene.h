@@ -8,6 +8,7 @@
 #include <array>
 
 class Renderer;
+struct BrushState;
 
 // World state: what exists in the scene. Render resources live in
 // Render/Renderer; the render methods below are legacy forwarders kept
@@ -32,6 +33,7 @@ public:
 	const Input* input = nullptr; // routed input, owned by Platform (wired in main.cpp)
 	Camera* camera = nullptr;     // world camera, owned by the engine root (wired in main.cpp)
 	Renderer* renderer = nullptr; // render resources + recording (wired in main.cpp)
+	const BrushState* brush = nullptr; // brush mirror for the indicator overlay, owned by SdfEditor (wired in main.cpp)
 	float fps = 0.0;
 	Scene(VulkanBase *vbase);
 	void init();
