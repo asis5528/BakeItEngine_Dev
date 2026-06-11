@@ -79,6 +79,7 @@ const bool enableValidationLayers = true;
 #include "ComputeShaderPipelines.h"
 #include "Core/Resources/ResourceManager.h"
 #include "Platform/Desktop/Input.h"
+#include "Platform/Desktop/DesktopBrushInput.h"
 #include "Render/Renderer.h"
 #include "EngineContext.h"
 
@@ -227,6 +228,9 @@ private:
         editorGui->sdfVolume = &clines->sdfEditor->volume;
         editorGui->brush = &clines->sdfEditor->brush;
         scene->brush = &clines->sdfEditor->brush; // brush indicator overlay (post pass)
+        // Platform brush source: desktop = cursor ray + mouse/keyboard; the
+        // Quest entry point wires an OpenXR controller source here instead.
+        clines->sdfEditor->brushInput = new DesktopBrushInput(ctx);
         scene->ptextures.push_back(base->vbuffer->createTexture3DGeneral(1, 1, 1));
         Material material;
         material.type = TexturedMaterial;

@@ -239,35 +239,28 @@ void SdfEditor::update(float time)
 {
 	uploadChunkSpatialData();
 
-	const Input& in = *scene->input;
-	const glm::dvec2 currentCursorPos = in.mousePos;
+	if (!brushInput) {
+		return;
+	}
+	const BrushInput bin = brushInput->poll();
+	const glm::dvec2 currentCursorPos = bin.strokeCursor;
 
-	if (in.uPressed) {
+	if (bin.shapeTogglePressed) {
 		BrushShapeMode = (BrushShapeMode + 1) % 3;
 		const char* shapeName = (BrushShapeMode == 0) ? "Cube" : ((BrushShapeMode == 1) ? "Sphere" : "Plane");
 		std::printf("Brush Shape: %s\n", shapeName);
 	}
-	if (in.iPressed) {
+	if (bin.emissiveTogglePressed) {
 		EmissiveMode = !EmissiveMode;
 		std::printf("Emissive Mode: %s\n", EmissiveMode ? "ON" : "OFF");
 	}
 
-	const float altSpeed = in.altDown ? 0.1f : 1.0f;
-	const float brushRadiusStep = 0.0001f * altSpeed;
-	const float brushSmoothnessStep = 0.0001f * altSpeed;
-	const float brushDistanceStep = 0.005f * altSpeed;
-	float msx = in.mousePos.x / base->presentExtent().width;
-	float msy = in.mousePos.y / base->presentExtent().height;
-
-	if (!in.cameraMoveMode) {
-		if (in.rightButtonDown) leftBut = 0.0;
-		if (in.leftButtonDown) leftBut = 1.0;
-		if (in.aDown) { BrushRadius += brushRadiusStep; }
-		if (in.dDown) { BrushRadius -= brushRadiusStep; }
-		if (in.qDown) { BrushSmoothness += brushSmoothnessStep; }
-		if (in.eDown) { BrushSmoothness -= brushSmoothnessStep; }
-		if (in.wDown) BrushDistanceFromCamera += brushDistanceStep;
-		if (in.sDown) BrushDistanceFromCamera -= brushDistanceStep;
+	if (bin.interactionAllowed) {
+		if (bin.eraseDown) leftBut = 0.0;
+		if (bin.drawDown) leftBut = 1.0;
+		BrushRadius += 0.0001f * bin.radiusDelta;
+		BrushSmoothness += 0.0001f * bin.smoothnessDelta;
+		BrushDistanceFromCamera += 0.005f * bin.distanceDelta;
 
 		if (BrushRadius < 0.001f) BrushRadius = 0.001f;
 		if (BrushSmoothness < 0.0001f) BrushSmoothness = 0.0001f;
@@ -278,16 +271,10 @@ void SdfEditor::update(float time)
 		if (BrushDistanceFromCamera > 3.0f) BrushDistanceFromCamera = 3.0f;
 	}
 
-	// Brush placement: ray through the cursor, pushed into the chunk bounds.
-	glm::mat4 invProj = glm::inverse(scene->camera->proj[0]);
-	glm::mat4 invView = glm::inverse(scene->camera->view[0]);
-	float ndcX = msx * 2.0f - 1.0f;
-	float ndcY = 1.0f - msy * 2.0f;
-	glm::vec4 rayClip(ndcX, ndcY, -1.0f, 1.0f);
-	glm::vec4 rayView = invProj * rayClip;
-	rayView = glm::vec4(rayView.x, rayView.y, -1.0f, 0.0f);
-	glm::vec3 rayDir = glm::normalize(glm::vec3(invView * rayView));
-	glm::vec3 rayOrigin = scene->camera->position;
+	// Brush placement: the platform's pointing ray, pushed into the chunk
+	// bounds (desktop: cursor ray; quest: controller aim pose).
+	const glm::vec3 rayDir = bin.rayDir;
+	const glm::vec3 rayOrigin = bin.rayOrigin;
 
 	float tEnter = 0.0f, tExit = 0.0f;
 	glm::vec3 brushCenter = rayOrigin + rayDir * BrushDistanceFromCamera; // fallback
@@ -311,7 +298,7 @@ void SdfEditor::update(float time)
 	pubo.BrushShape = static_cast<float>(BrushShapeMode);
 	pubo.BrushSmoothness = BrushSmoothness;
 	pubo.BrushEmissive = EmissiveMode ? 1.0f : 0.0f;
-	pubo.BrushRecolor = (in.shiftDown && in.leftButtonDown && !in.cameraMoveMode) ? 1.0f : 0.0f;
+	pubo.BrushRecolor = (bin.recolorModifier && bin.drawDown && bin.interactionAllowed) ? 1.0f : 0.0f;
 
 	// Editor-facing brush state mirror.
 	brush.data = glm::vec4(-brushCenter, BrushRadius);
@@ -330,7 +317,7 @@ void SdfEditor::update(float time)
 	// Stroke gesture: a stroke lasts as long as the button is held; stamps
 	// happen when the cursor moved far enough since the last executed stamp
 	// (deltas accumulate across skipped frames).
-	const bool brushPointerDown = !in.cameraMoveMode && (in.leftButtonDown || in.rightButtonDown);
+	const bool brushPointerDown = bin.interactionAllowed && (bin.drawDown || bin.eraseDown);
 	const bool isInitialBrushClick = brushPointerDown && !wasBrushPointerDown;
 	wasBrushPointerDown = brushPointerDown;
 	if (isInitialBrushClick) {

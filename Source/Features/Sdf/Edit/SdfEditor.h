@@ -3,6 +3,7 @@
 #include "Core/Pipelines/ComputePipeline.h"
 #include "Features/Sdf/SdfVolume.h"
 #include "Features/Sdf/Edit/BrushState.h"
+#include "Features/Sdf/Edit/BrushInputSource.h"
 #include "Features/Sdf/Edit/SdfDrawList.h"
 #include "EngineContext.h"
 #include <glm/glm.hpp>
@@ -23,6 +24,11 @@ class SdfEditor
 public:
 	SdfVolume volume;
 	BrushState brush;
+
+	// Brush ray + intents; platform-owned (desktop: DesktopBrushInput,
+	// quest: OpenXR controller actions). Wired in main.cpp; update() is a
+	// no-op for brushing while unset.
+	BrushInputSource* brushInput = nullptr;
 
 	std::vector<UBO> computeUBO;
 	std::vector<SBO> computeSBO;

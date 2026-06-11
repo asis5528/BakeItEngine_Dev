@@ -178,6 +178,7 @@ if exist "$(SolutionDir)ThirdParty\Libs\glfw3.dll" copy /Y "$(SolutionDir)ThirdP
     <ClCompile Include="Features\Sdf\Edit\SdfEditor.cpp" />
     <ClCompile Include="Features\Sdf\Edit\SdfDrawList.cpp" />
     <ClCompile Include="Platform\Desktop\Input.cpp" />
+    <ClCompile Include="Platform\Desktop\DesktopBrushInput.cpp" />
     <ClCompile Include="World\Camera\Camera.cpp" />
     <ClCompile Include="Core\Pipelines\ComputePipeline.cpp" />
     <ClCompile Include="Editor\EditorGui.cpp" />
@@ -224,7 +225,9 @@ if exist "$(SolutionDir)ThirdParty\Libs\glfw3.dll" copy /Y "$(SolutionDir)ThirdP
     <ClInclude Include="Features\Sdf\SdfVolume.h" />
     <ClInclude Include="Features\Sdf\Edit\BrushState.h" />
     <ClInclude Include="Features\Sdf\Edit\SdfDrawList.h" />
+    <ClInclude Include="Features\Sdf\Edit\BrushInputSource.h" />
     <ClInclude Include="Platform\Desktop\Input.h" />
+    <ClInclude Include="Platform\Desktop\DesktopBrushInput.h" />
     <ClInclude Include="Platform\Platform.h" />
     <ClInclude Include="World\Camera\Camera.h" />
     <ClInclude Include="Core\Pipelines\ComputePipeline.h" />
