@@ -14,7 +14,7 @@ ScenePipelines::ScenePipelines(VulkanBase *base,VkRenderPass renderPass) {
     //   input.MultiviewLayer = frameBuffer[0].multiLayerView;
     input.device = base->device;
     input.msaaSamples = base->msaaSamples;
-    input.viewportExtent = base->swapChain->swapChainExtent;
+    input.viewportExtent = base->presentExtent();
     input.colorAttachmentCount = 3;
     input.descriptorTypes = { descriptorTypes{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_SHADER_STAGE_VERTEX_BIT},
         descriptorTypes{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_SHADER_STAGE_VERTEX_BIT},

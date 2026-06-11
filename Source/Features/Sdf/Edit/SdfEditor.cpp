@@ -256,8 +256,8 @@ void SdfEditor::update(float time)
 	const float brushRadiusStep = 0.0001f * altSpeed;
 	const float brushSmoothnessStep = 0.0001f * altSpeed;
 	const float brushDistanceStep = 0.005f * altSpeed;
-	float msx = in.mousePos.x / base->swapChain->swapChainExtent.width;
-	float msy = in.mousePos.y / base->swapChain->swapChainExtent.height;
+	float msx = in.mousePos.x / base->presentExtent().width;
+	float msy = in.mousePos.y / base->presentExtent().height;
 
 	if (!in.cameraMoveMode) {
 		if (in.rightButtonDown) leftBut = 0.0;

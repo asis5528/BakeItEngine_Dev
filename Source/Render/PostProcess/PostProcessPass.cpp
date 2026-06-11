@@ -22,7 +22,7 @@ PostProcessPass::PostProcessPass(VulkanBase* base, Scene *scene, Framebuffer* pr
 	this->base = base;
     this->scene = scene;
     this->previousFB = previousFB;
-    Framebuffer* outputFB = new Framebuffer(base->vulkandevice, base->swapChain->swapChainExtent.width, base->swapChain->swapChainExtent.height, base->vulkandevice->getMaxUsableSampleCount(), base->swapChain->swapChainImageFormat, utils::findDepthFormat(base->vulkandevice->physicalDevice), previousFB->multiLayerView);
+    Framebuffer* outputFB = new Framebuffer(base->vulkandevice, base->presentExtent().width, base->presentExtent().height, base->vulkandevice->getMaxUsableSampleCount(), base->presentFormat(), utils::findDepthFormat(base->vulkandevice->physicalDevice), previousFB->multiLayerView);
     framebuffers.push_back(outputFB);
 
     Quad* quad = new Quad(base, framebuffers[0]);

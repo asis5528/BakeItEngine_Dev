@@ -18,7 +18,7 @@ void Quad::createGraphicsPipeline(std::string vshaderpath, std::string fshaderpa
     input.fragmentShaderpath = fshaderpath;
     input.renderPass = this->fr->renderPass;
     input.msaaSamples = base->msaaSamples;
-    input.viewportExtent = base->swapChain->swapChainExtent;
+    input.viewportExtent = base->presentExtent();
     input.colorAttachmentCount = 3;
     input.descriptorTypes = descriptorTypes;
     graphicsPipeline->setupPipeline(input);

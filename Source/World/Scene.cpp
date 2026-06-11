@@ -41,8 +41,8 @@ void Scene::update(float iTime) {
     float angle = (sin(iTime/3.)*3.1415)*0.;
 #ifndef VR
     camera->update(*input, delTime,
-        float(base->swapChain->swapChainExtent.width),
-        float(base->swapChain->swapChainExtent.height));
+        float(base->presentExtent().width),
+        float(base->presentExtent().height));
 #endif
     UniformBufferObject ubo{};
     glm::mat4 k;

@@ -35,6 +35,14 @@ public:
 	size_t currentFrame = 0;
 	uint32_t imageIndex;
 	std::vector<VkCommandBuffer> submitCommandBuffers;
+	// Presentation-surface properties. Engine code must use these instead of
+	// dereferencing swapChain: on the Quest build the extent/format come from
+	// the OpenXR swapchain, not VkSwapchainKHR (see Platform/Platform.h).
+	// Direct swapChain access is reserved for VulkanBase internals and
+	// desktop-only subsystems (ImGui, the OpenVR path).
+	VkExtent2D presentExtent() const;
+	VkFormat presentFormat() const;
+
 	void init(GLFWwindow* window);
 	void setupSurface();
 	void beginCommandBuffers(unsigned int index);

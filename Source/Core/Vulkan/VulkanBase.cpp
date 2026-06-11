@@ -65,6 +65,14 @@ void VulkanBase::init(GLFWwindow* window) {
     ////////////////////////////////////FIVRRRR//////////////////////////////////////////////
 }
 
+VkExtent2D VulkanBase::presentExtent() const {
+    return swapChain->swapChainExtent;
+}
+
+VkFormat VulkanBase::presentFormat() const {
+    return swapChain->swapChainImageFormat;
+}
+
 void VulkanBase::recreate() {
   //  swapChain->create();
     swapChain->create();

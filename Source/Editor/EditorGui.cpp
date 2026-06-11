@@ -165,7 +165,7 @@ void DrawSdfAtlasUsageBar(const char* label, float fraction, int usedBricks, int
    */
      ImGui::Begin("DockSpace", nullptr, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoTitleBar);
 
-     ImGui::SetWindowSize(ImVec2(m_base->swapChain->swapChainExtent.width, m_base->swapChain->swapChainExtent.height));
+     ImGui::SetWindowSize(ImVec2(m_base->presentExtent().width, m_base->presentExtent().height));
      ImGui::SetWindowPos(ImVec2(0, 0));
 
      ImGuiIO& io = ImGui::GetIO();
@@ -177,7 +177,7 @@ void DrawSdfAtlasUsageBar(const char* label, float fraction, int usedBricks, int
 
          ImGui::DockBuilderRemoveNode(dockspace_id); // clear any previous layout
          ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
-         ImGui::DockBuilderSetNodeSize(dockspace_id, ImVec2(m_base->swapChain->swapChainExtent.width, m_base->swapChain->swapChainExtent.height));
+         ImGui::DockBuilderSetNodeSize(dockspace_id, ImVec2(m_base->presentExtent().width, m_base->presentExtent().height));
 
          auto dock_id_up = ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Up, 0.2f, nullptr, &dockspace_id);
          auto dock_id_down = ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Down, 0.25f, nullptr, &dockspace_id);

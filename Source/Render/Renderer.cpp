@@ -13,7 +13,7 @@ void Renderer::init(Scene* scene)
 {
 	standardSampler = base->vbuffer->createTextureSampler(1);
 
-	Framebuffer* frameBuffer = new Framebuffer(base->vulkandevice, base->swapChain->swapChainExtent.width, base->swapChain->swapChainExtent.height, base->vulkandevice->getMaxUsableSampleCount(), base->swapChain->swapChainImageFormat, utils::findDepthFormat(base->vulkandevice->physicalDevice), 2);
+	Framebuffer* frameBuffer = new Framebuffer(base->vulkandevice, base->presentExtent().width, base->presentExtent().height, base->vulkandevice->getMaxUsableSampleCount(), base->presentFormat(), utils::findDepthFormat(base->vulkandevice->physicalDevice), 2);
 	framebuffers.push_back(frameBuffer);
 	postprocessingManager = new PostProcessingManager(base, scene, framebuffers[0]);
 	scenePipelines = new ScenePipelines(base, framebuffers[0]->renderPass);
