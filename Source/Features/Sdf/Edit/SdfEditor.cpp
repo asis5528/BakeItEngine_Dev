@@ -1,9 +1,9 @@
 #include "SdfEditor.h"
 #include "Core/Resources/ResourceManager.h"
-#include "Render/Renderer.h"
 #include <algorithm>
-#include <cfloat>
 #include <cmath>
+#include <cstdio>
+#include <iostream>
 #include <vector>
 
  struct alignas(16) sdfEditUBO {
@@ -18,8 +18,6 @@
 	float _pad0 = 0.0f;
 	float _pad1 = 0.0f;
 	glm::ivec4 DispatchBaseBlock = glm::ivec4(0);
-	
-
 };
 
 namespace
@@ -52,28 +50,6 @@ void BuildChunkSpatialData(
 	}
 }
 
-void BuildParentChunkSpatialData(
-	std::vector<BlockSpatialData>& blockSpatial,
-	uint32_t parentBlocksPerAxis,
-	float parentBlockSizeWS,
-	float childBlockSizeWS,
-	const glm::vec3& chunkTranslationWS)
-{
-	const glm::vec3 childCenterOrigin = ChunkLocalCenterOrigin(childBlockSizeWS);
-	const glm::vec3 parentCenterOrigin = childCenterOrigin + glm::vec3(0.5f * childBlockSizeWS);
-	for (uint32_t z = 0; z < parentBlocksPerAxis; ++z) {
-		for (uint32_t y = 0; y < parentBlocksPerAxis; ++y) {
-			for (uint32_t x = 0; x < parentBlocksPerAxis; ++x) {
-				const uint32_t blockIndex =
-					x + y * parentBlocksPerAxis + z * parentBlocksPerAxis * parentBlocksPerAxis;
-				const glm::vec3 localCenter =
-					parentCenterOrigin + glm::vec3(float(x), float(y), float(z)) * parentBlockSizeWS;
-				blockSpatial[blockIndex].centerAndSize = glm::vec4(localCenter + chunkTranslationWS, parentBlockSizeWS);
-			}
-		}
-	}
-}
-
 void ComputeChunkBounds(
 	uint32_t blocksPerAxis,
 	float blockSizeWS,
@@ -89,658 +65,7 @@ void ComputeChunkBounds(
 	outMaxWS = chunkTranslationWS + localCenterLast + halfExtent;
 }
 
-constexpr float kSnapshotGravity = 0.35f;
-constexpr float kSnapshotFloorY = -0.35f;
-constexpr int kBrickSamplesPerBlock = 9 * 9 * 9;
-constexpr uint32_t kFloorBlocksPerAxis = 64u;
-constexpr int kBlockEmissiveFlag = (1 << 30);
-constexpr int kBlockIndexMask = kBlockEmissiveFlag - 1;
-constexpr int kAtlasDim = 512;
-constexpr float kBrushCenterBias = 0.031f;
-constexpr bool kForceCoarseLodDebug = false;
-
-bool BlockHasRenderableSurfaceSamples(const float* bricks, int brickBase, float nearSurfaceThreshold)
-{
-	if (brickBase < 0 || bricks == nullptr) {
-		return false;
-	}
-
-	bool hasNegative = false;
-	bool hasPositive = false;
-	int nearSurfaceCount = 0;
-
-	for (int i = 0; i < kBrickSamplesPerBlock; ++i) {
-		const float h = bricks[brickBase + i];
-		if (h < 0.0f) hasNegative = true;
-		if (h > 0.0f) hasPositive = true;
-		if (std::abs(h) <= nearSurfaceThreshold) {
-			nearSurfaceCount++;
-		}
-	}
-
-	return (hasNegative && hasPositive) || (nearSurfaceCount >= 3);
-}
-
-std::vector<int32_t> BuildRenderableActiveIds(
-	const std::vector<int32_t>& blockState,
-	const float* bricks,
-	float nearSurfaceThreshold)
-{
-	std::vector<int32_t> activeIds;
-	activeIds.reserve(blockState.size());
-
-	for (uint32_t i = 0; i < blockState.size(); ++i) {
-		const int32_t blockRaw = blockState[i];
-		if (blockRaw < 0) {
-			continue;
-		}
-
-		const int brickBase = (blockRaw & kBlockIndexMask);
-		if (BlockHasRenderableSurfaceSamples(bricks, brickBase, nearSurfaceThreshold)) {
-			activeIds.push_back(static_cast<int32_t>(i));
-		}
-	}
-
-	return activeIds;
-}
-
-std::vector<int32_t> BuildAllocatedActiveIds(const std::vector<int32_t>& blockState)
-{
-	std::vector<int32_t> activeIds;
-	activeIds.reserve(blockState.size());
-	for (uint32_t i = 0; i < blockState.size(); ++i) {
-		if (blockState[i] >= 0) {
-			activeIds.push_back(static_cast<int32_t>(i));
-		}
-	}
-	return activeIds;
-}
-
-uint32_t FlattenBlockIndex(uint32_t x, uint32_t y, uint32_t z, uint32_t blocksPerAxis)
-{
-	return x + y * blocksPerAxis + z * blocksPerAxis * blocksPerAxis;
-}
-
-}
-
-SdfEditor::SdfEditor(EngineContext& ctx)
-{
-	this->base = ctx.base;
-	this->scene = ctx.scene;
-	//int size = 64*8;
-
-	int blocksPerAxis = static_cast<int>(chunkBlocksPerAxis);
-	int blockDim = static_cast<int>(chunkBlockDim);
-	int size = blocksPerAxis * blockDim; // 64 * 8 = 512
-
-	ComputeInput input;
-	input.computeShaderPath = "shaders/Sdf/SdfBrushCS.spv";
-	input.descriptorTypes = {
-		VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
-	};
-	comp = new ComputePipeline(base, input);
-	ComputeInput lodInput;
-	lodInput.computeShaderPath = "shaders/Sdf/SdfLod1CS.spv";
-	lodInput.descriptorTypes = {
-		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
-	};
-	lod1Builder = new ComputePipeline(base, lodInput);
-	computeUBO = base->vbuffer->createUniformBuffers({ sizeof(sdfEditUBO) });
-	
-	int numBlocks = blocksPerAxis * blocksPerAxis * blocksPerAxis; // 64^3 = 262144
-	int bricksPerBlock = kBrickSamplesPerBlock;                                     // 729
-	const int atlasCapacityBricks = (kAtlasDim * kAtlasDim * kAtlasDim) / kBrickSamplesPerBlock;
-	computeSBO = base->vbuffer->createStorageBuffers({
-		sizeof(float) * kAtlasDim * kAtlasDim * kAtlasDim,
-		sizeof(int) * numBlocks,
-		sizeof(int),
-		sizeof(glm::vec4) * numBlocks,
-		sizeof(int),
-		sizeof(BlockSpatialData) * numBlocks,
-		sizeof(int),
-		sizeof(int) * atlasCapacityBricks
-	});
-	int zeroInit = 0;
-	computeSBO[2].map(base->device, sizeof(int), &zeroInit);
-	computeSBO[4].map(base->device, sizeof(int), &zeroInit);
-	computeSBO[6].map(base->device, sizeof(int), &zeroInit);
-	std::vector<int32_t> initialFineBlocks(static_cast<size_t>(numBlocks), -999999);
-	std::vector<glm::vec4> initialFineColors(static_cast<size_t>(numBlocks), glm::vec4(0.0f));
-	computeSBO[1].map(base->device, sizeof(int32_t) * initialFineBlocks.size(), initialFineBlocks.data());
-	computeSBO[3].map(base->device, sizeof(glm::vec4) * initialFineColors.size(), initialFineColors.data());
-	fineActiveIds.clear();
-	volume.stats.capacityBricks = atlasCapacityBricks;
-	volume.stats.usedBricks = 0;
-	volume.stats.tailBricks = 0;
-	volume.stats.freeBricks = 0;
-	volume.stats.usage = 0.0f;
-
-	uploadChunkSpatialData();
-
-	std::vector<SBO> computeDescriptorSBOs = {
-		computeSBO[0], // bricks
-		computeSBO[1], // blocks
-		computeSBO[2], // tail counter
-		computeSBO[3], // block colors
-		computeSBO[4], // dirty counter
-		computeSBO[6], // free stack count
-		computeSBO[7]  // free stack data
-	};
-	comp->setupDescriptors(computeUBO, {}, computeDescriptorSBOs);
-	comp->dispatch(1, 1, 1);
-
-	// GPU-driven draw list for the editable chunk: a compaction pass writes
-	// active block IDs + the instance count straight from blocks[]; the mesh
-	// draws via vkCmdDrawIndexedIndirect, so brush edits never need a CPU
-	// readback or a command-buffer re-record to change what is drawn.
-	if (Mesh* fineMesh = findEditableMesh()) {
-		if (fineMesh->hasInstanceIdBuffer) {
-			base->vbuffer->createIndirectDrawBuffer(*fineMesh);
-
-			ComputeInput drawListInput;
-			drawListInput.computeShaderPath = "shaders/Sdf/SdfDrawListCS.spv";
-			drawListInput.descriptorTypes = {
-				VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-				VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-				VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
-			};
-			drawListBuilder = new ComputePipeline(base, drawListInput);
-
-			SBO instanceSbo{};
-			instanceSbo.buffer = fineMesh->instanceIdBuffer;
-			instanceSbo.bufferMemory = fineMesh->instanceIdBufferMemory;
-			instanceSbo.size = sizeof(int32_t) * fineMesh->instanceCapacity;
-			SBO indirectSbo{};
-			indirectSbo.buffer = fineMesh->indirectDrawBuffer;
-			indirectSbo.bufferMemory = fineMesh->indirectDrawBufferMemory;
-			indirectSbo.size = sizeof(VkDrawIndexedIndirectCommand);
-			drawListBuilder->setupDescriptors({}, {}, { computeSBO[1], instanceSbo, indirectSbo });
-			drawListBuilder->ensureCommandResources();
-		}
-	}
-
-	const uint32_t lod1TotalBlocks = lod1BlocksPerAxis * lod1BlocksPerAxis * lod1BlocksPerAxis;
-	const uint32_t lod1AtlasCapacityBricks = lod1TotalBlocks;
-	lod1SBO = base->vbuffer->createStorageBuffers({
-		sizeof(float) * lod1AtlasCapacityBricks * kBrickSamplesPerBlock,
-		sizeof(int32_t) * lod1TotalBlocks,
-		sizeof(int),
-		sizeof(glm::vec4) * lod1TotalBlocks,
-		sizeof(BlockSpatialData) * lod1TotalBlocks
-	});
-	lod1SBO[2].map(base->device, sizeof(int), &zeroInit);
-	std::vector<int32_t> initialLod1Blocks(static_cast<size_t>(lod1TotalBlocks), -999999);
-	std::vector<glm::vec4> initialLod1Colors(static_cast<size_t>(lod1TotalBlocks), glm::vec4(0.0f));
-	lod1SBO[1].map(base->device, sizeof(int32_t) * initialLod1Blocks.size(), initialLod1Blocks.data());
-	lod1SBO[3].map(base->device, sizeof(glm::vec4) * initialLod1Colors.size(), initialLod1Colors.data());
-	std::vector<BlockSpatialData> lod1Spatial(lod1TotalBlocks);
-	BuildParentChunkSpatialData(lod1Spatial, lod1BlocksPerAxis, lod1BlockSizeWS, chunkBlockSizeWS, chunkTranslationWS);
-	lod1SBO[4].map(
-		base->device,
-		sizeof(BlockSpatialData) * lod1Spatial.size(),
-		lod1Spatial.data());
-	std::vector<SBO> lod1DescriptorSBOs = {
-		computeSBO[0],
-		computeSBO[1],
-		computeSBO[3],
-		lod1SBO[0],
-		lod1SBO[1],
-		lod1SBO[3]
-	};
-	lod1Builder->setupDescriptors({}, {}, lod1DescriptorSBOs);
-	lod1Builder->dispatch(1, 1, 1);
-	//glfwSetMouseButtonCallback(base->window, mouse_button_cb);
-}
-
-void SdfEditor::createLodObjects()
-{
-	if (lod1ObjectIndex >= 0 || scene->objects.empty() || scene->objects[0].meshID.empty()) {
-		return;
-	}
-
-	const Mesh& sourceMesh = scene->meshes[scene->objects[0].meshID[0]];
-	Mesh coarseMesh{};
-	coarseMesh.vertices = sourceMesh.vertices;
-	coarseMesh.indices = sourceMesh.indices;
-	coarseMesh.color = sourceMesh.color;
-	coarseMesh.texID = sourceMesh.texID;
-	coarseMesh.matID = sourceMesh.matID;
-	base->vbuffer->createVertexBuffer(coarseMesh);
-	base->vbuffer->createIndexBuffer(coarseMesh);
-	base->vbuffer->createInstanceIdBuffer(
-		coarseMesh,
-		lod1BlocksPerAxis * lod1BlocksPerAxis * lod1BlocksPerAxis);
-	base->vbuffer->updateInstanceIdBuffer(coarseMesh, {});
-	scene->meshes.push_back(coarseMesh);
-	lod1MeshIndex = static_cast<int>(scene->meshes.size() - 1);
-
-	Object coarseObject{};
-	coarseObject.hasMesh = true;
-	coarseObject.hasAnimation = false;
-	coarseObject.ModelMatrix = glm::mat4(1.0f);
-	coarseObject.finalMatrix = glm::mat4(1.0f);
-	coarseObject.meshID.push_back(static_cast<uint32_t>(lod1MeshIndex));
-	coarseObject.name = "VolumetricLOD1";
-
-	VulkanShader shader{};
-	shader.graphicsPipeline = scene->pipelines[4];
-	shader.ubos = base->vbuffer->createUniformBuffers(shader.graphicsPipeline->bufferSize);
-	shader.sbos = {
-		lod1SBO[0],
-		lod1SBO[1],
-		lod1SBO[2],
-		lod1SBO[3],
-		lod1SBO[4]
-	};
-	coarseObject.shader.push_back(shader);
-	scene->objects.push_back(coarseObject);
-	lod1ObjectIndex = static_cast<int>(scene->objects.size() - 1);
-}
-
-void SdfEditor::uploadChunkSpatialData()
-{
-	if (chunkTranslationWS == uploadedChunkTranslationWS) {
-		return;
-	}
-
-	const uint32_t totalBlocks = chunkBlocksPerAxis * chunkBlocksPerAxis * chunkBlocksPerAxis;
-	std::vector<BlockSpatialData> blockSpatial(static_cast<size_t>(totalBlocks));
-	BuildChunkSpatialData(blockSpatial, chunkBlocksPerAxis, chunkBlockSizeWS, chunkTranslationWS);
-	computeSBO[5].map(
-		base->device,
-		sizeof(BlockSpatialData) * blockSpatial.size(),
-		blockSpatial.data());
-
-	if (lod1SBO.size() >= 5) {
-		const uint32_t lod1TotalBlocks = lod1BlocksPerAxis * lod1BlocksPerAxis * lod1BlocksPerAxis;
-		std::vector<BlockSpatialData> lod1Spatial(static_cast<size_t>(lod1TotalBlocks));
-		BuildParentChunkSpatialData(lod1Spatial, lod1BlocksPerAxis, lod1BlockSizeWS, chunkBlockSizeWS, chunkTranslationWS);
-		lod1SBO[4].map(
-			base->device,
-			sizeof(BlockSpatialData) * lod1Spatial.size(),
-			lod1Spatial.data());
-	}
-	uploadedChunkTranslationWS = chunkTranslationWS;
-}
-
-Mesh* SdfEditor::findEditableMesh()
-{
-	for (Object& obj : scene->objects) {
-		if (!obj.hasMesh) continue;
-		for (size_t i = 0; i < obj.meshID.size(); ++i) {
-			if (i >= obj.shader.size()) continue;
-			if (obj.shader[i].graphicsPipeline != scene->pipelines[4]) continue;
-			return &scene->meshes[obj.meshID[i]];
-		}
-	}
-	return nullptr;
-}
-
-void SdfEditor::clearEditableChunk()
-{
-	const uint32_t totalBlocks = chunkBlocksPerAxis * chunkBlocksPerAxis * chunkBlocksPerAxis;
-	std::vector<int32_t> clearedBlocks(totalBlocks, -999999);
-	std::vector<glm::vec4> clearedColors(totalBlocks, glm::vec4(0.0f));
-	int zero = 0;
-	computeSBO[1].map(base->device, sizeof(int32_t) * clearedBlocks.size(), clearedBlocks.data());
-	computeSBO[2].map(base->device, sizeof(int), &zero);
-	computeSBO[3].map(base->device, sizeof(glm::vec4) * clearedColors.size(), clearedColors.data());
-	computeSBO[4].map(base->device, sizeof(int), &zero);
-	computeSBO[6].map(base->device, sizeof(int), &zero);
-	pendingFullChunkResolve = false;
-	pendingStrictSurfaceScan = false;
-	pendingLod1Rebuild = false;
-	lod1RebuildSubmitted = false;
-	strictSurfaceScanCursor = 0;
-	strictScanBlockState.clear();
-	strictScanRenderableIds.clear();
-	fineActiveIds.clear();
-	lod1ActiveIds.clear();
-	if (Mesh* fineMesh = findEditableMesh()) {
-		base->vbuffer->setIndirectInstanceCount(*fineMesh, 0);
-	}
-	fineListGpuOwned = false;
-}
-
-void SdfEditor::rebuildLod1()
-{
-	lod1ActiveIds.clear();
-
-	lod1Builder->submit(lod1BlocksPerAxis, lod1BlocksPerAxis, lod1BlocksPerAxis);
-	vkWaitForFences(base->device, 1, &lod1Builder->computeFence, VK_TRUE, UINT64_MAX);
-
-	const uint32_t totalBlocks = lod1BlocksPerAxis * lod1BlocksPerAxis * lod1BlocksPerAxis;
-	std::vector<int32_t> coarseBlocks(totalBlocks, -999999);
-	lod1SBO[1].read(base->device, sizeof(int32_t) * coarseBlocks.size(), coarseBlocks.data());
-	void* mapped = nullptr;
-	vkMapMemory(base->device, lod1SBO[0].bufferMemory, 0, lod1SBO[0].size, 0, &mapped);
-	const float* coarseBricks = static_cast<const float*>(mapped);
-	const float nearSurfaceThreshold = 2.0f / float(chunkBlocksPerAxis * chunkBlockDim);
-	lod1ActiveIds = BuildRenderableActiveIds(coarseBlocks, coarseBricks, nearSurfaceThreshold);
-	vkUnmapMemory(base->device, lod1SBO[0].bufferMemory);
-}
-
-void SdfEditor::updateLodSelection()
-{
-	if (lod1MeshIndex < 0 || lod1ObjectIndex < 0 || scene->objects.empty() || scene->objects[0].meshID.empty()) {
-		return;
-	}
-
-	glm::vec3 boundsMin;
-	glm::vec3 boundsMax;
-	ComputeChunkBounds(chunkBlocksPerAxis, chunkBlockSizeWS, chunkTranslationWS, boundsMin, boundsMax);
-	const glm::vec3 chunkCenter = 0.5f * (boundsMin + boundsMax);
-	const float camDistance = glm::distance(scene->camera->position, chunkCenter);
-	const bool desiredCoarse = kForceCoarseLodDebug || (camDistance > 1.35f);
-
-	Mesh& fineMesh = scene->meshes[scene->objects[0].meshID[0]];
-	Mesh& coarseMesh = scene->meshes[static_cast<size_t>(lod1MeshIndex)];
-	const uint32_t desiredFineCount = desiredCoarse
-		? 0u
-		: (fineListGpuOwned ? fineMesh.instanceCount : static_cast<uint32_t>(fineActiveIds.size()));
-	const uint32_t desiredCoarseCount = desiredCoarse ? static_cast<uint32_t>(lod1ActiveIds.size()) : 0u;
-	const bool needsRefresh =
-		(coarseLodSelected != desiredCoarse) ||
-		(fineMesh.instanceCount != desiredFineCount) ||
-		(coarseMesh.instanceCount != desiredCoarseCount);
-
-	if (!needsRefresh) {
-		return;
-	}
-
-	if (fineMesh.useIndirectDraw) {
-		if (desiredCoarse) {
-			base->vbuffer->setIndirectInstanceCount(fineMesh, 0);
-		}
-		else if (fineListGpuOwned && drawListBuilder) {
-			// fineActiveIds is stale while the GPU owns the list; rebuild it
-			// straight from blocks[] instead of uploading the stale copy.
-			const uint32_t totalBlocks = chunkBlocksPerAxis * chunkBlocksPerAxis * chunkBlocksPerAxis;
-			drawListBuilder->submitDrawListBuild(
-				fineMesh.indirectDrawBuffer,
-				offsetof(VkDrawIndexedIndirectCommand, instanceCount),
-				0,
-				(totalBlocks + 255u) / 256u, 1, 1);
-		}
-		else {
-			base->vbuffer->updateIndirectInstanceList(fineMesh, fineActiveIds);
-		}
-	}
-	else {
-		base->vbuffer->updateInstanceIdBuffer(fineMesh, desiredCoarse ? std::vector<int32_t>{} : fineActiveIds);
-	}
-	base->vbuffer->updateInstanceIdBuffer(coarseMesh, desiredCoarse ? lod1ActiveIds : std::vector<int32_t>{});
-	coarseLodSelected = desiredCoarse;
-
-	scene->renderer->renderPassDirty = true;
-}
-
-void SdfEditor::createStaticFloorObject()
-{
-	const Mesh& sourceMesh = scene->meshes[scene->objects[0].meshID[0]];
-	const uint32_t totalBlocks = chunkBlocksPerAxis * chunkBlocksPerAxis * chunkBlocksPerAxis;
-	const float blockSizeWS = chunkBlockSizeWS;
-	const float floorCenterY = kSnapshotFloorY - 0.5f * blockSizeWS;
-	const float startXZ = -0.5f + 0.5f * blockSizeWS;
-
-	std::vector<int32_t> floorBlocks(totalBlocks, -999999);
-	std::vector<glm::vec4> floorColors(totalBlocks, glm::vec4(0.0f));
-	std::vector<BlockSpatialData> floorSpatial(totalBlocks);
-	for (uint32_t i = 0; i < totalBlocks; ++i) {
-		floorSpatial[i].centerAndSize = glm::vec4(0.0f, floorCenterY, 0.0f, blockSizeWS);
-	}
-
-	std::vector<int32_t> activeIds;
-	activeIds.reserve(static_cast<size_t>(kFloorBlocksPerAxis) * static_cast<size_t>(kFloorBlocksPerAxis));
-
-	for (uint32_t z = 0; z < kFloorBlocksPerAxis; ++z) {
-		for (uint32_t x = 0; x < kFloorBlocksPerAxis; ++x) {
-			const uint32_t blockIndex = x + z * chunkBlocksPerAxis;
-			const int brickBase = static_cast<int>(activeIds.size()) * kBrickSamplesPerBlock;
-			floorBlocks[blockIndex] = brickBase;
-			floorColors[blockIndex] = glm::vec4(0.92f, 0.92f, 0.92f, 1.0f);
-			floorSpatial[blockIndex].centerAndSize = glm::vec4(
-				startXZ + float(x) * blockSizeWS,
-				floorCenterY,
-				startXZ + float(z) * blockSizeWS,
-				blockSizeWS);
-			activeIds.push_back(static_cast<int32_t>(blockIndex));
-		}
-	}
-
-	std::vector<float> floorBricks(static_cast<size_t>(activeIds.size()) * kBrickSamplesPerBlock, -1.0f);
-	std::vector<SBO> floorSbos = base->vbuffer->createStorageBuffers({
-		sizeof(float) * floorBricks.size(),
-		sizeof(int32_t) * floorBlocks.size(),
-		sizeof(int),
-		sizeof(glm::vec4) * floorColors.size(),
-		sizeof(BlockSpatialData) * floorSpatial.size()
-	});
-
-	int zero = 0;
-	floorSbos[0].map(base->device, sizeof(float) * floorBricks.size(), floorBricks.data());
-	floorSbos[1].map(base->device, sizeof(int32_t) * floorBlocks.size(), floorBlocks.data());
-	floorSbos[2].map(base->device, sizeof(int), &zero);
-	floorSbos[3].map(base->device, sizeof(glm::vec4) * floorColors.size(), floorColors.data());
-	floorSbos[4].map(base->device, sizeof(BlockSpatialData) * floorSpatial.size(), floorSpatial.data());
-	snapshotChunkSBOs.push_back(std::move(floorSbos));
-
-	Mesh floorMesh{};
-	floorMesh.vertices = sourceMesh.vertices;
-	floorMesh.indices = sourceMesh.indices;
-	floorMesh.color = glm::vec4(1.0f);
-	floorMesh.texID = sourceMesh.texID;
-	floorMesh.matID = sourceMesh.matID;
-	base->vbuffer->createVertexBuffer(floorMesh);
-	base->vbuffer->createIndexBuffer(floorMesh);
-	base->vbuffer->createInstanceIdBuffer(floorMesh, static_cast<uint32_t>(activeIds.size()));
-	base->vbuffer->updateInstanceIdBuffer(floorMesh, activeIds);
-	scene->meshes.push_back(floorMesh);
-
-	Object floorObject{};
-	floorObject.hasMesh = true;
-	floorObject.hasAnimation = false;
-	floorObject.ModelMatrix = glm::mat4(1.0f);
-	floorObject.finalMatrix = glm::mat4(1.0f);
-	floorObject.meshID.push_back(static_cast<uint32_t>(scene->meshes.size() - 1));
-	floorObject.name = "StaticFloor";
-
-	VulkanShader shader{};
-	shader.graphicsPipeline = scene->pipelines[4];
-	shader.ubos = base->vbuffer->createUniformBuffers(shader.graphicsPipeline->bufferSize);
-	shader.sbos = snapshotChunkSBOs.back();
-	floorObject.shader.push_back(shader);
-	scene->objects.push_back(floorObject);
-}
-
-void SdfEditor::updateSnapshotChunks(float time)
-{
-	for (const SnapshotChunk& snapshot : snapshotChunks) {
-		if (snapshot.objectIndex >= scene->objects.size()) {
-			continue;
-		}
-
-		const float t = glm::max(0.0f, time - snapshot.spawnTime);
-		const float fallOffsetY = glm::max(-0.5f * kSnapshotGravity * t * t, snapshot.stopOffsetY);
-		scene->objects[snapshot.objectIndex].ModelMatrix =
-			glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, fallOffsetY, 0.0f));
-	}
-}
-
-void SdfEditor::finalizeStrokeChunk(float time)
-{
-	const uint32_t totalBlocks = chunkBlocksPerAxis * chunkBlocksPerAxis * chunkBlocksPerAxis;
-	std::vector<int32_t> blockState(totalBlocks, -1);
-	computeSBO[1].read(base->device, sizeof(int32_t) * blockState.size(), blockState.data());
-
-	std::vector<int32_t> activeIds;
-	for (uint32_t i = 0; i < totalBlocks; ++i) {
-		if (blockState[i] >= 0) {
-			activeIds.push_back(static_cast<int32_t>(i));
-		}
-	}
-	if (activeIds.empty()) {
-		return;
-	}
-
-	std::vector<glm::vec4> blockColors(totalBlocks, glm::vec4(0.0f));
-	std::vector<glm::vec4> blockSpatial(totalBlocks, glm::vec4(0.0f));
-	computeSBO[3].read(base->device, sizeof(glm::vec4) * blockColors.size(), blockColors.data());
-	computeSBO[5].read(base->device, sizeof(glm::vec4) * blockSpatial.size(), blockSpatial.data());
-
-	std::vector<int32_t> snapshotBlocks = blockState;
-	std::vector<float> snapshotBricks(static_cast<size_t>(activeIds.size()) * 9u * 9u * 9u, 100.01f);
-	for (size_t activeIndex = 0; activeIndex < activeIds.size(); ++activeIndex) {
-		const uint32_t blockIndex = static_cast<uint32_t>(activeIds[activeIndex]);
-		const int oldBlockRaw = blockState[blockIndex];
-		const int oldBrickBase = oldBlockRaw & 0x3fffffff;
-		const int newBrickBase = static_cast<int>(activeIndex * 9u * 9u * 9u);
-		snapshotBlocks[blockIndex] = newBrickBase | (oldBlockRaw & (1 << 30));
-
-		void* src = nullptr;
-		vkMapMemory(
-			base->device,
-			computeSBO[0].bufferMemory,
-			static_cast<VkDeviceSize>(oldBrickBase) * sizeof(float),
-			static_cast<VkDeviceSize>(9u * 9u * 9u) * sizeof(float),
-			0,
-			&src);
-		memcpy(
-			snapshotBricks.data() + newBrickBase,
-			src,
-			static_cast<size_t>(9u * 9u * 9u) * sizeof(float));
-		vkUnmapMemory(base->device, computeSBO[0].bufferMemory);
-	}
-
-	snapshotChunkSBOs.push_back(base->vbuffer->createStorageBuffers({
-		sizeof(float) * snapshotBricks.size(),
-		sizeof(int32_t) * snapshotBlocks.size(),
-		sizeof(int),
-		sizeof(glm::vec4) * blockColors.size(),
-		sizeof(glm::vec4) * blockSpatial.size()
-	}));
-	std::vector<SBO>& sbos = snapshotChunkSBOs.back();
-	int zero = 0;
-	sbos[0].map(base->device, sizeof(float) * snapshotBricks.size(), snapshotBricks.data());
-	sbos[1].map(base->device, sizeof(int32_t) * snapshotBlocks.size(), snapshotBlocks.data());
-	sbos[2].map(base->device, sizeof(int), &zero);
-	sbos[3].map(base->device, sizeof(glm::vec4) * blockColors.size(), blockColors.data());
-	sbos[4].map(base->device, sizeof(glm::vec4) * blockSpatial.size(), blockSpatial.data());
-
-	const Mesh& sourceMesh = scene->meshes[scene->objects[0].meshID[0]];
-	Mesh snapshotMesh{};
-	snapshotMesh.vertices = sourceMesh.vertices;
-	snapshotMesh.indices = sourceMesh.indices;
-	snapshotMesh.color = sourceMesh.color;
-	snapshotMesh.texID = sourceMesh.texID;
-	snapshotMesh.matID = sourceMesh.matID;
-	base->vbuffer->createVertexBuffer(snapshotMesh);
-	base->vbuffer->createIndexBuffer(snapshotMesh);
-	base->vbuffer->createInstanceIdBuffer(snapshotMesh, static_cast<uint32_t>(activeIds.size()));
-	base->vbuffer->updateInstanceIdBuffer(snapshotMesh, activeIds);
-	scene->meshes.push_back(snapshotMesh);
-	const size_t newMeshIndex = scene->meshes.size() - 1;
-
-	Object snapshotObject{};
-	snapshotObject.hasMesh = true;
-	snapshotObject.hasAnimation = false;
-	snapshotObject.ModelMatrix = glm::mat4(1.0f);
-	snapshotObject.finalMatrix = glm::mat4(1.0f);
-	snapshotObject.meshID.push_back(static_cast<uint32_t>(newMeshIndex));
-	snapshotObject.name = "SnapshotChunk";
-
-	VulkanShader shader{};
-	shader.graphicsPipeline = scene->pipelines[4];
-	shader.ubos = base->vbuffer->createUniformBuffers(shader.graphicsPipeline->bufferSize);
-	shader.sbos = sbos;
-	snapshotObject.shader.push_back(shader);
-	scene->objects.push_back(snapshotObject);
-	const size_t newObjectIndex = scene->objects.size() - 1;
-
-	float minY = FLT_MAX;
-	glm::vec3 boundsMin(FLT_MAX);
-	glm::vec3 boundsMax(-FLT_MAX);
-	glm::vec3 colorAccum(0.0f);
-	for (int32_t id : activeIds) {
-		const glm::vec4 centerAndSize = blockSpatial[static_cast<size_t>(id)];
-		const glm::vec3 center = glm::vec3(centerAndSize);
-		const glm::vec3 halfExtent(centerAndSize.w * 0.5f);
-		minY = std::min(minY, center.y);
-		boundsMin = glm::min(boundsMin, center - halfExtent);
-		boundsMax = glm::max(boundsMax, center + halfExtent);
-		colorAccum += glm::vec3(blockColors[static_cast<size_t>(id)]);
-	}
-
-	SnapshotChunk snapshot{};
-	snapshot.objectIndex = newObjectIndex;
-	snapshot.meshIndex = newMeshIndex;
-	snapshot.sboIndex = snapshotChunkSBOs.size() - 1;
-	snapshot.usedBricks = static_cast<int>(activeIds.size());
-	snapshot.baseShadowCenterWS = 0.5f * (boundsMin + boundsMax);
-	snapshot.shadowRadius = glm::max(
-		0.5f * glm::length(glm::vec2(boundsMax.x - boundsMin.x, boundsMax.z - boundsMin.z)),
-		chunkBlockSizeWS * 0.75f);
-	snapshot.bounceColor = colorAccum / glm::max(float(activeIds.size()), 1.0f);
-	snapshot.baseSpatial = blockSpatial;
-	snapshot.spawnTime = time;
-	snapshot.stopOffsetY = (kSnapshotFloorY + 0.5f * chunkBlockSizeWS) - minY;
-	snapshotChunks.push_back(std::move(snapshot));
-
-	clearEditableChunk();
-	base->vbuffer->updateInstanceIdBuffer(scene->meshes[scene->objects[0].meshID[0]], {});
-
-	vkDeviceWaitIdle(base->device);
-	scene->cleanDescriptors();
-	scene->createSceneDescriptor();
-	scene->renderer->renderPassDirty = true;
-}
-
-SdfEditor::~SdfEditor() {
-	delete comp;
-	delete lod1Builder;
-	for (UBO& ubo : computeUBO) {
-		vkDestroyBuffer(base->device, ubo.buffer, nullptr);
-		vkFreeMemory(base->device, ubo.bufferMemory, nullptr);
-	}
-	for (SBO& sbo : computeSBO) {
-		vkDestroyBuffer(base->device, sbo.buffer, nullptr);
-		vkFreeMemory(base->device, sbo.bufferMemory, nullptr);
-	}
-	for (SBO& sbo : lod1SBO) {
-		vkDestroyBuffer(base->device, sbo.buffer, nullptr);
-		vkFreeMemory(base->device, sbo.bufferMemory, nullptr);
-	}
-	for (std::vector<SBO>& sboSet : snapshotChunkSBOs) {
-		for (SBO& sbo : sboSet) {
-			vkDestroyBuffer(base->device, sbo.buffer, nullptr);
-			vkFreeMemory(base->device, sbo.bufferMemory, nullptr);
-		}
-	}
-	//computeTexture.destroy(base->device);
-	//vkDestroySampler(base->device, computeTexture.imageSampler, nullptr);
-}
-
-static int BrushShapeMode = 0; // 0 cube, 1 sphere, 2 plane
-static bool EmissiveMode = false;
-
-static float leftBut = 1.0;
-static float BrushRadius = 0.01;
-static float BrushSmoothness = 0.001f;
-static float BrushDistanceFromCamera = 0.2f;
-
-static bool intersectAabb(const glm::vec3& ro, const glm::vec3& rd, const glm::vec3& bmin, const glm::vec3& bmax, float& tEnter, float& tExit)
+bool IntersectAabb(const glm::vec3& ro, const glm::vec3& rd, const glm::vec3& bmin, const glm::vec3& bmax, float& tEnter, float& tExit)
 {
 	tEnter = -1e30f;
 	tExit = 1e30f;
@@ -767,6 +92,149 @@ static bool intersectAabb(const glm::vec3& ro, const glm::vec3& rd, const glm::v
 	return true;
 }
 
+constexpr int kBrickSamplesPerBlock = 9 * 9 * 9;
+constexpr int kAtlasDim = 512;
+constexpr float kBrushCenterBias = 0.031f;
+constexpr int32_t kBlockEmpty = -999999;
+}
+
+// Brush parameters adjusted with keys; persist across strokes.
+static int BrushShapeMode = 0; // 0 cube, 1 sphere, 2 plane
+static bool EmissiveMode = false;
+static float leftBut = 1.0;
+static float BrushRadius = 0.01;
+static float BrushSmoothness = 0.001f;
+static float BrushDistanceFromCamera = 0.2f;
+
+SdfEditor::SdfEditor(EngineContext& ctx)
+{
+	this->base = ctx.base;
+	this->scene = ctx.scene;
+
+	const int blocksPerAxis = static_cast<int>(chunkBlocksPerAxis);
+	const int numBlocks = blocksPerAxis * blocksPerAxis * blocksPerAxis;
+	const int atlasCapacityBricks = (kAtlasDim * kAtlasDim * kAtlasDim) / kBrickSamplesPerBlock;
+
+	ComputeInput input;
+	input.computeShaderPath = "shaders/Sdf/SdfBrushCS.spv";
+	input.descriptorTypes = {
+		VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+	};
+	comp = new ComputePipeline(base, input);
+	computeUBO = base->vbuffer->createUniformBuffers({ sizeof(sdfEditUBO) });
+
+	computeSBO = base->vbuffer->createStorageBuffers({
+		sizeof(float) * kAtlasDim * kAtlasDim * kAtlasDim,   // 0: brick atlas
+		sizeof(int) * numBlocks,                             // 1: block table
+		sizeof(int) * 2,                                     // 2: atlas tail counter + free-stack pop cursor
+		sizeof(glm::vec4) * numBlocks,                       // 3: block colors
+		sizeof(int),                                         // 4: dirty counter
+		sizeof(BlockSpatialData) * numBlocks,                // 5: block spatial data
+		sizeof(int),                                         // 6: free stack count
+		sizeof(int) * atlasCapacityBricks                    // 7: free stack
+	});
+	int zeroInit = 0;
+	int zeroCounters[2] = { 0, 0 };
+	computeSBO[2].map(base->device, sizeof(zeroCounters), zeroCounters);
+	computeSBO[4].map(base->device, sizeof(int), &zeroInit);
+	computeSBO[6].map(base->device, sizeof(int), &zeroInit);
+	std::vector<int32_t> initialBlocks(static_cast<size_t>(numBlocks), kBlockEmpty);
+	std::vector<glm::vec4> initialColors(static_cast<size_t>(numBlocks), glm::vec4(0.0f));
+	computeSBO[1].map(base->device, sizeof(int32_t) * initialBlocks.size(), initialBlocks.data());
+	computeSBO[3].map(base->device, sizeof(glm::vec4) * initialColors.size(), initialColors.data());
+
+	volume.stats.capacityBricks = atlasCapacityBricks;
+	volume.stats.usedBricks = 0;
+	volume.stats.tailBricks = 0;
+	volume.stats.freeBricks = 0;
+	volume.stats.usage = 0.0f;
+
+	uploadChunkSpatialData();
+
+	std::vector<SBO> computeDescriptorSBOs = {
+		computeSBO[0], // bricks
+		computeSBO[1], // blocks
+		computeSBO[2], // tail counter
+		computeSBO[3], // block colors
+		computeSBO[4], // dirty counter
+		computeSBO[6], // free stack count
+		computeSBO[7]  // free stack data
+	};
+	comp->setupDescriptors(computeUBO, {}, computeDescriptorSBOs);
+	comp->dispatch(1, 1, 1);
+
+	// GPU-driven draw list for the scene mesh: counting-sorted by camera
+	// distance (front-to-back for early-Z) straight from blocks[]; the mesh
+	// draws via vkCmdDrawIndexedIndirect, so brush edits never need a CPU
+	// readback or a command-buffer re-record to change what is drawn.
+	if (Mesh* fineMesh = findEditableMesh()) {
+		if (fineMesh->hasInstanceIdBuffer) {
+			base->vbuffer->createIndirectDrawBuffer(*fineMesh);
+			drawList = new SdfDrawList(
+				base,
+				computeSBO[1],
+				fineMesh->instanceIdBuffer,
+				sizeof(int32_t) * fineMesh->instanceCapacity,
+				fineMesh->indirectDrawBuffer);
+		}
+	}
+}
+
+void SdfEditor::uploadChunkSpatialData()
+{
+	if (chunkTranslationWS == uploadedChunkTranslationWS) {
+		return;
+	}
+
+	const uint32_t totalBlocks = chunkBlocksPerAxis * chunkBlocksPerAxis * chunkBlocksPerAxis;
+	std::vector<BlockSpatialData> blockSpatial(static_cast<size_t>(totalBlocks));
+	BuildChunkSpatialData(blockSpatial, chunkBlocksPerAxis, chunkBlockSizeWS, chunkTranslationWS);
+	computeSBO[5].map(
+		base->device,
+		sizeof(BlockSpatialData) * blockSpatial.size(),
+		blockSpatial.data());
+	uploadedChunkTranslationWS = chunkTranslationWS;
+}
+
+Mesh* SdfEditor::findEditableMesh()
+{
+	for (Object& obj : scene->objects) {
+		if (!obj.hasMesh) continue;
+		for (size_t i = 0; i < obj.meshID.size(); ++i) {
+			if (i >= obj.shader.size()) continue;
+			if (obj.shader[i].graphicsPipeline != scene->pipelines[4]) continue;
+			return &scene->meshes[obj.meshID[i]];
+		}
+	}
+	return nullptr;
+}
+
+void SdfEditor::clearScene()
+{
+	const uint32_t totalBlocks = chunkBlocksPerAxis * chunkBlocksPerAxis * chunkBlocksPerAxis;
+	std::vector<int32_t> clearedBlocks(totalBlocks, kBlockEmpty);
+	std::vector<glm::vec4> clearedColors(totalBlocks, glm::vec4(0.0f));
+	int zero = 0;
+	int zeroCounters[2] = { 0, 0 };
+	computeSBO[1].map(base->device, sizeof(int32_t) * clearedBlocks.size(), clearedBlocks.data());
+	computeSBO[2].map(base->device, sizeof(zeroCounters), zeroCounters);
+	computeSBO[3].map(base->device, sizeof(glm::vec4) * clearedColors.size(), clearedColors.data());
+	computeSBO[4].map(base->device, sizeof(int), &zero);
+	computeSBO[6].map(base->device, sizeof(int), &zero);
+	freeStackStableCount = 0;
+	if (Mesh* fineMesh = findEditableMesh()) {
+		base->vbuffer->setIndirectInstanceCount(*fineMesh, 0);
+	}
+	volume.stats.dirtyBlockCount = 0;
+}
+
 void SdfEditor::update(float time)
 {
 	uploadChunkSpatialData();
@@ -790,16 +258,12 @@ void SdfEditor::update(float time)
 	const float brushDistanceStep = 0.005f * altSpeed;
 	float msx = in.mousePos.x / base->swapChain->swapChainExtent.width;
 	float msy = in.mousePos.y / base->swapChain->swapChainExtent.height;
-	// Example: print to console
-	//std::printf("Mouse: (%.1f, %.1f)\n", msx-0.5, msy-0.5);
-	sdfEditUBO pubo;
-	pubo.time = time*0.05;
 
-	if(!in.cameraMoveMode){
-		 if (in.rightButtonDown) leftBut = 0.0;
+	if (!in.cameraMoveMode) {
+		if (in.rightButtonDown) leftBut = 0.0;
 		if (in.leftButtonDown) leftBut = 1.0;
-		if (in.aDown) { BrushRadius += brushRadiusStep; std::cout << BrushRadius << "\n"; }
-		if (in.dDown) { BrushRadius -= brushRadiusStep; std::cout << BrushRadius << "\n"; }
+		if (in.aDown) { BrushRadius += brushRadiusStep; }
+		if (in.dDown) { BrushRadius -= brushRadiusStep; }
 		if (in.qDown) { BrushSmoothness += brushSmoothnessStep; }
 		if (in.eDown) { BrushSmoothness -= brushSmoothnessStep; }
 		if (in.wDown) BrushDistanceFromCamera += brushDistanceStep;
@@ -807,14 +271,18 @@ void SdfEditor::update(float time)
 
 		if (BrushRadius < 0.001f) BrushRadius = 0.001f;
 		if (BrushSmoothness < 0.0001f) BrushSmoothness = 0.0001f;
+		// Upper bound keeps the kernel's keepBand (2x smoothness) - and with
+		// it the number of retained near-surface bricks - within budget.
+		if (BrushSmoothness > 0.005f) BrushSmoothness = 0.005f;
 		if (BrushDistanceFromCamera < 0.02f) BrushDistanceFromCamera = 0.02f;
 		if (BrushDistanceFromCamera > 3.0f) BrushDistanceFromCamera = 3.0f;
 	}
+
+	// Brush placement: ray through the cursor, pushed into the chunk bounds.
 	glm::mat4 invProj = glm::inverse(scene->camera->proj[0]);
 	glm::mat4 invView = glm::inverse(scene->camera->view[0]);
 	float ndcX = msx * 2.0f - 1.0f;
 	float ndcY = 1.0f - msy * 2.0f;
-
 	glm::vec4 rayClip(ndcX, ndcY, -1.0f, 1.0f);
 	glm::vec4 rayView = invProj * rayClip;
 	rayView = glm::vec4(rayView.x, rayView.y, -1.0f, 0.0f);
@@ -826,7 +294,7 @@ void SdfEditor::update(float time)
 	glm::vec3 chunkBoundsMin;
 	glm::vec3 chunkBoundsMax;
 	ComputeChunkBounds(chunkBlocksPerAxis, chunkBlockSizeWS, chunkTranslationWS, chunkBoundsMin, chunkBoundsMax);
-	if (intersectAabb(rayOrigin, rayDir, chunkBoundsMin, chunkBoundsMax, tEnter, tExit)) {
+	if (IntersectAabb(rayOrigin, rayDir, chunkBoundsMin, chunkBoundsMax, tEnter, tExit)) {
 		float tStart = std::max(tEnter, 0.0f);
 		float tCenter = std::min(tStart + BrushDistanceFromCamera, tExit - 0.001f);
 		if (tCenter >= tStart) {
@@ -834,13 +302,18 @@ void SdfEditor::update(float time)
 		}
 	}
 	const glm::vec3 brushCenterLocal = brushCenter - chunkTranslationWS;
+
+	sdfEditUBO pubo;
+	pubo.time = time * 0.05f;
 	pubo.BrushData = glm::vec4(-brushCenterLocal, BrushRadius);
 	pubo.BrushColor = brush.color;
-	pubo.BrushAction = leftBut; // 1.0 add, 0.0 remove
+	pubo.BrushAction = leftBut;
 	pubo.BrushShape = static_cast<float>(BrushShapeMode);
 	pubo.BrushSmoothness = BrushSmoothness;
 	pubo.BrushEmissive = EmissiveMode ? 1.0f : 0.0f;
 	pubo.BrushRecolor = (in.shiftDown && in.leftButtonDown && !in.cameraMoveMode) ? 1.0f : 0.0f;
+
+	// Editor-facing brush state mirror.
 	brush.data = glm::vec4(-brushCenter, BrushRadius);
 	brush.useSphere = (BrushShapeMode == 1);
 	brush.shapeMode = BrushShapeMode;
@@ -849,197 +322,121 @@ void SdfEditor::update(float time)
 	brush.zAxis = BrushDistanceFromCamera;
 	brush.action = leftBut;
 	brush.emissive = EmissiveMode;
-	computeUBO[0].map(base->device, sizeof(sdfEditUBO), &pubo);
+	// NOTE: the brush UBO is intentionally only mapped at dispatch time
+	// (after the compute fence confirms the previous stamp finished) -
+	// mapping it every frame overwrites DispatchBaseBlock while the
+	// in-flight compute is reading it, silently voiding stamps.
 
-
-	const int dim = 8;
-	const int total = dim * dim * dim; // 512
-
-	// CPU-side storage
-	std::vector<int> gpuArray(total);
-
-	// Read from GPU buffer
-	//computeSBO[1].read(base->device, sizeof(int) * gpuArray.size(), gpuArray.data());
-
-	
-	//std::cout << "gpuArray[0]: " << gpuArray[10] << std::endl;
-
+	// Stroke gesture: a stroke lasts as long as the button is held; stamps
+	// happen when the cursor moved far enough since the last executed stamp
+	// (deltas accumulate across skipped frames).
 	const bool brushPointerDown = !in.cameraMoveMode && (in.leftButtonDown || in.rightButtonDown);
-	const glm::dvec2 cursorDelta = currentCursorPos - previousBrushCursorPos;
-	const bool cursorDragged =
-		wasBrushPointerDown &&
-		glm::dot(cursorDelta, cursorDelta) > 0.25;
 	const bool isInitialBrushClick = brushPointerDown && !wasBrushPointerDown;
-	const bool isBrushEditing = brushPointerDown && (isInitialBrushClick || cursorDragged);
-	const bool editJustEnded = wasBrushEditing && !isBrushEditing;
-	wasBrushEditing = isBrushEditing;
 	wasBrushPointerDown = brushPointerDown;
-	previousBrushCursorPos = currentCursorPos;
+	if (isInitialBrushClick) {
+		strokeNeedsInitialDispatch = true;
+	}
+	if (!brushPointerDown) {
+		previousBrushCursorPos = currentCursorPos;
+	}
+	const glm::dvec2 cursorDelta = currentCursorPos - previousBrushCursorPos;
+	const bool movedEnough = glm::dot(cursorDelta, cursorDelta) > 0.25;
+	const bool wantsDispatch = brushPointerDown && (strokeNeedsInitialDispatch || movedEnough);
 
-	if (isBrushEditing) {
+	bool stampedThisFrame = false;
+	if (wantsDispatch && vkGetFenceStatus(base->device, comp->computeFence) == VK_SUCCESS) {
+		stampedThisFrame = true;
+		// Stats + free-stack maintenance from the previous stamp (stable:
+		// the compute is idle now). The kernel pops the stable bottom of the
+		// stack via a cursor and pushes frees on top - same-dispatch reuse
+		// races (garbage brick indices, the "glitch cubes"). Compact here so
+		// freshly freed bricks become allocatable for the next stamp.
+		int counters[2] = { 0, 0 }; // [0] atlas tail (floats), [1] pop cursor
+		int freeBrickCount = 0;
+		computeSBO[2].read(base->device, sizeof(counters), counters);
+		computeSBO[6].read(base->device, sizeof(int), &freeBrickCount);
+
+		const int consumed = std::min(counters[1], freeStackStableCount);
+		if (consumed > 0 && freeBrickCount >= consumed) {
+			std::vector<int> stack(static_cast<size_t>(freeBrickCount));
+			computeSBO[7].read(base->device, sizeof(int) * stack.size(), stack.data());
+			stack.erase(stack.begin(), stack.begin() + consumed);
+			freeBrickCount -= consumed;
+			if (!stack.empty()) {
+				computeSBO[7].map(base->device, sizeof(int) * stack.size(), stack.data());
+			}
+			computeSBO[6].map(base->device, sizeof(int), &freeBrickCount);
+		}
+		if (counters[1] != 0) {
+			counters[1] = 0;
+			computeSBO[2].map(base->device, sizeof(counters), counters);
+		}
+		freeStackStableCount = freeBrickCount;
+
+		volume.stats.tailBricks = counters[0] / kBrickSamplesPerBlock;
+		volume.stats.freeBricks = std::max(freeBrickCount, 0);
+		volume.stats.usedBricks = std::max(volume.stats.tailBricks - volume.stats.freeBricks, 0);
+
+		// Dispatch region: blocks the brush stamp can affect.
 		const float effectiveBrushRadius = BrushRadius * (leftBut < 0.5f ? 1.15f : 1.0f);
 		const float smoothSupportPadding = glm::max(BrushSmoothness * 8.0f, chunkBlockSizeWS * 2.0f);
 		const glm::vec3 brushCenterCompute = brushCenterLocal + glm::vec3(kBrushCenterBias);
 		const glm::vec3 brushExtent = glm::vec3(effectiveBrushRadius + smoothSupportPadding);
-		const glm::vec3 blockCoordMinF =
-			((brushCenterCompute - brushExtent) + 0.5f) / chunkBlockSizeWS;
-		const glm::vec3 blockCoordMaxF =
-			((brushCenterCompute + brushExtent) + 0.5f) / chunkBlockSizeWS;
+		const glm::vec3 blockCoordMinF = ((brushCenterCompute - brushExtent) + 0.5f) / chunkBlockSizeWS;
+		const glm::vec3 blockCoordMaxF = ((brushCenterCompute + brushExtent) + 0.5f) / chunkBlockSizeWS;
 		glm::ivec3 dispatchBlockMin = glm::ivec3(glm::floor(blockCoordMinF)) - glm::ivec3(1);
 		glm::ivec3 dispatchBlockMax = glm::ivec3(glm::floor(blockCoordMaxF)) + glm::ivec3(1);
 		dispatchBlockMin = glm::clamp(dispatchBlockMin, glm::ivec3(0), glm::ivec3(int(chunkBlocksPerAxis) - 1));
 		dispatchBlockMax = glm::clamp(dispatchBlockMax, glm::ivec3(0), glm::ivec3(int(chunkBlocksPerAxis) - 1));
 		const glm::ivec3 dispatchBlockCount = dispatchBlockMax - dispatchBlockMin + glm::ivec3(1);
-		const bool computeReady = (vkGetFenceStatus(base->device, comp->computeFence) == VK_SUCCESS);
 
-		Mesh* targetMesh = findEditableMesh();
-
-		if (computeReady) {
-			pubo.DispatchBaseBlock = glm::ivec4(dispatchBlockMin, 0);
-			computeUBO[0].map(base->device, sizeof(sdfEditUBO), &pubo);
-			int dirtyZero = 0;
-			computeSBO[4].map(base->device, sizeof(int), &dirtyZero);
-			comp->submit(
-				static_cast<uint32_t>(dispatchBlockCount.x),
-				static_cast<uint32_t>(dispatchBlockCount.y),
-				static_cast<uint32_t>(dispatchBlockCount.z));
-
-			// Rebuild the draw list on the GPU right behind the brush pass:
-			// blocks[] -> compacted instance IDs + indirect instance count.
-			// No CPU readback, no instance upload, no command re-record.
-			if (drawListBuilder && targetMesh && targetMesh->useIndirectDraw) {
-				const uint32_t totalBlocks = chunkBlocksPerAxis * chunkBlocksPerAxis * chunkBlocksPerAxis;
-				drawListBuilder->submitDrawListBuild(
-					targetMesh->indirectDrawBuffer,
-					offsetof(VkDrawIndexedIndirectCommand, instanceCount),
-					0,
-					(totalBlocks + 255u) / 256u, 1, 1);
-				fineListGpuOwned = true;
-
-				// HUD mirror: last completed list's count (host-visible).
-				volume.stats.dirtyBlockCount = static_cast<int>(
-					base->vbuffer->readIndirectInstanceCount(*targetMesh));
-			}
-		}
+		pubo.DispatchBaseBlock = glm::ivec4(dispatchBlockMin, freeStackStableCount);
+		computeUBO[0].map(base->device, sizeof(sdfEditUBO), &pubo);
+		int dirtyZero = 0;
+		computeSBO[4].map(base->device, sizeof(int), &dirtyZero);
+		comp->submit(
+			static_cast<uint32_t>(dispatchBlockCount.x),
+			static_cast<uint32_t>(dispatchBlockCount.y),
+			static_cast<uint32_t>(dispatchBlockCount.z));
+		strokeNeedsInitialDispatch = false;
+		previousBrushCursorPos = currentCursorPos;
 	}
 
-	if (editJustEnded) {
-		pendingFullChunkResolve = true;
-		pendingStrictSurfaceScan = false;
-		pendingLod1Rebuild = false;
-		lod1RebuildSubmitted = false;
-		strictSurfaceScanCursor = 0;
-		strictScanBlockState.clear();
-		strictScanRenderableIds.clear();
-	}
+	// Rebuild the draw list when its inputs changed: right behind each stamp
+	// (blocks[] changed) and whenever the camera moved - the frustum cull and
+	// the front-to-back bucket order bake the camera into the list. Skipping
+	// unchanged frames avoids a per-frame fence wait + queue submit, and the
+	// HUD instance-count readback (GPU -> CPU) runs only on stamp frames so
+	// idle/orbit frames never sync back to the CPU.
+	Mesh* targetMesh = findEditableMesh();
+	if (drawList && targetMesh && targetMesh->useIndirectDraw) {
+		const glm::vec3 camBlockUnits =
+			(scene->camera->position - chunkTranslationWS - ChunkLocalCenterOrigin(chunkBlockSizeWS)) / chunkBlockSizeWS + glm::vec3(0.5f);
 
-	if (!isBrushEditing && pendingFullChunkResolve) {
-		if (vkGetFenceStatus(base->device, comp->computeFence) == VK_SUCCESS) {
-			pubo.DispatchBaseBlock = glm::ivec4(0);
-			computeUBO[0].map(base->device, sizeof(sdfEditUBO), &pubo);
-			int dirtyZero = 0;
-			computeSBO[4].map(base->device, sizeof(int), &dirtyZero);
-			comp->submit(chunkBlocksPerAxis, chunkBlocksPerAxis, chunkBlocksPerAxis);
-			pendingFullChunkResolve = false;
-			pendingStrictSurfaceScan = true;
+		// Block-units -> world is a uniform scale + translation (inverse of
+		// the camBlockUnits mapping above); chained with proj * view it gives
+		// the matrix the frustum planes are extracted from. (VR note: eye 0
+		// only - revisit when VR is re-enabled.)
+		const float s = chunkBlockSizeWS;
+		const glm::vec3 origin =
+			chunkTranslationWS + ChunkLocalCenterOrigin(s) - glm::vec3(0.5f * s);
+		glm::mat4 blockToWorld(1.0f);
+		blockToWorld[0][0] = s;
+		blockToWorld[1][1] = s;
+		blockToWorld[2][2] = s;
+		blockToWorld[3] = glm::vec4(origin, 1.0f);
+		const glm::mat4 blockToClip =
+			scene->camera->proj[0] * scene->camera->view[0] * blockToWorld;
+
+		if (stampedThisFrame || blockToClip != lastDrawListBlockToClip) {
+			drawList->build(camBlockUnits, blockToClip);
+			lastDrawListBlockToClip = blockToClip;
 		}
-	}
-
-	if (!isBrushEditing && pendingStrictSurfaceScan) {
-		if (vkGetFenceStatus(base->device, comp->computeFence) == VK_SUCCESS) {
-			const uint32_t totalBlocks = chunkBlocksPerAxis * chunkBlocksPerAxis * chunkBlocksPerAxis;
-			if (strictScanBlockState.empty()) {
-				strictScanBlockState.resize(totalBlocks, -1);
-				computeSBO[1].read(
-					base->device,
-					sizeof(int32_t) * strictScanBlockState.size(),
-					strictScanBlockState.data());
-				strictScanRenderableIds.clear();
-				strictScanRenderableIds.reserve(fineActiveIds.size());
-				strictSurfaceScanCursor = 0;
-			}
-
-			const uint32_t kBlocksPerFrame = 8192u;
-			const uint32_t scanEnd = glm::min(
-				strictSurfaceScanCursor + kBlocksPerFrame,
-				totalBlocks);
-			void* mapped = nullptr;
-			vkMapMemory(base->device, computeSBO[0].bufferMemory, 0, computeSBO[0].size, 0, &mapped);
-			const float* fineBricks = static_cast<const float*>(mapped);
-			const float nearSurfaceThreshold = 2.0f / float(chunkBlocksPerAxis * chunkBlockDim);
-			for (uint32_t i = strictSurfaceScanCursor; i < scanEnd; ++i) {
-				const int32_t blockRaw = strictScanBlockState[i];
-				if (blockRaw < 0) {
-					continue;
-				}
-				const int brickBase = (blockRaw & kBlockIndexMask);
-				if (BlockHasRenderableSurfaceSamples(fineBricks, brickBase, nearSurfaceThreshold)) {
-					strictScanRenderableIds.push_back(static_cast<int32_t>(i));
-				}
-			}
-			vkUnmapMemory(base->device, computeSBO[0].bufferMemory);
-			strictSurfaceScanCursor = scanEnd;
-
-			if (strictSurfaceScanCursor >= totalBlocks) {
-				fineActiveIds.swap(strictScanRenderableIds);
-
-				Mesh* targetMesh = findEditableMesh();
-				if (targetMesh && targetMesh->hasInstanceIdBuffer) {
-					if (targetMesh->useIndirectDraw) {
-						// Strict surface-filtered list replaces the broad
-						// GPU-built drag list; CPU owns it again until the
-						// next drag.
-						base->vbuffer->updateIndirectInstanceList(*targetMesh, fineActiveIds);
-						fineListGpuOwned = false;
-					}
-					else {
-						base->vbuffer->updateInstanceIdBuffer(*targetMesh, fineActiveIds);
-					}
-				}
-				volume.stats.dirtyBlockCount = static_cast<int>(fineActiveIds.size());
-
-				int gpuValue = 0;
-				int freeBrickCount = 0;
-				computeSBO[2].read(base->device, sizeof(int), &gpuValue);
-				computeSBO[6].read(base->device, sizeof(int), &freeBrickCount);
-				volume.stats.tailBricks = gpuValue / kBrickSamplesPerBlock;
-				volume.stats.freeBricks = glm::max(freeBrickCount, 0);
-				volume.stats.usedBricks = glm::max(volume.stats.tailBricks - volume.stats.freeBricks, 0);
-
-				pendingStrictSurfaceScan = false;
-				pendingLod1Rebuild = true;
-				lod1RebuildSubmitted = false;
-				strictSurfaceScanCursor = 0;
-				strictScanBlockState.clear();
-				strictScanRenderableIds.clear();
-				scene->renderer->renderPassDirty = true;
-			}
+		if (stampedThisFrame) {
+			// HUD mirror: last completed list's count (host-visible).
+			volume.stats.dirtyBlockCount = static_cast<int>(
+				base->vbuffer->readIndirectInstanceCount(*targetMesh));
 		}
-	}
-
-	if (!isBrushEditing && pendingLod1Rebuild) {
-		if (!lod1RebuildSubmitted) {
-			lod1Builder->submit(lod1BlocksPerAxis, lod1BlocksPerAxis, lod1BlocksPerAxis);
-			lod1RebuildSubmitted = true;
-		}
-		else if (vkGetFenceStatus(base->device, lod1Builder->computeFence) == VK_SUCCESS) {
-			const uint32_t totalBlocks = lod1BlocksPerAxis * lod1BlocksPerAxis * lod1BlocksPerAxis;
-			std::vector<int32_t> coarseBlocks(totalBlocks, -999999);
-			lod1SBO[1].read(base->device, sizeof(int32_t) * coarseBlocks.size(), coarseBlocks.data());
-			void* mapped = nullptr;
-			vkMapMemory(base->device, lod1SBO[0].bufferMemory, 0, lod1SBO[0].size, 0, &mapped);
-			const float* coarseBricks = static_cast<const float*>(mapped);
-			const float nearSurfaceThreshold = 2.0f / float(chunkBlocksPerAxis * chunkBlockDim);
-			lod1ActiveIds = BuildRenderableActiveIds(coarseBlocks, coarseBricks, nearSurfaceThreshold);
-			vkUnmapMemory(base->device, lod1SBO[0].bufferMemory);
-			pendingLod1Rebuild = false;
-			lod1RebuildSubmitted = false;
-			scene->renderer->renderPassDirty = true;
-		}
-	}
-
-	if (!isBrushEditing) {
-		updateLodSelection();
 	}
 
 	if (volume.stats.capacityBricks > 0) {
@@ -1051,5 +448,18 @@ void SdfEditor::update(float time)
 	}
 	else {
 		volume.stats.usage = 0.0f;
+	}
+}
+
+SdfEditor::~SdfEditor() {
+	delete drawList;
+	delete comp;
+	for (UBO& ubo : computeUBO) {
+		vkDestroyBuffer(base->device, ubo.buffer, nullptr);
+		vkFreeMemory(base->device, ubo.bufferMemory, nullptr);
+	}
+	for (SBO& sbo : computeSBO) {
+		vkDestroyBuffer(base->device, sbo.buffer, nullptr);
+		vkFreeMemory(base->device, sbo.bufferMemory, nullptr);
 	}
 }

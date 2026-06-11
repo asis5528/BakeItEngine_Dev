@@ -49,6 +49,10 @@ const int BLOCKS_PER_AXIS = 64;
 void main()
 {
     // Convert the -2..+2 cube into the centered unit cube [-0.5, 0.5].
+    // Proxies tile exactly; boundary-pixel handoff between bricks is handled
+    // in SdfBrickFS by marching a margin past the cube with global sampling
+    // (proxy inflation was tried and reverted - it created paired discards
+    // for exactly grid-parallel rays, a worse artifact).
     vec3 v = inPosition * 0.25;
 
     int blockId = max(inBlockID, 0);

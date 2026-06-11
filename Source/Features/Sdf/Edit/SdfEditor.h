@@ -3,79 +3,61 @@
 #include "Core/Pipelines/ComputePipeline.h"
 #include "Features/Sdf/SdfVolume.h"
 #include "Features/Sdf/Edit/BrushState.h"
+#include "Features/Sdf/Edit/SdfDrawList.h"
 #include "EngineContext.h"
 #include <glm/glm.hpp>
 #include <vector>
+
+// SdfEditor - the volumetric brush editor.
+//
+// The brick atlas holds the one persistent scene SDF. Every brush stamp is a
+// complete boolean update (smooth union / subtraction of the analytic brush
+// SDF with the stored field), applied by SdfBrushCS over only the blocks the
+// brush bounds touch. Stamps are final: there is no settle/resolve pass.
+// Block storage classes: surface blocks own a brick; fully-interior and
+// empty blocks store a sentinel in blocks[] and no brick.
+// Visibility is fully GPU-driven: SdfDrawList compacts active blocks into
+// the indirect draw list (sorted front-to-back) right behind each stamp.
 class SdfEditor
 {
 public:
 	SdfVolume volume;
 	BrushState brush;
-	struct SnapshotChunk
-	{
-		size_t objectIndex = 0;
-		size_t meshIndex = 0;
-		size_t sboIndex = 0;
-		int usedBricks = 0;
-		glm::vec3 baseShadowCenterWS = glm::vec3(0.0f);
-		float shadowRadius = 0.0f;
-		glm::vec3 bounceColor = glm::vec3(0.0f);
-		std::vector<glm::vec4> baseSpatial;
-		float spawnTime = 0.0f;
-		float stopOffsetY = 0.0f;
-	};
 
 	std::vector<UBO> computeUBO;
 	std::vector<SBO> computeSBO;
-	std::vector<SBO> lod1SBO;
 	ComputePipeline* comp;
-	ComputePipeline* lod1Builder;
-	// Builds the editable chunk's draw list on the GPU from blocks[] during
-	// brush drags (no CPU readback, no command re-record); the release-path
-	// strict scan still uploads its filtered list through the same indirect
-	// command.
-	ComputePipeline* drawListBuilder = nullptr;
+	SdfDrawList* drawList = nullptr;
 	VulkanBase* base;
 	Scene* scene;
+
 	glm::vec3 chunkTranslationWS = glm::vec3(0.0f);
 	glm::vec3 uploadedChunkTranslationWS = glm::vec3(1e9f);
 	uint32_t chunkBlocksPerAxis = 64u;
 	uint32_t chunkBlockDim = 8u;
 	float chunkBlockSizeWS = 1.0f / 64.0f;
-	uint32_t lod1BlocksPerAxis = 32u;
-	float lod1BlockSizeWS = 2.0f / 64.0f;
-	bool wasBrushEditing = false;
+
+	// Allocatable (stable) free-stack entries for the next stamp: the kernel
+	// may only pop entries that existed before its dispatch (same-dispatch
+	// reuse races); update() compacts the stack and refreshes this snapshot.
+	int freeStackStableCount = 0;
+
+	// Camera matrix of the last draw-list build: the list is rebuilt only
+	// when this changes (or a stamp ran), so idle frames skip the build
+	// submit and the HUD readback entirely.
+	glm::mat4 lastDrawListBlockToClip = glm::mat4(0.0f);
+
+	// Stroke gesture state. A stroke lasts as long as the button is held;
+	// dispatches happen when the cursor has moved far enough since the last
+	// executed dispatch (deltas accumulate across skipped frames).
 	bool wasBrushPointerDown = false;
+	bool strokeNeedsInitialDispatch = false;
 	glm::dvec2 previousBrushCursorPos = glm::dvec2(0.0);
-	bool pendingFullChunkResolve = true;
-	bool pendingStrictSurfaceScan = false;
-	bool pendingLod1Rebuild = false;
-	bool lod1RebuildSubmitted = false;
-	uint32_t strictSurfaceScanCursor = 0;
-	std::vector<int32_t> strictScanBlockState;
-	std::vector<int32_t> strictScanRenderableIds;
-	std::vector<int32_t> fineActiveIds;
-	std::vector<int32_t> lod1ActiveIds;
-	// True while the editable mesh's instance list was last written by the
-	// GPU compaction pass (during/after a drag, until the strict scan
-	// uploads its filtered list) - fineActiveIds is stale in that window.
-	bool fineListGpuOwned = false;
-	int lod1ObjectIndex = -1;
-	int lod1MeshIndex = -1;
-	bool coarseLodSelected = false;
-	std::vector<SnapshotChunk> snapshotChunks;
-	std::vector<std::vector<SBO>> snapshotChunkSBOs;
+
 	SdfEditor(EngineContext& ctx);
 	~SdfEditor();
 	void update(float time);
 	void uploadChunkSpatialData();
-	void createLodObjects();
-	void rebuildLod1();
-	void updateLodSelection();
-	void createStaticFloorObject();
-	void finalizeStrokeChunk(float time);
-	void updateSnapshotChunks(float time);
-	void clearEditableChunk();
+	void clearScene();
 	Mesh* findEditableMesh();
 };
-

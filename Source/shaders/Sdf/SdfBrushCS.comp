@@ -1,71 +1,95 @@
 #version 450
 
-// One workgroup per block, 9x9x9 threads per block
+// SdfBrushCS - applies one brush stamp to the scene SDF stored in the brick
+// atlas. The brush is an analytic SDF (cube/sphere/plane with smoothness);
+// each stamp is a complete boolean update of every block in the dispatch
+// region:
+//
+//   add    : stored = smin(brushSDF, stored, smoothness)
+//   remove : stored = max(-brushSDF, stored)
+//
+// Stamps are final - there is no later resolve pass. Per block the kernel
+// decides the storage class from the new values:
+//   surface  (sign crossing / near-surface samples) -> brick allocated, 9^3
+//             samples written (8 cells + 1 padding sample shared with the
+//             +X/+Y/+Z neighbor)
+//   interior (all samples deep negative)            -> brick freed,
+//             blocks[] = BLOCK_INTERIOR sentinel (solid, no surface)
+//   empty    (all samples positive)                 -> brick freed,
+//             blocks[] = BLOCK_EMPTY sentinel
+//
+// One workgroup per block, 9x9x9 threads (one per brick sample).
+
 layout(local_size_x = 9, local_size_y = 9, local_size_z = 9) in;
 
 layout(binding = 0) uniform computeUbo {
-    vec4  BrushData;
+    vec4  BrushData;     // xyz: negated brush center (chunk local), w: radius
     vec4  BrushColor;
-    float BrushAction;  // 1.0 add, 0.0 remove
+    float BrushAction;   // 1.0 add, 0.0 remove
     float time;
-    float BrushShape;   // 0.0 cube, 1.0 sphere, 2.0 plane
+    float BrushShape;    // 0.0 cube, 1.0 sphere, 2.0 plane
     float BrushSmoothness;
     float BrushEmissive; // 1.0 emissive paint mode, 0.0 default
-    float BrushRecolor;  // 1.0 recolor existing touched blocks
+    float BrushRecolor;  // 1.0 recolor existing touched blocks only
     float _pad0;
     float _pad1;
-    ivec4 DispatchBaseBlock;
+    ivec4 DispatchBaseBlock; // xyz: region origin for partial dispatches,
+                             // w: allocatable (stable) free-stack entry count
 } ubo;
 
 layout(binding = 1) buffer BrickBuffer {
     float bricks[];
 };
-
 layout(binding = 2) buffer BlockBuffer {
     int blocks[];
 };
-
 layout(binding = 3) buffer Counter {
-    int counter;
+    int counter;     // atlas tail (in floats)
+    int allocCursor; // free-stack pop cursor for this dispatch (CPU resets it)
 };
-
 layout(binding = 4) buffer BlockColorBuffer {
     vec4 blockColors[];
 };
 layout(binding = 5) buffer DirtyCounter {
     int dirtyBlockCount;
 };
-
 layout(binding = 6) buffer FreeBrickCounter {
     int freeBrickCount;
 };
-
 layout(binding = 7) buffer FreeBrickStack {
     int freeBrickStack[];
 };
-
-// -------- shared variables MUST be at global scope --------
-shared uint  sGotHit;
-shared uint  sInsideBand;
-shared uint  sTouched;
-shared uint  sHasNegative;
-shared uint  sHasPositive;
-shared uint  sNearSurfaceCount;
-shared float sInsideBandDis;
-shared float hShared[9 * 9 * 9];
-// ----------------------------------------------------------
 
 const int BLOCK_EMISSIVE_FLAG = (1 << 30);
 const int BLOCK_INDEX_MASK = BLOCK_EMISSIVE_FLAG - 1;
 const int BRICK_STRIDE = 9 * 9 * 9;
 
+// Brick-less storage classes (blocks[] < 0).
+const int BLOCK_EMPTY = -999999;    // outside the shape, value = +FAR
+const int BLOCK_INTERIOR = -999998; // deep inside the shape, value = -FAR
+const float FAR_VALUE = 100.01;
+
+shared uint  sTouched;
+shared uint  sHasNegative;
+shared uint  sHasPositive;
+shared uint  sNearSurfaceCount;
+shared int   sBrickBase; // allocation result published by thread 0
+shared float hShared[BRICK_STRIDE];
+
+// Free-stack discipline: allocation and freeing run concurrently within one
+// dispatch, so a brick freed in this dispatch must NOT be reused in it -
+// popping the slot another workgroup is still pushing reads a garbage brick
+// index (rendered as glitch cubes), and racing pops could drive the counter
+// negative (out-of-bounds pushes). Instead, pops consume the stable bottom
+// of the stack ([0, DispatchBaseBlock.w), the count snapshotted by the CPU
+// at submit) via allocCursor, while frees push on top via freeBrickCount.
+// The two ranges never overlap; the CPU compacts the stack between stamps.
 int AllocateBrickBase()
 {
-    int oldCount = atomicAdd(freeBrickCount, -1);
-    if (oldCount > 0) {
-        return freeBrickStack[oldCount - 1];
+    int idx = atomicAdd(allocCursor, 1);
+    if (idx < ubo.DispatchBaseBlock.w) {
+        return freeBrickStack[idx];
     }
-    atomicAdd(freeBrickCount, 1);
     return atomicAdd(counter, BRICK_STRIDE);
 }
 
@@ -82,6 +106,7 @@ float smin(float a, float b, float k) {
     float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
     return mix(b, a, h) - k * h * (1.0 - h);
 }
+
 float sdfBox(vec3 p, vec3 halfExtents) {
     vec3 q = abs(p) - halfExtents;
     return length(max(q, vec3(0.0))) + min(max(q.x, max(q.y, q.z)), 0.0);
@@ -91,233 +116,146 @@ float sdfSphere(vec3 p, float radius) {
     return length(p) - radius;
 }
 
-float sdfPlanePatch(vec3 p, float radius, float halfThickness) {
+float sdfPlanePatch(vec3 p, float radius) {
     // Finite flat plane brush: square on XZ with small Y thickness.
     return sdfBox(p, vec3(radius, 0.001, radius));
 }
 
 void main()
 {
-    const ivec3 dims = ivec3(64 * 8); // 512^3 editable domain
-
-    const ivec3 blockDim = ivec3(8);        // 8x8x8 voxels per block
-    ivec3 blocksPerAxis  = dims / blockDim; // 64/8 = 8
+    const ivec3 dims = ivec3(64 * 8);       // 512^3 sample domain
+    const ivec3 blockDim = ivec3(8);
+    const ivec3 blocksPerAxis = dims / blockDim;
 
     ivec3 blockId = ivec3(gl_WorkGroupID) + ubo.DispatchBaseBlock.xyz;
-    
-   // blockId = gl_BaseInstanceARB + blockId; // support multi-dispatch
-    //what is gl_WorkGroupID?
-    // gl_WorkGroupID is the index of the current workgroup in the dispatch grid.
-    //do all threads have same workgroupid or specific id,i need to know how do i get id for each thread
-    // All threads in a workgroup share the same gl_WorkGroupID.
-    // Individual threads within the workgroup can be identified using gl_LocalInvocationID.
-    // So, gl_WorkGroupID gives you the workgroup's position in the overall dispatch,
-    // while gl_LocalInvocationID gives you the thread's position within that workgroup.
-    // how do i find the position of each thread in global space,like worldposition
-    // To find the global position of each thread (voxel) in world space,
-    // you can combine the workgroup ID and the local invocation ID.
-    // Here's how you can calculate it:
-    // 1. Calculate the base position of the workgroup in voxel space:
-    //	ivec3 workgroupBase = blockId * blockDim;
-    // 2. Add the local invocation ID to get the global voxel position:
-    //	ivec3 globalVoxelPos = workgroupBase + ivec3(gl_LocalInvocationID);
-    // This globalVoxelPos now represents the position of the voxel that the current thread is responsible for in the overall 3D texture.
-    // Note that this position is still in voxel coordinates.
-    // If you need to convert it to world coordinates, you'll need to apply any necessary transformations based on your scene's setup.
-    // so in short,global position of each thread=workgroupid*blockdim+localinvocationid
-    // so basically gl_WorkGroupID+gl_LocalInvocationID gives global position of each thread?
-    // Not quite. You need to multiply gl_WorkGroupID by the block dimensions first, then add gl_LocalInvocationID.
-    // won't gl_WorkGroupID give index of each thread group?
-    // Yes, gl_WorkGroupID gives the index of each workgroup (thread group) in the dispatch grid.
-    // so lets say first workgroup is 0,second is 1 ...and so on,right? so workgroupid * localinnovationsize+localinnovationid?
-    // Correct. To get the global position of each thread (voxel), you would calculate it as:
-    //what are the wrap features i can use in compute shader,so i can utilize the wraps
-    // In compute shaders, you can utilize various built-in variables and features to manage workgroups and threads effectively. Here are some key features you can use:
-    // 1. gl_WorkGroupID: Identifies the current workgroup in the dispatch grid.
-    // 2. gl_LocalInvocationID: Identifies the thread's position within its workgroup.
-    // 3. gl_GlobalInvocationID: Identifies the thread's position in the overall dispatch grid.
-    // 4. gl_NumWorkGroups: Provides the total number of workgroups dispatched.
-    // no i dont mean this values,like i mean communication between threads in workgroup,so i can know if some thread finished and some haven't so i can optimize
-    // In compute shaders, threads within a workgroup can communicate and synchronize using shared memory and barriers. Here are some features you can use for inter-thread communication and synchronization:
-    // 1. Shared Memory: You can declare shared variables that are accessible by all threads within a workgroup. This allows threads to share data and results.
-    // 2. Barriers: You can use the barrier() function to synchronize threads within a workgroup. This ensures that all threads reach the same point in the code before proceeding, which is useful for coordinating access to shared memory.
-    // 3. Atomic Operations: You can use atomic functions (like atomicAdd, atomicOr, etc.) to safely update shared variables from multiple threads without
-    // race conditions
-    // 4. Memory Barriers: You can use memoryBarrier() and memoryBarrierShared() to ensure proper ordering of memory operations, which is important when threads read from and write to shared memory.
-    // These features help you manage the execution flow and data sharing among threads in a workgroup, allowing for more efficient parallel processing.
-    // can u tell how barrier() works in compute shader? do all threads wait in barrier till all thread reaches it?
-    // Yes, in a compute shader, when a thread reaches a barrier() call, it will wait until all other threads in the same workgroup also reach that barrier. Once all threads have reached the barrier, they are all released to continue execution past the barrier point. This ensures that all threads are synchronized at that point in the code, which is useful for coordinating access to shared resources or ensuring that certain computations are completed before proceeding.
-    // so if one thread is slow and other threads reach barrier first,those threads will wait for slow thread,right?
-    // Yes, that's correct. If one thread is slower and reaches the barrier later than the others, all the faster threads will wait at the barrier until the slowest thread arrives. Once all threads in the workgroup have reached the barrier, they will all proceed past it together.
-    // so its better to avoid barrier if not necessary,right?
-    // Yes, it's generally a good practice to minimize the use of barriers in compute shaders. While barriers are essential for synchronization and ensuring correct data access among threads, they can introduce performance bottlenecks if overused or used unnecessarily. Excessive barriers can lead to idle threads waiting for others, which reduces overall parallel efficiency. Therefore, it's best to use barriers only when necessary for coordinating shared data access or ensuring that certain computations are completed before proceeding.
-    // what are other powerful wrap features ,like i could find maximum/minimum between threads without any performance lost?
-    // In compute shaders, you can use atomic operations to find the maximum or minimum values between threads without significant performance loss. Atomic operations allow multiple threads to safely read and write shared variables concurrently. Here are some useful atomic functions for this purpose:
-    // 1. atomicMax: This function updates a shared variable to the maximum value between its current value and a new value provided by a thread.
-    // 2. atomicMin: This function updates a shared variable to the minimum value between its current value and a new value provided by a thread.
-    // By using these atomic functions, you can efficiently compute the maximum or minimum values across threads in a workgroup without the need for complex synchronization mechanisms or barriers, thus maintaining good performance.
-    // so how these minimum/maximum works without needing to barrier or synchronization
-    // Atomic operations like atomicMax and atomicMin work without explicit barriers or synchronization because they are designed to handle concurrent access to shared variables safely. When multiple threads attempt to update the same variable using an atomic operation, the GPU ensures that these updates are performed in a way that prevents
-    // is it coz of instruction cycle ?
-    //how can i utilize this wrap functions?
-    // Atomic operations are implemented at the hardware level, allowing them to be executed in a single instruction cycle. This means that when multiple threads attempt to perform an atomic operation on the same variable, the GPU can manage these requests efficiently without the need for additional synchronization mechanisms like barriers. The hardware ensures that each atomic operation is completed fully before another thread can access the same variable, preventing
-
-    // This 'if' is uniform for the whole workgroup: either all threads return,
-    // or none. So it's safe (no barrier reached in this case).
-
-    //so tell me more bout wrap functions in compute shaders
-    // In compute shaders, "wrap functions" typically refer to built-in functions and features that facilitate parallel processing and inter-thread communication. Here are some additional powerful features you can utilize in compute shaders:
-
-   
-
+    // Uniform for the whole workgroup: safe to return before any barrier.
     if (any(greaterThanEqual(blockId, blocksPerAxis)))
         return;
 
-    // Flatten block index (same idea as your old 'index')
     int index =
         blockId.x +
         blockId.y * blocksPerAxis.x +
         blockId.z * blocksPerAxis.x * blocksPerAxis.y;
 
     ivec3 localOffset = ivec3(gl_LocalInvocationID); // 0..8
+    ivec3 pos = blockId * blockDim + localOffset;
+    uint lid = gl_LocalInvocationIndex;              // 0..728
 
-    ivec3 blockBase = blockId * blockDim;
-    ivec3 pos       = blockBase + localOffset;
-
-    uint lid = gl_LocalInvocationIndex; // 0..728
-
-    // Init shared vars once per block
     if (lid == 0u) {
-        sGotHit        = 0u;
-        sInsideBand    = 0u;
-        sTouched       = 0u;
-        sHasNegative   = 0u;
-        sHasPositive   = 0u;
+        sTouched = 0u;
+        sHasNegative = 0u;
+        sHasPositive = 0u;
         sNearSurfaceCount = 0u;
-        sInsideBandDis = 0.0;
+        sBrickBase = -1;
     }
     barrier();
 
-    // Check if this voxel is actually inside the 3D texture
-    bool valid = !(
-        any(lessThan(pos, ivec3(0))) ||
-        any(greaterThanEqual(pos, dims))
-    );
+    // Padding samples of edge blocks fall outside the domain; keep them FAR.
+    bool valid = all(lessThan(pos, dims));
 
-    float h = 10.01; // default far value
+    int blkRaw = blocks[index];
+    int blkBase = (blkRaw & BLOCK_INDEX_MASK);
 
+    float h = FAR_VALUE;
     if (valid) {
-        vec3 p = pos- (dims/2.0);
-        p = p/dims;
-
-        // Base SDF from previous state
-        int blkRaw = blocks[index];
-        int blkBase = (blkRaw & BLOCK_INDEX_MASK);
+        // Previous stored value: brick sample, or the sentinel constant.
         if (blkRaw >= 0) {
-            h = bricks[blkBase
-                       + localOffset.x
-                       + localOffset.y * 9
-                       + localOffset.z * 9 * 9];
-        } else if (blkRaw == -999999) {
-            h = 100.01;
+            h = bricks[blkBase + int(lid)];
+        } else if (blkRaw == BLOCK_INTERIOR) {
+            h = -FAR_VALUE;
         } else {
-            h = 100.01;
+            h = FAR_VALUE;
         }
 
-       // p -= 0.5;
-       // p*=8.;
-        vec3 pq = p + ubo.BrushData.xyz-0.031;
+        // Sample position in chunk-local space [-0.5, 0.5).
+        vec3 p = (vec3(pos) - vec3(dims) * 0.5) / vec3(dims);
+        vec3 pq = p + ubo.BrushData.xyz - 0.031; // kBrushCenterBias
+
         float brushRadius = ubo.BrushData.w;
         if (ubo.BrushAction < 0.5) {
-            brushRadius *= 1.15; // Remove is slightly larger than add.
+            brushRadius *= 1.15; // remove is slightly larger than add
         }
 
         int shapeMode = int(floor(ubo.BrushShape + 0.5));
-        float eraser = 0.0;
+        float brush;
         if (shapeMode == 1) {
-            eraser = sdfSphere(pq, brushRadius);
+            brush = sdfSphere(pq, brushRadius);
         } else if (shapeMode == 2) {
-            eraser = sdfPlanePatch(pq, brushRadius, max(brushRadius * 0.08, 0.0005));
+            brush = sdfPlanePatch(pq, brushRadius);
         } else {
-            eraser = sdfBox(pq, vec3(brushRadius));
+            brush = sdfBox(pq, vec3(brushRadius));
         }
 
-        if (eraser < 0.0) {
+        if (brush < 0.0) {
             atomicOr(sTouched, 1u);
         }
 
+        // Boolean update (skipped in recolor mode).
         if (ubo.BrushRecolor < 0.5) {
             if (ubo.BrushAction < 0.5) {
-                h = max(-eraser, h);
+                h = max(-brush, h);
             } else {
-                h = smin(eraser, h, max(ubo.BrushSmoothness, 0.0001));
+                h = smin(brush, h, max(ubo.BrushSmoothness, 0.0001));
             }
         }
 
-        float keepBand = 2.0 / float(dims.x);
-        bool hit        = (abs(h) <= keepBand);
-        bool insideBand = (h < -keepBand);
-        bool negativeSample = (h < 0.0);
-        bool positiveSample = (h > 0.0);
-
-        if (hit) {
-            atomicOr(sGotHit, 1u);
+        // Band of samples that must keep their real values. Freeing a block
+        // quantizes its samples to +-FAR, so the band has to cover everything
+        // a future stamp's smooth union could blend with - otherwise the
+        // re-stamped block disagrees with its kept neighbors at the shared
+        // boundary samples and a crease appears in the surface.
+        float keepBand = max(2.0 / float(dims.x), 2.0 * ubo.BrushSmoothness);
+        if (abs(h) <= keepBand) {
             atomicAdd(sNearSurfaceCount, 1u);
         }
-        if (insideBand) {
-            atomicOr(sInsideBand, 1u);
-            // "last wins" like your original code
-            sInsideBandDis = h;
-        }
-        if (negativeSample) {
+        if (h < 0.0) {
             atomicOr(sHasNegative, 1u);
         }
-        if (positiveSample) {
+        if (h > 0.0) {
             atomicOr(sHasPositive, 1u);
         }
     }
 
-    // Store per-thread value in shared array
     hShared[lid] = h;
-
     barrier();
 
-    bool groupHasCrossing = (sHasNegative != 0u) && (sHasPositive != 0u);
-    bool groupHasMaterial = groupHasCrossing || (sNearSurfaceCount >= 3u);
+    bool hasCrossing = (sHasNegative != 0u) && (sHasPositive != 0u);
+    // A single in-band sample is enough to keep the brick: freeing a block
+    // that grazes the surface at a corner/edge discards values its neighbors
+    // still store, and the mismatch renders as crease lines along block
+    // boundaries when the block is stamped again later.
+    bool hasSurface = hasCrossing || (sNearSurfaceCount > 0u);
 
-    // Block-level decision & brick allocation
+    // Block-level storage decision (thread 0 only).
     if (lid == 0u) {
-        int blkRaw = blocks[index];
-        int blkBase = (blkRaw & BLOCK_INDEX_MASK);
-        int blkFlags = (blkRaw & BLOCK_EMISSIVE_FLAG);
         if (ubo.BrushRecolor > 0.5) {
             if (sTouched != 0u && blkRaw >= 0) {
                 blockColors[index] = vec4(ubo.BrushColor.rgb, 1.0);
             }
-            blocks[index] = blkRaw;
-        } else if (groupHasMaterial) {
+        } else if (hasSurface) {
+            int flags = (blkRaw >= 0) ? (blkRaw & BLOCK_EMISSIVE_FLAG) : 0;
             if (blkRaw < 0) {
                 blkBase = AllocateBrickBase();
-                // Emissive applies only to newly created blocks while mode is ON.
-                blkFlags = (ubo.BrushEmissive > 0.5 && ubo.BrushAction >= 0.5) ? BLOCK_EMISSIVE_FLAG : 0;
+                // Emissive applies only to newly created blocks while ON.
+                flags = (ubo.BrushEmissive > 0.5 && ubo.BrushAction >= 0.5) ? BLOCK_EMISSIVE_FLAG : 0;
                 blockColors[index] = vec4(ubo.BrushColor.rgb, 1.0);
             }
-            blocks[index] = blkBase | blkFlags;
-        } else {
-            blocks[index] = -999999;
-        }
-        if (blocks[index] >= 0) {
+            blocks[index] = blkBase | flags;
+            sBrickBase = blkBase;
             atomicAdd(dirtyBlockCount, 1);
+        } else {
+            // No surface left in this block: return its brick to the free
+            // list and store the constant-class sentinel.
+            if (blkRaw >= 0) {
+                FreeBrickBase(blkBase);
+            }
+            blocks[index] = (sHasNegative != 0u) ? BLOCK_INTERIOR : BLOCK_EMPTY;
         }
     }
-
     barrier();
 
-    // Write 9x9x9 brick for surface blocks
-    if (ubo.BrushRecolor < 0.5 && groupHasMaterial && valid) {
-        int base = (blocks[index] & BLOCK_INDEX_MASK);
-        if (base >= 0) {
-            bricks[base + int(lid)] = hShared[lid];
-        }
+    // Write the brick samples for surface blocks.
+    if (sBrickBase >= 0 && ubo.BrushRecolor < 0.5) {
+        bricks[sBrickBase + int(lid)] = hShared[lid];
     }
 }

@@ -54,8 +54,19 @@ layout(location = 0) out vec4 outColor;
 layout(location = 1) out vec4 outWorldPos;        // G-buffer slot (future deferred)
 layout(location = 2) out vec4 outMotion;          // G-buffer slot (future deferred)
 
+// The raymarch hit always lies inside the cube, i.e. at or behind the
+// rasterized front-face depth - promising depth_greater lets the GPU keep
+// early-Z enabled despite the gl_FragDepth write: fragments of bricks whose
+// front face is already occluded are killed before this shader runs.
+// (Draw order is roughly front-to-back via SdfDrawList's counting sort, so
+// occluded bricks die early; pixels where a front brick missed/discarded
+// still march the bricks behind, keeping hollow regions correct.)
+//out float gl_FragDepth;
+layout(depth_greater) out float gl_FragDepth;
+
 const int BLOCK_EMISSIVE_FLAG = (1 << 30);
 const int BLOCK_INDEX_MASK = BLOCK_EMISSIVE_FLAG - 1;
+const int BLOCK_INTERIOR = -999998; // brick-less storage class: solid inside
 
 const int BLOCKS_PER_AXIS = 64;
 const int BRICK_DIM = 9;          // 8 cells + 1 padding sample per axis
@@ -64,11 +75,13 @@ const float CELLS_PER_BLOCK = 8.0;
 // March tuning.
 // - One cell is 1/8 of the cube; stored distances are reliable at that scale,
 //   so never step less than half a cell: bounds the loop without overshooting.
-// - The cube diagonal is sqrt(3) ~ 1.73 local units; at the minimum step that
-//   is ~28 iterations worst case, but sphere tracing leaves empty space in
-//   1-3 steps and reaches a surface in 3-6, so 24 covers everything except
-//   pathological grazing rays (which exit via tExit anyway).
-const int   MAX_STEPS = 24;
+// - The marched span is the cube diagonal (sqrt(3) ~ 1.73 local units) plus
+//   the cross-brick MARGIN (1.5 voxels); at the minimum step that is ~31
+//   iterations worst case, so 48 guarantees every ray terminates by hit or
+//   span end - never by running out of steps. (Budgets that can be exhausted
+//   by grazing rays advancing at MIN_STEP discard mid-block and let the
+//   background streak through.) Typical rays still exit in 3-6 steps.
+const int   MAX_STEPS = 32;
 const float MIN_STEP = 0.5 / CELLS_PER_BLOCK;
 const float HIT_EPSILON = 0.0005;
 
@@ -107,22 +120,31 @@ float sampleBrick(vec3 pos)
 // Sample the SDF at an arbitrary point of the global voxel grid by walking
 // blocks[] - this is what lets normals stay smooth across brick boundaries:
 // the offset taps land in whichever neighbor brick owns that position.
-// If the target block has no brick allocated, fall back to a clamped sample
-// of the current brick so silhouettes don't get blown out by an artificially
-// large empty-space value.
-float sampleFieldGlobal(vec3 globalGrid)
+// hasData reports whether the point's block owns a brick. If it does not,
+// the tap is clamped into the current brick and extrapolated by the
+// clamped-off distance (sign from the sentinel: empty keeps growing
+// positive, interior keeps falling negative). The estimate's *value* is
+// close, but its *gradient* is not - callers should prefer real data
+// (one-sided differences) and treat this as a last resort: normals built
+// from it kink visibly along block faces, especially in specular regions.
+float sampleFieldGlobal(vec3 globalGrid, out bool hasData)
 {
     ivec3 blockCoord = ivec3(floor(globalGrid * (1.0 / CELLS_PER_BLOCK)));
     blockCoord = clamp(blockCoord, ivec3(0), ivec3(BLOCKS_PER_AXIS - 1));
 
     int blockLinear = blockCoord.x + blockCoord.y * BLOCKS_PER_AXIS + blockCoord.z * BLOCKS_PER_AXIS * BLOCKS_PER_AXIS;
     int blockRaw = blocks[blockLinear];
+    hasData = (blockRaw >= 0);
 
     int brickIdx;
     vec3 localGrid;
+    float bias = 0.0;
     if (blockRaw < 0) {
         brickIdx = brickIndex2;
-        localGrid = clamp(globalGrid - vec3(blockCoordIn) * CELLS_PER_BLOCK, vec3(0.0), vec3(7.9999));
+        vec3 unclamped = globalGrid - vec3(blockCoordIn) * CELLS_PER_BLOCK;
+        localGrid = clamp(unclamped, vec3(0.0), vec3(7.9999));
+        float clampedOff = length(unclamped - localGrid) * (blockSizeWSIn / CELLS_PER_BLOCK);
+        bias = (blockRaw == BLOCK_INTERIOR) ? -clampedOff : clampedOff;
     } else {
         brickIdx = blockRaw & BLOCK_INDEX_MASK;
         localGrid = clamp(globalGrid - vec3(blockCoord) * CELLS_PER_BLOCK, vec3(0.0), vec3(7.9999));
@@ -142,35 +164,67 @@ float sampleFieldGlobal(vec3 globalGrid)
 
     float s0 = mix(mix(v000, v100, f.x), mix(v010, v110, f.x), f.y);
     float s1 = mix(mix(v001, v101, f.x), mix(v011, v111, f.x), f.y);
-    return mix(s0, s1, f.z);
+    return mix(s0, s1, f.z) + bias;
 }
 
-// Central-difference normal that crosses brick boundaries via
-// sampleFieldGlobal. hitLocalPos is in [-0.5, 0.5] of this block; the offset
-// e = 0.5 voxel units. fallback is returned for degenerate gradients
-// (constant field around the hit).
+// Difference component for one axis, preferring real brick data: central
+// difference when both taps have data, one-sided (vs. the center sample,
+// scaled x2 to match the central baseline) when only one side does, and the
+// extrapolated central difference as a last resort. This keeps normals from
+// kinking along block faces next to brick-less (empty/interior sentinel)
+// neighbors - the extrapolation estimates the field's value well but not
+// its gradient, and the kink shows as view-dependent light/dark dashes in
+// specular regions.
+float axisDiff(float fp, bool okP, float fm, bool okM, float f0)
+{
+    if (okP && okM) return fp - fm;
+    if (okP) return 2.0 * (fp - f0);
+    if (okM) return 2.0 * (f0 - fm);
+    return fp - fm;
+}
+
+// Normal from differences that cross brick boundaries via sampleFieldGlobal.
+// hitLocalPos is in [-0.5, 0.5] of this block; the offset e = 0.5 voxel
+// units. fallback is returned for degenerate gradients (constant field
+// around the hit).
 vec3 calcNormalSmoothGlobal(vec3 hitLocalPos, vec3 fallback)
 {
     vec3 baseGlobal = vec3(blockCoordIn) * CELLS_PER_BLOCK + (hitLocalPos + 0.5) * CELLS_PER_BLOCK;
     const float e = 0.5;
 
-    float dx = sampleFieldGlobal(baseGlobal + vec3(e, 0, 0)) - sampleFieldGlobal(baseGlobal - vec3(e, 0, 0));
-    float dy = sampleFieldGlobal(baseGlobal + vec3(0, e, 0)) - sampleFieldGlobal(baseGlobal - vec3(0, e, 0));
-    float dz = sampleFieldGlobal(baseGlobal + vec3(0, 0, e)) - sampleFieldGlobal(baseGlobal - vec3(0, 0, e));
+    bool okC, okPX, okMX, okPY, okMY, okPZ, okMZ;
+    float f0 = sampleFieldGlobal(baseGlobal, okC);
+    float px = sampleFieldGlobal(baseGlobal + vec3(e, 0, 0), okPX);
+    float mx = sampleFieldGlobal(baseGlobal - vec3(e, 0, 0), okMX);
+    float py = sampleFieldGlobal(baseGlobal + vec3(0, e, 0), okPY);
+    float my = sampleFieldGlobal(baseGlobal - vec3(0, e, 0), okMY);
+    float pz = sampleFieldGlobal(baseGlobal + vec3(0, 0, e), okPZ);
+    float mz = sampleFieldGlobal(baseGlobal - vec3(0, 0, e), okMZ);
 
-    vec3 g = vec3(dx, dy, dz);
+    vec3 g = vec3(
+        axisDiff(px, okPX, mx, okMX, f0),
+        axisDiff(py, okPY, my, okMY, f0),
+        axisDiff(pz, okPZ, mz, okMZ, f0));
     if (dot(g, g) <= 1e-12) {
         return fallback;
     }
     return normalize(g);
 }
 
-// Distance along the ray to where it leaves this block's unit cube.
-float rayCubeExit(vec3 ro, vec3 rd)
+// Ray span through this block's unit cube (slab test). ro may sit slightly
+// outside the cube (inflated proxy, see SdfBrickVS): tEnter is where the ray
+// actually reaches the cube. Robust to grid-axis-parallel rays: plain 1.0/rd
+// gives +-inf as intended, but sign(+-0.0) == 0.0 would collapse that axis -
+// step() never returns a zero sign, and the clamped reciprocal keeps the
+// parallel axis at huge finite distances (never the limiting slab).
+void rayCubeSpan(vec3 ro, vec3 rd, out float tEnter, out float tExit)
 {
-    vec3 invDir = 1.0 / rd; // GLSL inf-safe: axis-parallel components yield +-inf
-    vec3 tFar = (sign(rd) * 0.5 - ro) * invDir;
-    return min(tFar.x, min(tFar.y, tFar.z));
+    vec3 s = step(0.0, rd) * 2.0 - 1.0;
+    vec3 inv = s / max(abs(rd), vec3(1e-12));
+    vec3 tNear = (-s * 0.5 - ro) * inv;
+    vec3 tFar  = ( s * 0.5 - ro) * inv;
+    tEnter = max(max(tNear.x, tNear.y), tNear.z);
+    tExit  = min(min(tFar.x,  tFar.y),  tFar.z);
 }
 
 void main()
@@ -178,19 +232,59 @@ void main()
     outWorldPos = vec4(0.0);
     outMotion = vec4(0.0);
 
-    // March in local cube space; the entry point is this fragment's position
-    // on the rasterized cube face, so t starts at 0 with no entry search.
+    // March in local cube space along the true pixel ray. Rasterization
+    // assigns each boundary pixel to exactly one brick, but the surface
+    // crossing can sit just past a shared face in the neighbor - and the
+    // neighbor's fragment does not reliably exist there (its face is an
+    // edge-on sliver triangle for grazing/grid-parallel rays). So the
+    // handoff must not depend on coverage: march this brick's span with the
+    // fast in-brick sampler, then continue a short MARGIN past the cube
+    // with the global cross-brick sampler. Whichever brick the pixel landed
+    // on finds crossings near its boundary itself; deeper crossings belong
+    // to fragments of the bricks that contain them.
+    // Direction from the *unclamped* attributes: the true pixel ray. The
+    // origin is snapped onto the cube separately - edge-on sliver triangles
+    // evaluate attributes at pixel centers that can sit slightly outside the
+    // face (sub-pixel), and an off-cube origin makes the slab test reject
+    // the fragment. Snapping only the origin keeps the ray unbent.
     vec3 dirLocal = normalize(localCoord - camLocal);
-    float tExit = rayCubeExit(localCoord, dirLocal) + 1e-4;
+    vec3 ro = clamp(localCoord, vec3(-0.5), vec3(0.5));
+    float tEnter;
+    float tExit;
+    rayCubeSpan(ro, dirLocal, tEnter, tExit);
+    tExit += 1e-4;
+    if (tEnter > tExit || tExit < 0.0) {
+        discard;
+    }
 
-    float t = 0.0;
-    float tPrev = 0.0;
+    const float MARGIN = 1.5 / CELLS_PER_BLOCK;
+    float t = max(tEnter, 0.0);
+
+    // Normal fragments: march the in-cube span plus a short cross-brick
+    // margin (a crossing just past a shared face must not depend on the
+    // neighbor's fragment existing). Edge-on sliver fragments (in-cube span
+    // ~ 0: the ray runs along a block face) exclusively own their boundary-
+    // row pixels, so they march a full block diagonal globally - they are
+    // confined to 1-px rows, so the extra cost is negligible.
+    float tEnd = (tExit - t < MIN_STEP)
+        ? t + 1.7321 + MARGIN
+        : tExit + MARGIN;
+    float tPrev = t;
     float dPrev = 1e9;
     bool hit = false;
 
     for (int i = 0; i < MAX_STEPS; i++)
     {
-        float d = sampleBrick(localCoord + dirLocal * t);
+        vec3 p = ro + dirLocal * t;
+        float d;
+        if (t <= tExit) {
+            d = sampleBrick(p);
+        } else {
+            // Past the cube: cross-brick sample (world distance -> local).
+            bool okTap;
+            vec3 globalGrid = (vec3(blockCoordIn) + (p + 0.5)) * CELLS_PER_BLOCK;
+            d = sampleFieldGlobal(globalGrid, okTap) * localDistanceScale();
+        }
 
         if (d < HIT_EPSILON)
         {
@@ -203,24 +297,28 @@ void main()
             break;
         }
 
-        // The nearest surface is farther than the rest of this ray's path
-        // through the cube: it cannot hit inside this block.
-        if (d >= tExit - t)
+        // The nearest surface is farther than the rest of this ray's marched
+        // span: it cannot hit before tEnd.
+        if (d >= tEnd - t)
             break;
 
         tPrev = t;
         dPrev = d;
         t += max(d, MIN_STEP);
 
-        if (t >= tExit)
-            break;
+        // Clamp the last step onto the end of the span instead of jumping
+        // past it, so a zero crossing in the final half-voxel is still
+        // sampled (the next iteration either hits via secant or exits
+        // through the d >= tEnd - t test).
+        if (t >= tEnd)
+            t = tEnd;
     }
 
     if (!hit) {
         discard;
     }
 
-    vec3 hitLocalPos = localCoord + dirLocal * t;
+    vec3 hitLocalPos = ro + dirLocal * t;
     vec3 hitObjectPos = blockCenterObject + hitLocalPos * blockSizeWSIn;
     vec3 hitWorldPos = (ubo.model * vec4(hitObjectPos, 1.0)).xyz;
 
@@ -245,9 +343,10 @@ void main()
     if (blockEmissive > 0.5) {
         outColor.rgb = baseColor * (1.8 + 0.2 * dif);
     }
+    //outColor.rgb = n;
     outColor.a = 1.0;
 
-    outWorldPos = vec4(hitWorldPos, 1.0);
+  //  outWorldPos = vec4(hitWorldPos, 1.0);
 
     // Real depth at the SDF hit so volumetric surfaces intersect correctly
     // with rasterized meshes and each other.
