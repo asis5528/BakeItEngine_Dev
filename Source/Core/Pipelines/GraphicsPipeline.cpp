@@ -110,8 +110,15 @@ void GraphicsPipeline::setupPipeline(PipelineInput  pipelineInput) {
     infoLocal.rasterizer.rasterizerDiscardEnable = VK_FALSE;
     infoLocal.rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
     infoLocal.rasterizer.lineWidth = 1.0f;
-    infoLocal.rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
-   // if(frontFaceCull) infoLocal.rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
+    // frontFaceCull (volumetric brick pipeline): disable culling entirely.
+    // The brick raymarch is only correct when marching starts at the NEAR
+    // face of the proxy cube; which side back-face culling keeps depends on
+    // the mesh winding x the projection's Y handedness - a trap that breaks
+    // per-platform (Quest: hollow bricks / flat cut faces). With both faces
+    // rasterized, near-face fragments march correctly and win the depth
+    // test; far-face fragments resolve at-or-behind them or discard, so
+    // layout(depth_greater) holds for every fragment.
+    infoLocal.rasterizer.cullMode = frontFaceCull ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT;
     infoLocal.rasterizer.depthBiasEnable = VK_FALSE;
 
 

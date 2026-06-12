@@ -9,6 +9,7 @@
 
 class Renderer;
 struct BrushState;
+struct SdfVolumeStats;
 
 // World state: what exists in the scene. Render resources live in
 // Render/Renderer; the render methods below are legacy forwarders kept
@@ -34,6 +35,10 @@ public:
 	Camera* camera = nullptr;     // world camera, owned by the engine root (wired in main.cpp)
 	Renderer* renderer = nullptr; // render resources + recording (wired in main.cpp)
 	const BrushState* brush = nullptr; // brush mirror for the indicator overlay, owned by SdfEditor (wired in main.cpp)
+	// Atlas stats mirror for the on-device HUD (post pass digits); owned by
+	// SdfEditor, wired by the Quest entry point. Desktop shows these in ImGui
+	// instead and leaves it null.
+	const SdfVolumeStats* sdfStats = nullptr;
 	float fps = 0.0;
 	Scene(VulkanBase *vbase);
 	void init();

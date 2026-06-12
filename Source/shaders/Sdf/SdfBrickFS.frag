@@ -324,6 +324,9 @@ void main()
 
     vec3 dir = normalize(worldPosition - cameraPos);
     vec3 n = calcNormalSmoothGlobal(hitLocalPos, -dir);
+    // The field gradient lives in object/grid space; rotate it into world
+    // space for lighting (model is rigid - rotation + translation only).
+    n = normalize(mat3(ubo.model) * n);
 
     // Lighting: single directional light + wrap term + specular.
     vec3 light = normalize(vec3(10.0, 10.0, 10.0));

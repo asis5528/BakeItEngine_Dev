@@ -87,7 +87,12 @@ void main()
     // so camera = -transpose(R) * t - no full matrix inverse needed.
     mat4 view = ubo.view[gl_ViewIndex];
     cameraPos = -(vec3(view[3]) * mat3(view));
-    camLocal = (cameraPos - centerWorld) / blockSizeWS;
+    // camLocal must live in OBJECT space (the cube/grid axes): when the
+    // model rotates (pottery spin), bring the camera into object space with
+    // the rigid inverse instead of assuming object == world.
+    mat3 modelRotInv = transpose(mat3(ubo.model));
+    vec3 cameraObject = modelRotInv * (cameraPos - vec3(ubo.model[3]));
+    camLocal = (cameraObject - centerObject) / blockSizeWS;
 
     localCoord = v;
     gl_Position = ubo.proj[gl_ViewIndex] * view * vec4(vertWS, 1.0);

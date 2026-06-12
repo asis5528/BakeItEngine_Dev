@@ -94,12 +94,14 @@ bool IntersectAabb(const glm::vec3& ro, const glm::vec3& rd, const glm::vec3& bm
 
 constexpr int kBrickSamplesPerBlock = 9 * 9 * 9;
 #ifdef BAKEIT_PLATFORM_ANDROID
-// Adreno's maxStorageBufferRange caps SSBO ranges far below desktop's; the
-// 512^3 float atlas (512 MiB) sits past it and over-limit ranges read as
-// garbage/zero (the "flat cubes" look). 256^3 = 64 MiB, ~23k bricks - plenty
-// until the Phase 4 FP16/3D-texture atlas lands. Shaders index the atlas
-// linearly by brick, so capacity is a CPU-side decision only.
-constexpr int kAtlasDim = 256;
+// Adreno's maxStorageBufferRange caps SSBO ranges at 128 MiB (desktop's
+// 512^3 float atlas is 512 MiB; over-limit ranges read as garbage/zero - the
+// "flat cubes" look). 300^3 = ~103 MiB / ~37k bricks fills the budget while
+// staying under the limit; the tail allocator runs out sooner than desktop's
+// 184k bricks, so watch stats.tailBricks vs capacity. Phase 4's FP16/3D-
+// texture atlas relieves this. Shaders index the atlas linearly by brick,
+// so capacity is a CPU-side decision only.
+constexpr int kAtlasDim = 300;
 #else
 constexpr int kAtlasDim = 512;
 #endif
@@ -225,6 +227,19 @@ Mesh* SdfEditor::findEditableMesh()
 	return nullptr;
 }
 
+Object* SdfEditor::findEditableObject()
+{
+	for (Object& obj : scene->objects) {
+		if (!obj.hasMesh) continue;
+		for (size_t i = 0; i < obj.meshID.size(); ++i) {
+			if (i >= obj.shader.size()) continue;
+			if (obj.shader[i].graphicsPipeline != scene->pipelines[4]) continue;
+			return &obj;
+		}
+	}
+	return nullptr;
+}
+
 void SdfEditor::clearScene()
 {
 	const uint32_t totalBlocks = chunkBlocksPerAxis * chunkBlocksPerAxis * chunkBlocksPerAxis;
@@ -272,6 +287,10 @@ void SdfEditor::update(float time)
 		BrushDistanceFromCamera += 0.005f * bin.distanceDelta;
 
 		if (BrushRadius < 0.001f) BrushRadius = 0.001f;
+		// Upper bound: a fifth of the chunk. Unbounded growth makes stamps
+		// (and the indicator) engulf the camera - easy to hit by holding an
+		// analog input (the VR thumbstick).
+		if (BrushRadius > 0.2f) BrushRadius = 0.2f;
 		if (BrushSmoothness < 0.0001f) BrushSmoothness = 0.0001f;
 		// Upper bound keeps the kernel's keepBand (2x smoothness) - and with
 		// it the number of retained near-surface bricks - within budget.
@@ -280,10 +299,18 @@ void SdfEditor::update(float time)
 		if (BrushDistanceFromCamera > 3.0f) BrushDistanceFromCamera = 3.0f;
 	}
 
+	// Pottery rotation: the editable object's ModelMatrix (rigid). All brush
+	// math runs in OBJECT space - transform the platform's world-space
+	// pointing ray with the inverse model, so a held brush carves a ring on
+	// a spinning pot. Identity model (desktop today) reduces to the old path.
+	Object* editableObject = findEditableObject();
+	const glm::mat4 model = editableObject ? editableObject->ModelMatrix : glm::mat4(1.0f);
+	const glm::mat4 invModel = glm::inverse(model);
+
 	// Brush placement: the platform's pointing ray, pushed into the chunk
 	// bounds (desktop: cursor ray; quest: controller aim pose).
-	const glm::vec3 rayDir = bin.rayDir;
-	const glm::vec3 rayOrigin = bin.rayOrigin;
+	const glm::vec3 rayDir = glm::normalize(glm::mat3(invModel) * bin.rayDir);
+	const glm::vec3 rayOrigin = glm::vec3(invModel * glm::vec4(bin.rayOrigin, 1.0f));
 
 	float tEnter = 0.0f, tExit = 0.0f;
 	glm::vec3 brushCenter = rayOrigin + rayDir * BrushDistanceFromCamera; // fallback
@@ -309,8 +336,10 @@ void SdfEditor::update(float time)
 	pubo.BrushEmissive = EmissiveMode ? 1.0f : 0.0f;
 	pubo.BrushRecolor = (bin.recolorModifier && bin.drawDown && bin.interactionAllowed) ? 1.0f : 0.0f;
 
-	// Editor-facing brush state mirror.
-	brush.data = glm::vec4(-brushCenter, BrushRadius);
+	// Editor-facing brush state mirror. The indicator overlay draws in world
+	// space, so mirror the WORLD center (brushCenter is object space).
+	const glm::vec3 brushCenterWorld = glm::vec3(model * glm::vec4(brushCenter, 1.0f));
+	brush.data = glm::vec4(-brushCenterWorld, BrushRadius);
 	brush.useSphere = (BrushShapeMode == 1);
 	brush.shapeMode = BrushShapeMode;
 	brush.radius = BrushRadius;
@@ -406,8 +435,11 @@ void SdfEditor::update(float time)
 	// idle/orbit frames never sync back to the CPU.
 	Mesh* targetMesh = findEditableMesh();
 	if (drawList && targetMesh && targetMesh->useIndirectDraw) {
+		// Distance sort runs in object/block space: bring the camera into
+		// object space first (matters once the pot rotates).
+		const glm::vec3 cameraObject = glm::vec3(invModel * glm::vec4(scene->camera->position, 1.0f));
 		const glm::vec3 camBlockUnits =
-			(scene->camera->position - chunkTranslationWS - ChunkLocalCenterOrigin(chunkBlockSizeWS)) / chunkBlockSizeWS + glm::vec3(0.5f);
+			(cameraObject - chunkTranslationWS - ChunkLocalCenterOrigin(chunkBlockSizeWS)) / chunkBlockSizeWS + glm::vec3(0.5f);
 
 		// Block-units -> world is a uniform scale + translation (inverse of
 		// the camBlockUnits mapping above); chained with proj * view it gives
@@ -426,7 +458,9 @@ void SdfEditor::update(float time)
 		const glm::mat4 cullViewProj = hasCullOverride
 			? scene->camera->cullProj * scene->camera->cullView
 			: scene->camera->proj[0] * scene->camera->view[0];
-		const glm::mat4 blockToClip = cullViewProj * blockToWorld;
+		// Model goes in front of blockToWorld: block units live in object
+		// space, the frustum in world space.
+		const glm::mat4 blockToClip = cullViewProj * model * blockToWorld;
 
 		if (stampedThisFrame || blockToClip != lastDrawListBlockToClip) {
 			drawList->build(camBlockUnits, blockToClip);

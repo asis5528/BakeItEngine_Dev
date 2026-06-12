@@ -66,4 +66,9 @@ public:
 	void uploadChunkSpatialData();
 	void clearScene();
 	Mesh* findEditableMesh();
+	// The object owning the editable mesh; its ModelMatrix carries the
+	// pottery-wheel rotation. Brush math runs in OBJECT space (so a held
+	// brush carves a ring on a spinning pot) and the draw-list cull/sort
+	// matrices include the model transform.
+	Object* findEditableObject();
 };

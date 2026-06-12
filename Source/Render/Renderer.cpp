@@ -21,11 +21,10 @@ void Renderer::init(Scene* scene)
 #endif
 	Framebuffer* frameBuffer = new Framebuffer(base->vulkandevice, base->presentExtent().width, base->presentExtent().height, base->vulkandevice->getMaxUsableSampleCount(), base->presentFormat(), utils::findDepthFormat(base->vulkandevice->physicalDevice), 2, multiview);
 	framebuffers.push_back(frameBuffer);
-#ifdef BAKEIT_PLATFORM_DESKTOP
-	// Post-process chain + editor viewport feed are desktop-only for now; the
-	// Quest path copies the scene color straight into the XrSwapchain image.
+	// Post-process chain runs on both platforms (it carries the brush
+	// indicator overlay); on Quest its output framebuffer inherits the
+	// multiview setup and is what gets copied into the XrSwapchain image.
 	postprocessingManager = new PostProcessingManager(base, scene, framebuffers[0]);
-#endif
 	scenePipelines = new ScenePipelines(base, framebuffers[0]->renderPass);
 	pipelines = scenePipelines->pipelines;
 	scene->pipelines = pipelines; // legacy mirror; consumers index scene->pipelines
@@ -71,10 +70,14 @@ void Renderer::recordCommandBuffers(Scene& scene)
 		base->swapChain->beginRenderPass(base->commandBuffers[i], i);
 		vkCmdEndRenderPass(base->commandBuffers[i]);
 #else
-		// Quest: copy both rendered eye layers into XrSwapchain image i. The
-		// scene color ends the pass in SHADER_READ_ONLY_OPTIMAL; the XR image
+		// Quest: post pass (scene passthrough + brush indicator, multiview)
+		// then copy both of its eye layers into XrSwapchain image i. The
+		// color ends the pass in SHADER_READ_ONLY_OPTIMAL; the XR image
 		// must be released in COLOR_ATTACHMENT_OPTIMAL for the compositor.
-		VkImage srcImage = framebuffers[0]->MultisampledColorImage->image;
+		postprocessingManager->renderPass(base->commandBuffers[i]);
+
+		Framebuffer* postFB = postprocessingManager->framebuffers[postprocessingManager->bufferSize - 1];
+		VkImage srcImage = postFB->MultisampledColorImage->image;
 		VkImage dstImage = base->platformHooks.presentImages[i];
 		const VkExtent2D extent = base->presentExtent();
 
