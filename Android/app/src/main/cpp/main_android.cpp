@@ -1,13 +1,20 @@
-// BakeIt Quest - Phase 2: the engine's SDF brick renderer on device.
+// BakeIt Quest - Phase 3: SDF sculpting with the Touch controllers.
 //
 // OpenXR owns the frame loop and the Vulkan instance/device (created through
 // XR_KHR_vulkan_enable2 via VulkanPlatformHooks - the seam VulkanBase
 // exposes). The engine core (Core/World/Render/Features) is compiled in
 // unchanged: Renderer records the offscreen scene pass with true multiview
 // (both eyes in one pass) and ends each command buffer with a copy into the
-// matching XrSwapchain image. A scripted BrushInputSource stamps a demo
-// sculpture through the exact same SdfEditor path the desktop brush uses -
-// Phase 3 swaps it for OpenXR controller actions.
+// matching XrSwapchain image.
+//
+// Brushing: QuestBrushInput implements the engine's BrushInputSource from
+// OpenXR actions - the same contract DesktopBrushInput fulfills with the
+// mouse, feeding the identical SdfEditor stroke path.
+//   Right controller: aim ray = brush wand, trigger = draw, grip = erase,
+//                     thumbstick X/Y = radius / brush distance,
+//                     A = shape toggle, B = emissive toggle.
+//   Left controller:  thumbstick Y = smoothness, trigger = recolor modifier,
+//                     X = clear scene.
 //
 // Shader .spv files ship as APK assets, are extracted to internal storage at
 // startup, and chdir() makes the engine's relative "shaders/..." paths work
@@ -75,6 +82,40 @@ namespace {
 // around the world origin goes slightly below eye height and ~0.75m forward.
 const glm::vec3 kWorldToStage(0.0f, -0.15f, -0.75f);
 
+struct Engine; // fwd; set once the engine is up, for the diagnostics log
+Engine* gEngineForDiag = nullptr;
+
+// OpenXR action handles + the per-frame input snapshot they produce.
+// syncXrInput() refreshes the snapshot once per frame (after xrWaitFrame, at
+// the predicted display time); QuestBrushInput::poll() consumes it.
+struct XrInput
+{
+    XrActionSet actionSet = XR_NULL_HANDLE;
+    XrAction aimPose = XR_NULL_HANDLE;       // right aim pose -> brush ray
+    XrAction drawTrigger = XR_NULL_HANDLE;   // right trigger (float)
+    XrAction eraseSqueeze = XR_NULL_HANDLE;  // right grip (float)
+    XrAction stickRight = XR_NULL_HANDLE;    // right thumbstick (vec2)
+    XrAction stickLeft = XR_NULL_HANDLE;     // left thumbstick (vec2)
+    XrAction shapeButton = XR_NULL_HANDLE;   // A (bool)
+    XrAction emissiveButton = XR_NULL_HANDLE;// B (bool)
+    XrAction recolorTrigger = XR_NULL_HANDLE;// left trigger (float)
+    XrAction clearButton = XR_NULL_HANDLE;   // X (bool)
+    XrSpace aimSpace = XR_NULL_HANDLE;
+
+    // Per-frame snapshot (stage/LOCAL space pose).
+    bool aimValid = false;
+    glm::vec3 aimPos = glm::vec3(0.0f);
+    glm::quat aimRot = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+    bool drawDown = false;
+    bool eraseDown = false;
+    bool recolorDown = false;
+    bool shapePressed = false;    // this-frame edges
+    bool emissivePressed = false;
+    bool clearPressed = false;
+    glm::vec2 stickR = glm::vec2(0.0f);
+    glm::vec2 stickL = glm::vec2(0.0f);
+};
+
 struct App
 {
     android_app* androidApp = nullptr;
@@ -107,6 +148,9 @@ struct App
 
     bool haveBaseTime = false;
     XrTime baseTime = 0;
+
+    XrInput input;
+    float lastFrameTimeSec = -1.0f;
 };
 
 // The engine, wired the same way main.cpp wires it on desktop (minus
@@ -121,71 +165,65 @@ struct Engine
     SdfEditor* sdfEditor = nullptr;
 };
 
-// ------------------------------------------------------------- demo brush ---
+// ------------------------------------------------------- controller brush ---
 // Platform-free brush intents (the same contract DesktopBrushInput fulfills
-// with the mouse). Scripted for Phase 2: grow the brush, then sweep a spiral
-// of smooth-union sphere stamps through SdfEditor's standard stroke path.
-// Phase 3 replaces this with OpenXR controller aim + trigger.
-class ScriptedBrushInput : public BrushInputSource
+// with the mouse), built from the XrInput per-frame snapshot. The brush sits
+// on the right controller's aim ray; SdfEditor places it BrushDistance along
+// the ray (a wand tip), adjustable with the right thumbstick.
+float stickDeadzone(float v)
+{
+    const float dz = 0.18f;
+    if (std::fabs(v) < dz) return 0.0f;
+    return (v - (v > 0.0f ? dz : -dz)) / (1.0f - dz);
+}
+
+class QuestBrushInput : public BrushInputSource
 {
 public:
+    QuestBrushInput(const XrInput* input, const glm::vec3* worldToStage)
+        : in(input), worldToStage(worldToStage) {}
+
     BrushInput poll() override
     {
-        BrushInput in{};
-        in.rayOrigin = glm::vec3(0.0f, 1.0f, 0.0f);
-        in.rayDir = glm::vec3(0.0f, -1.0f, 0.0f);
-        const int f = frame++;
-        // Strictly increasing cursor so every held frame passes the
-        // moved-enough stroke gate.
-        in.strokeCursor = glm::dvec2(f * 10.0, 0.0);
+        BrushInput b{};
+        // Aim pose -> engine-world ray (-Z is the OpenXR aim forward).
+        b.rayOrigin = in->aimPos - *worldToStage;
+        b.rayDir = in->aimRot * glm::vec3(0.0f, 0.0f, -1.0f);
 
-        if (f == 0) {
-            in.shapeTogglePressed = true; // cube -> sphere
-            return in;
+        b.interactionAllowed = in->aimValid;
+        b.drawDown = in->drawDown;
+        b.eraseDown = in->eraseDown;
+        b.recolorModifier = in->recolorDown;
+        b.shapeTogglePressed = in->shapePressed;
+        b.emissiveTogglePressed = in->emissivePressed;
+
+        // Tuned for 72Hz: full deflection sweeps each parameter's useful
+        // range in a couple of seconds (SdfEditor scales these deltas).
+        b.radiusDelta = stickDeadzone(in->stickR.x) * 3.5f;
+        b.distanceDelta = stickDeadzone(in->stickR.y) * 1.2f;
+        b.smoothnessDelta = stickDeadzone(in->stickL.y) * 0.35f;
+
+        // SdfEditor's stroke gate wants a 2D cursor that moves while the
+        // stroke moves (stamp when it travels > ~0.5 units). Feed it the
+        // accumulated path length of the wand tip: 400 units/m makes a stamp
+        // land every ~1.3mm of controller travel.
+        const glm::vec3 tip = b.rayOrigin + b.rayDir * 0.25f;
+        if (hasLastTip) {
+            pathLength += double(glm::length(tip - lastTip)) * 400.0;
         }
-        if (f < 60) {
-            // Grow the brush to chunky but still crisp settings: big radius,
-            // smoothness near the desktop default (cranking it to the cap
-            // melts the field and mushes the normals).
-            in.interactionAllowed = true;
-            in.radiusDelta = 6.0f;     // +0.0006/frame -> ~0.045 total
-            in.smoothnessDelta = 0.1f; // -> ~0.0016
-            return in;
-        }
-        if (f < 420) {
-            // Descending spiral: rays aim straight down from an orbiting
-            // origin (no inward tilt - it would cancel the orbit radius by
-            // stamp depth), radius tightening while the brush distance grows.
-            in.interactionAllowed = true;
-            in.drawDown = true;
-            const float s = float(f - 60);
-            const float t = s * 0.035f;            // ~2 turns over the stroke
-            const float r = 0.30f - 0.00045f * s;  // 0.30 -> 0.14
-            in.rayOrigin = glm::vec3(r * std::cos(t) - 0.035f, 1.2f, r * std::sin(t) - 0.035f);
-            in.rayDir = glm::vec3(0.0f, -1.0f, 0.0f);
-            in.distanceDelta = 0.35f;              // sink deeper each stamp
-            return in;
-        }
-        return in; // sculpture done: render-only
+        lastTip = tip;
+        hasLastTip = true;
+        b.strokeCursor = glm::dvec2(pathLength, 0.0);
+        return b;
     }
 
-    int frame = 0;
+private:
+    const XrInput* in;
+    const glm::vec3* worldToStage;
+    glm::vec3 lastTip = glm::vec3(0.0f);
+    bool hasLastTip = false;
+    double pathLength = 0.0;
 };
-
-glm::vec3 hsv2rgb(float h, float s, float v)
-{
-    const float c = v * s;
-    const float x = c * (1.0f - std::fabs(std::fmod(h * 6.0f, 2.0f) - 1.0f));
-    const float m = v - c;
-    glm::vec3 rgb;
-    if (h < 1.0f / 6.0f) rgb = glm::vec3(c, x, 0.0f);
-    else if (h < 2.0f / 6.0f) rgb = glm::vec3(x, c, 0.0f);
-    else if (h < 3.0f / 6.0f) rgb = glm::vec3(0.0f, c, x);
-    else if (h < 4.0f / 6.0f) rgb = glm::vec3(0.0f, x, c);
-    else if (h < 5.0f / 6.0f) rgb = glm::vec3(x, 0.0f, c);
-    else rgb = glm::vec3(c, 0.0f, x);
-    return rgb + glm::vec3(m);
-}
 
 // ------------------------------------------------------------------ assets ---
 
@@ -417,6 +455,163 @@ void createSessionAndSwapchain(App& app)
     }
 }
 
+// ------------------------------------------------------------ XR input -----
+
+XrAction makeAction(XrActionSet set, XrActionType type, const char* name, const char* localized)
+{
+    XrActionCreateInfo info{XR_TYPE_ACTION_CREATE_INFO};
+    info.actionType = type;
+    std::strcpy(info.actionName, name);
+    std::strcpy(info.localizedActionName, localized);
+    XrAction action = XR_NULL_HANDLE;
+    XR_CHECK(xrCreateAction(set, &info, &action));
+    return action;
+}
+
+void createXrInput(App& app)
+{
+    XrInput& in = app.input;
+
+    XrActionSetCreateInfo setInfo{XR_TYPE_ACTION_SET_CREATE_INFO};
+    std::strcpy(setInfo.actionSetName, "brush");
+    std::strcpy(setInfo.localizedActionSetName, "Brush");
+    XR_CHECK(xrCreateActionSet(app.xrInstance, &setInfo, &in.actionSet));
+
+    in.aimPose = makeAction(in.actionSet, XR_ACTION_TYPE_POSE_INPUT, "aim_pose", "Aim Pose");
+    in.drawTrigger = makeAction(in.actionSet, XR_ACTION_TYPE_FLOAT_INPUT, "draw", "Draw");
+    in.eraseSqueeze = makeAction(in.actionSet, XR_ACTION_TYPE_FLOAT_INPUT, "erase", "Erase");
+    in.stickRight = makeAction(in.actionSet, XR_ACTION_TYPE_VECTOR2F_INPUT, "stick_right", "Radius / Distance");
+    in.stickLeft = makeAction(in.actionSet, XR_ACTION_TYPE_VECTOR2F_INPUT, "stick_left", "Hue / Smoothness");
+    in.shapeButton = makeAction(in.actionSet, XR_ACTION_TYPE_BOOLEAN_INPUT, "shape_toggle", "Shape Toggle");
+    in.emissiveButton = makeAction(in.actionSet, XR_ACTION_TYPE_BOOLEAN_INPUT, "emissive_toggle", "Emissive Toggle");
+    in.recolorTrigger = makeAction(in.actionSet, XR_ACTION_TYPE_FLOAT_INPUT, "recolor", "Recolor Modifier");
+    in.clearButton = makeAction(in.actionSet, XR_ACTION_TYPE_BOOLEAN_INPUT, "clear_scene", "Clear Scene");
+
+    auto path = [&](const char* p) {
+        XrPath out = XR_NULL_PATH;
+        XR_CHECK(xrStringToPath(app.xrInstance, p, &out));
+        return out;
+    };
+
+    const XrActionSuggestedBinding bindings[] = {
+        { in.aimPose, path("/user/hand/right/input/aim/pose") },
+        { in.drawTrigger, path("/user/hand/right/input/trigger/value") },
+        { in.eraseSqueeze, path("/user/hand/right/input/squeeze/value") },
+        { in.stickRight, path("/user/hand/right/input/thumbstick") },
+        { in.shapeButton, path("/user/hand/right/input/a/click") },
+        { in.emissiveButton, path("/user/hand/right/input/b/click") },
+        { in.stickLeft, path("/user/hand/left/input/thumbstick") },
+        { in.recolorTrigger, path("/user/hand/left/input/trigger/value") },
+        { in.clearButton, path("/user/hand/left/input/x/click") },
+    };
+    XrInteractionProfileSuggestedBinding suggested{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
+    suggested.interactionProfile = path("/interaction_profiles/oculus/touch_controller");
+    suggested.suggestedBindings = bindings;
+    suggested.countSuggestedBindings = sizeof(bindings) / sizeof(bindings[0]);
+    XR_CHECK(xrSuggestInteractionProfileBindings(app.xrInstance, &suggested));
+
+    XrActionSpaceCreateInfo spaceInfo{XR_TYPE_ACTION_SPACE_CREATE_INFO};
+    spaceInfo.action = in.aimPose;
+    spaceInfo.poseInActionSpace.orientation.w = 1.0f;
+    XR_CHECK(xrCreateActionSpace(app.session, &spaceInfo, &in.aimSpace));
+
+    XrSessionActionSetsAttachInfo attachInfo{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
+    attachInfo.countActionSets = 1;
+    attachInfo.actionSets = &in.actionSet;
+    XR_CHECK(xrAttachSessionActionSets(app.session, &attachInfo));
+    LOGI("XR input: brush action set attached");
+}
+
+void syncXrInput(App& app, XrTime displayTime)
+{
+    XrInput& in = app.input;
+
+    XrActiveActionSet active{in.actionSet, XR_NULL_PATH};
+    XrActionsSyncInfo syncInfo{XR_TYPE_ACTIONS_SYNC_INFO};
+    syncInfo.countActiveActionSets = 1;
+    syncInfo.activeActionSets = &active;
+    // XR_SESSION_NOT_FOCUSED is normal (system menu up etc.) - inputs just
+    // read inactive this frame.
+    XrResult syncResult = xrSyncActions(app.session, &syncInfo);
+    if (XR_FAILED(syncResult)) {
+        LOGE("xrSyncActions failed: %d", syncResult);
+    }
+
+    auto getFloat = [&](XrAction action) {
+        XrActionStateGetInfo gi{XR_TYPE_ACTION_STATE_GET_INFO};
+        gi.action = action;
+        XrActionStateFloat s{XR_TYPE_ACTION_STATE_FLOAT};
+        XR_CHECK(xrGetActionStateFloat(app.session, &gi, &s));
+        return s.isActive ? s.currentState : 0.0f;
+    };
+    auto getPressedEdge = [&](XrAction action) {
+        XrActionStateGetInfo gi{XR_TYPE_ACTION_STATE_GET_INFO};
+        gi.action = action;
+        XrActionStateBoolean s{XR_TYPE_ACTION_STATE_BOOLEAN};
+        XR_CHECK(xrGetActionStateBoolean(app.session, &gi, &s));
+        return s.isActive && s.currentState && s.changedSinceLastSync;
+    };
+    auto getVec2 = [&](XrAction action) {
+        XrActionStateGetInfo gi{XR_TYPE_ACTION_STATE_GET_INFO};
+        gi.action = action;
+        XrActionStateVector2f s{XR_TYPE_ACTION_STATE_VECTOR2F};
+        XR_CHECK(xrGetActionStateVector2f(app.session, &gi, &s));
+        return s.isActive ? glm::vec2(s.currentState.x, s.currentState.y) : glm::vec2(0.0f);
+    };
+
+    // Analog buttons with hysteresis so held strokes don't flicker.
+    const float drawValue = getFloat(in.drawTrigger);
+    in.drawDown = drawValue > (in.drawDown ? 0.35f : 0.6f);
+    const float eraseValue = getFloat(in.eraseSqueeze);
+    in.eraseDown = eraseValue > (in.eraseDown ? 0.35f : 0.6f);
+    in.recolorDown = getFloat(in.recolorTrigger) > 0.5f;
+
+    in.shapePressed = getPressedEdge(in.shapeButton);
+    in.emissivePressed = getPressedEdge(in.emissiveButton);
+    in.clearPressed = getPressedEdge(in.clearButton);
+    in.stickR = getVec2(in.stickRight);
+    in.stickL = getVec2(in.stickLeft);
+
+    XrSpaceLocation location{XR_TYPE_SPACE_LOCATION};
+    XR_CHECK(xrLocateSpace(in.aimSpace, app.localSpace, displayTime, &location));
+    const XrSpaceLocationFlags needed =
+        XR_SPACE_LOCATION_POSITION_VALID_BIT | XR_SPACE_LOCATION_ORIENTATION_VALID_BIT;
+    in.aimValid = (location.locationFlags & needed) == needed;
+    if (in.aimValid) {
+        in.aimPos = glm::vec3(location.pose.position.x, location.pose.position.y, location.pose.position.z);
+        in.aimRot = glm::quat(location.pose.orientation.w, location.pose.orientation.x,
+                              location.pose.orientation.y, location.pose.orientation.z);
+    }
+
+    // Once-a-second input diagnostics until Phase 3 is proven.
+    static int diagCounter = 0;
+    if (++diagCounter >= 72) {
+        diagCounter = 0;
+        XrActionStateGetInfo gi{XR_TYPE_ACTION_STATE_GET_INFO};
+        gi.action = in.drawTrigger;
+        XrActionStateFloat trig{XR_TYPE_ACTION_STATE_FLOAT};
+        xrGetActionStateFloat(app.session, &gi, &trig);
+
+        XrPath rightHand = XR_NULL_PATH;
+        xrStringToPath(app.xrInstance, "/user/hand/right", &rightHand);
+        XrInteractionProfileState profile{XR_TYPE_INTERACTION_PROFILE_STATE};
+        xrGetCurrentInteractionProfile(app.session, rightHand, &profile);
+        char profileName[XR_MAX_PATH_LENGTH] = "none";
+        if (profile.interactionProfile != XR_NULL_PATH) {
+            uint32_t len = 0;
+            xrPathToString(app.xrInstance, profile.interactionProfile, sizeof(profileName), &len, profileName);
+        }
+        LOGI("input: sync=%d profile=%s trigActive=%d trig=%.2f aimValid=%d aim=(%.2f %.2f %.2f) state=%d",
+             syncResult, profileName, trig.isActive ? 1 : 0, trig.currentState,
+             in.aimValid ? 1 : 0, in.aimPos.x, in.aimPos.y, in.aimPos.z, app.sessionState);
+        if (gEngineForDiag) {
+            const SdfVolumeStats& s = gEngineForDiag->sdfEditor->volume.stats;
+            LOGI("atlas: tail=%d free=%d used=%d capacity=%d (%.0f%%)",
+                 s.tailBricks, s.freeBricks, s.usedBricks, s.capacityBricks, s.usage * 100.0f);
+        }
+    }
+}
+
 // -------------------------------------------------------- engine bring-up ---
 // Mirrors main.cpp's initVulkan() wiring, with the Assimp-loaded cube mesh
 // replaced by a procedural one (the brick proxy expects positions -2..+2,
@@ -513,7 +708,8 @@ void initEngineScene(App& app, Engine& eng)
     eng.sdfEditor = new SdfEditor(eng.ctx);
     eng.scene->SBOs.push_back(eng.sdfEditor->computeSBO);
     eng.scene->brush = &eng.sdfEditor->brush;
-    eng.sdfEditor->brushInput = new ScriptedBrushInput();
+    eng.scene->sdfStats = &eng.sdfEditor->volume.stats; // HUD source
+    eng.sdfEditor->brushInput = new QuestBrushInput(&app.input, &kWorldToStage);
 
     // Volumetric material: placeholder 1x1x1 3D texture (same as desktop).
     eng.scene->ptextures.push_back(base->vbuffer->createTexture3DGeneral(1, 1, 1));
@@ -533,9 +729,12 @@ void initEngineScene(App& app, Engine& eng)
         eng.scene->SBOs[0][5]
     };
     base->vbuffer->updateIndirectInstanceList(eng.scene->meshes[0], {});
+    // Brush indicator: same as desktop - the post-process pass overlays the
+    // shape outline + surface footprint, depth-tested against the scene.
 
     eng.scene->createSceneDescriptor();
     eng.scene->renderPass(); // record per-image command buffers (incl. XR copy)
+    gEngineForDiag = &eng;
     LOGI("Engine scene ready");
 }
 
@@ -627,6 +826,8 @@ void renderFrame(App& app, Engine& eng)
     endInfo.displayTime = frameState.predictedDisplayTime;
     endInfo.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
 
+    syncXrInput(app, frameState.predictedDisplayTime);
+
     if (frameState.shouldRender) {
         XrViewLocateInfo locateInfo{XR_TYPE_VIEW_LOCATE_INFO};
         locateInfo.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
@@ -648,7 +849,23 @@ void renderFrame(App& app, Engine& eng)
             VK_CHECK(vkWaitForFences(app.device, 1, &app.lastSubmittedFence, VK_TRUE, UINT64_MAX));
         }
 
+        // Safe spot for CPU writes to the SDF buffers: GPU is idle here.
+        if (app.input.clearPressed) {
+            eng.sdfEditor->clearScene();
+            LOGI("Scene cleared");
+        }
+
         updateCameraFromXr(eng, views);
+
+        const float dt = (app.lastFrameTimeSec >= 0.0f) ? (timeSec - app.lastFrameTimeSec) : 0.0f;
+        app.lastFrameTimeSec = timeSec;
+
+        // Smoothed fps for the HUD (Scene::fps feeds the post-pass digits).
+        if (dt > 0.0f) {
+            const float inst = 1.0f / dt;
+            eng.scene->fps = (eng.scene->fps <= 0.0f) ? inst : glm::mix(eng.scene->fps, inst, 0.05f);
+        }
+
         eng.scene->update(timeSec); // maps frame UBOs; records cmd bufs once
 
         uint32_t imageIndex = 0;
@@ -690,8 +907,6 @@ void renderFrame(App& app, Engine& eng)
     XR_CHECK(xrEndFrame(app.session, &endInfo));
 
     if (frameState.shouldRender) {
-        // Brush color cycles while the scripted stroke runs.
-        eng.sdfEditor->brush.color = glm::vec4(hsv2rgb(std::fmod(timeSec * 0.12f, 1.0f), 0.85f, 1.0f), 1.0f);
         // Compute (brush stamps + draw-list rebuild) after submission,
         // mirroring the desktop frame order (clines->update after present).
         eng.sdfEditor->update(timeSec);
@@ -766,12 +981,13 @@ void android_main(android_app* androidApp)
     androidApp->userData = &app;
     androidApp->onAppCmd = onAppCmd;
 
-    LOGI("BakeItQuest starting (Phase 2: SDF brick renderer)");
+    LOGI("BakeItQuest starting (Phase 3: controller sculpting)");
     try {
         extractShaderAssets(androidApp);
         createXrInstance(app);
         initEngineVulkan(app, eng);
         createSessionAndSwapchain(app);
+        createXrInput(app);
         initEngineScene(app, eng);
     } catch (const std::exception& e) {
         LOGE("Engine init failed: %s", e.what());
