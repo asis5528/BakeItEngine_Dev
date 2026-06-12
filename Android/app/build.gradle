@@ -2,9 +2,30 @@ plugins {
     id 'com.android.application'
 }
 
+// Precompiled SPIR-V from the engine tree, packaged as APK assets. The app
+// extracts them to internal storage at startup and chdir()s there, so the
+// engine's relative "shaders/..." paths work unchanged. Run the desktop
+// engine (or compile.bat) first so the .spv files exist.
+def engineShaderDir = file("$rootDir/../Source/shaders")
+def generatedAssetDir = file("$buildDir/bakeitAssets")
+
+tasks.register('syncEngineShaders', Copy) {
+    from(engineShaderDir) {
+        include '**/*.spv'
+    }
+    into "$generatedAssetDir/shaders"
+}
+preBuild.dependsOn 'syncEngineShaders'
+
 android {
     namespace 'com.bakeit.questdemo'
     compileSdk 34
+
+    sourceSets {
+        main {
+            assets.srcDirs += generatedAssetDir
+        }
+    }
 
     defaultConfig {
         applicationId 'com.bakeit.questdemo'

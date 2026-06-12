@@ -1,25 +1,49 @@
-// BakeIt Quest - Phase 1 skeleton.
+// BakeIt Quest - Phase 2: the engine's SDF brick renderer on device.
 //
-// Boots OpenXR on the headset, creates the Vulkan instance/device THROUGH
-// OpenXR (XR_KHR_vulkan_enable2 - the same contract Source/Core/Vulkan/
-// VulkanPlatformHooks.h injects into VulkanBase), runs the XR frame loop and
-// clears both eyes to an animated color. If you see the color cycling in the
-// headset, every layer below the engine is proven: loader, session, Vulkan
-// device, swapchain, frame timing, composition.
+// OpenXR owns the frame loop and the Vulkan instance/device (created through
+// XR_KHR_vulkan_enable2 via VulkanPlatformHooks - the seam VulkanBase
+// exposes). The engine core (Core/World/Render/Features) is compiled in
+// unchanged: Renderer records the offscreen scene pass with true multiview
+// (both eyes in one pass) and ends each command buffer with a copy into the
+// matching XrSwapchain image. A scripted BrushInputSource stamps a demo
+// sculpture through the exact same SdfEditor path the desktop brush uses -
+// Phase 3 swaps it for OpenXR controller actions.
 //
-// Phase 2 replaces the clear with the brick renderer (multiview, one
-// arraySize=2 swapchain - matching the engine's view[2]/proj[2] layout).
+// Shader .spv files ship as APK assets, are extracted to internal storage at
+// startup, and chdir() makes the engine's relative "shaders/..." paths work
+// untouched.
 
 #include <android_native_app_glue.h>
 #include <android/log.h>
+#include <android/asset_manager.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+// Engine headers first: Platform/Platform.h keys off __ANDROID__, VulkanBase
+// pulls <vulkan/vulkan.h> (no GLFW on this platform).
+#include "Platform/Platform.h"
+#include "Core/Vulkan/VulkanBase.h"
+#include "Core/Resources/ResourceManager.h"
+#include "World/Scene.h"
+#include "World/Camera/Camera.h"
+#include "Render/Renderer.h"
+#include "Features/Sdf/Edit/SdfEditor.h"
+#include "Features/Sdf/Edit/BrushInputSource.h"
+#include "EngineContext.h"
+
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 // XR_USE_PLATFORM_ANDROID / XR_USE_GRAPHICS_API_VULKAN come from CMakeLists.
-#include <vulkan/vulkan.h>
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
 
 #include <cmath>
+#include <cstdio>
 #include <cstring>
+#include <exception>
+#include <string>
 #include <vector>
 
 #define LOG_TAG "BakeItQuest"
@@ -46,6 +70,11 @@
 
 namespace {
 
+// Engine world -> XR LOCAL space. LOCAL's origin sits at the headset's pose
+// when the session starts (eye level, not the floor!), so the ~1m SDF chunk
+// around the world origin goes slightly below eye height and ~0.75m forward.
+const glm::vec3 kWorldToStage(0.0f, -0.15f, -0.75f);
+
 struct App
 {
     android_app* androidApp = nullptr;
@@ -58,32 +87,151 @@ struct App
     bool sessionRunning = false;
     XrSessionState sessionState = XR_SESSION_STATE_UNKNOWN;
 
+    // Vulkan handles mirror VulkanBase's (engine owns them; these are for the
+    // XR binding and frame submission).
     VkInstance vkInstance = VK_NULL_HANDLE;
     VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
     VkDevice device = VK_NULL_HANDLE;
     uint32_t queueFamily = 0;
     VkQueue queue = VK_NULL_HANDLE;
-    VkCommandPool commandPool = VK_NULL_HANDLE;
-    VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
-    VkFence fence = VK_NULL_HANDLE;
 
-    // One swapchain, arraySize = 2 (left/right eye) - same layout the
-    // engine's multiview renderer wants in Phase 2.
+    // One swapchain, arraySize = 2 (left/right eye) - the engine renders both
+    // layers in one multiview pass and copies into these images.
     XrSwapchain swapchain = XR_NULL_HANDLE;
     int32_t swapchainWidth = 0;
     int32_t swapchainHeight = 0;
     VkFormat swapchainFormat = VK_FORMAT_UNDEFINED;
     std::vector<XrSwapchainImageVulkan2KHR> swapchainImages;
+    std::vector<VkFence> frameFences; // per swapchain image, created signaled
+    VkFence lastSubmittedFence = VK_NULL_HANDLE;
 
-    float timeSeconds = 0.0f;
+    bool haveBaseTime = false;
+    XrTime baseTime = 0;
 };
+
+// The engine, wired the same way main.cpp wires it on desktop (minus
+// ImGui/Assimp/PostProcess - see Source/Platform/Platform.h).
+struct Engine
+{
+    VulkanBase* base = nullptr;
+    Scene* scene = nullptr;
+    Renderer* renderer = nullptr;
+    Camera camera;
+    EngineContext ctx;
+    SdfEditor* sdfEditor = nullptr;
+};
+
+// ------------------------------------------------------------- demo brush ---
+// Platform-free brush intents (the same contract DesktopBrushInput fulfills
+// with the mouse). Scripted for Phase 2: grow the brush, then sweep a spiral
+// of smooth-union sphere stamps through SdfEditor's standard stroke path.
+// Phase 3 replaces this with OpenXR controller aim + trigger.
+class ScriptedBrushInput : public BrushInputSource
+{
+public:
+    BrushInput poll() override
+    {
+        BrushInput in{};
+        in.rayOrigin = glm::vec3(0.0f, 1.0f, 0.0f);
+        in.rayDir = glm::vec3(0.0f, -1.0f, 0.0f);
+        const int f = frame++;
+        // Strictly increasing cursor so every held frame passes the
+        // moved-enough stroke gate.
+        in.strokeCursor = glm::dvec2(f * 10.0, 0.0);
+
+        if (f == 0) {
+            in.shapeTogglePressed = true; // cube -> sphere
+            return in;
+        }
+        if (f < 60) {
+            // Grow the brush to chunky but still crisp settings: big radius,
+            // smoothness near the desktop default (cranking it to the cap
+            // melts the field and mushes the normals).
+            in.interactionAllowed = true;
+            in.radiusDelta = 6.0f;     // +0.0006/frame -> ~0.045 total
+            in.smoothnessDelta = 0.1f; // -> ~0.0016
+            return in;
+        }
+        if (f < 420) {
+            // Descending spiral: rays aim straight down from an orbiting
+            // origin (no inward tilt - it would cancel the orbit radius by
+            // stamp depth), radius tightening while the brush distance grows.
+            in.interactionAllowed = true;
+            in.drawDown = true;
+            const float s = float(f - 60);
+            const float t = s * 0.035f;            // ~2 turns over the stroke
+            const float r = 0.30f - 0.00045f * s;  // 0.30 -> 0.14
+            in.rayOrigin = glm::vec3(r * std::cos(t) - 0.035f, 1.2f, r * std::sin(t) - 0.035f);
+            in.rayDir = glm::vec3(0.0f, -1.0f, 0.0f);
+            in.distanceDelta = 0.35f;              // sink deeper each stamp
+            return in;
+        }
+        return in; // sculpture done: render-only
+    }
+
+    int frame = 0;
+};
+
+glm::vec3 hsv2rgb(float h, float s, float v)
+{
+    const float c = v * s;
+    const float x = c * (1.0f - std::fabs(std::fmod(h * 6.0f, 2.0f) - 1.0f));
+    const float m = v - c;
+    glm::vec3 rgb;
+    if (h < 1.0f / 6.0f) rgb = glm::vec3(c, x, 0.0f);
+    else if (h < 2.0f / 6.0f) rgb = glm::vec3(x, c, 0.0f);
+    else if (h < 3.0f / 6.0f) rgb = glm::vec3(0.0f, c, x);
+    else if (h < 4.0f / 6.0f) rgb = glm::vec3(0.0f, x, c);
+    else if (h < 5.0f / 6.0f) rgb = glm::vec3(x, 0.0f, c);
+    else rgb = glm::vec3(c, 0.0f, x);
+    return rgb + glm::vec3(m);
+}
+
+// ------------------------------------------------------------------ assets ---
+
+void extractShaderAssets(android_app* androidApp)
+{
+    AAssetManager* mgr = androidApp->activity->assetManager;
+    const std::string root = androidApp->activity->internalDataPath;
+
+    // AAssetDir lists files only (no recursion); the shader tree's subdirs
+    // are fixed, so walk them explicitly.
+    const char* dirs[] = { "shaders", "shaders/Sdf", "shaders/World", "shaders/Render", "shaders/Fluid" };
+
+    int extracted = 0;
+    for (const char* d : dirs) {
+        const std::string outDir = root + "/" + d;
+        mkdir(outDir.c_str(), 0755);
+        AAssetDir* dir = AAssetManager_openDir(mgr, d);
+        if (!dir) continue;
+        const char* name = nullptr;
+        while ((name = AAssetDir_getNextFileName(dir)) != nullptr) {
+            const std::string rel = std::string(d) + "/" + name;
+            AAsset* asset = AAssetManager_open(mgr, rel.c_str(), AASSET_MODE_BUFFER);
+            if (!asset) continue;
+            const void* data = AAsset_getBuffer(asset);
+            const size_t len = static_cast<size_t>(AAsset_getLength(asset));
+            const std::string outPath = root + "/" + rel;
+            if (FILE* f = std::fopen(outPath.c_str(), "wb")) {
+                std::fwrite(data, 1, len, f);
+                std::fclose(f);
+                ++extracted;
+            }
+            AAsset_close(asset);
+        }
+        AAssetDir_close(dir);
+    }
+
+    // From here on the engine's relative paths ("shaders/Sdf/SdfBrushCS.spv")
+    // resolve exactly like they do with Source/ as the working dir on desktop.
+    chdir(root.c_str());
+    LOGI("Extracted %d shader assets to %s", extracted, root.c_str());
+}
 
 // ---------------------------------------------------------------- OpenXR ---
 
 void createXrInstance(App& app)
 {
-    // The Android loader must be initialized with the app context before any
-    // other OpenXR call.
     PFN_xrInitializeLoaderKHR initializeLoader = nullptr;
     XR_CHECK(xrGetInstanceProcAddr(XR_NULL_HANDLE, "xrInitializeLoaderKHR",
                                    reinterpret_cast<PFN_xrVoidFunction*>(&initializeLoader)));
@@ -121,97 +269,82 @@ void createXrInstance(App& app)
     LOGI("OpenXR system: %s", props.systemName);
 }
 
-// ---------------------------------------------------------------- Vulkan ---
-// Created THROUGH OpenXR: the runtime wraps instance/device creation and
-// dictates the physical device. This mirrors VulkanPlatformHooks on desktop.
+// -------------------------------------------------- Vulkan via VulkanBase ---
+// The engine's VulkanBase drives creation; the hooks reroute the actual
+// instance/device calls through the OpenXR runtime (XR_KHR_vulkan_enable2).
 
-void createVulkanViaXr(App& app)
+void initEngineVulkan(App& app, Engine& eng)
 {
-    // Mandatory before session creation.
+    // Spec: must be called once before xrCreateVulkanInstanceKHR.
     PFN_xrGetVulkanGraphicsRequirements2KHR getRequirements = nullptr;
     XR_CHECK(xrGetInstanceProcAddr(app.xrInstance, "xrGetVulkanGraphicsRequirements2KHR",
                                    reinterpret_cast<PFN_xrVoidFunction*>(&getRequirements)));
     XrGraphicsRequirementsVulkan2KHR requirements{XR_TYPE_GRAPHICS_REQUIREMENTS_VULKAN2_KHR};
     XR_CHECK(getRequirements(app.xrInstance, app.systemId, &requirements));
 
-    VkApplicationInfo appInfo{VK_STRUCTURE_TYPE_APPLICATION_INFO};
-    appInfo.pApplicationName = "BakeItQuest";
-    appInfo.pEngineName = "BakeItEngine";
-    appInfo.apiVersion = VK_API_VERSION_1_1; // multiview is core in 1.1
+    eng.base = new VulkanBase();
+    VulkanPlatformHooks& hooks = eng.base->platformHooks;
+    App* appPtr = &app;
 
-    VkInstanceCreateInfo instanceInfo{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
-    instanceInfo.pApplicationInfo = &appInfo;
+    hooks.createInstance = [appPtr](const VkInstanceCreateInfo& ci, VkInstance& out) -> VkResult {
+        PFN_xrCreateVulkanInstanceKHR createVkInstance = nullptr;
+        XR_CHECK(xrGetInstanceProcAddr(appPtr->xrInstance, "xrCreateVulkanInstanceKHR",
+                                       reinterpret_cast<PFN_xrVoidFunction*>(&createVkInstance)));
+        XrVulkanInstanceCreateInfoKHR xrInfo{XR_TYPE_VULKAN_INSTANCE_CREATE_INFO_KHR};
+        xrInfo.systemId = appPtr->systemId;
+        xrInfo.pfnGetInstanceProcAddr = vkGetInstanceProcAddr;
+        xrInfo.vulkanCreateInfo = &ci;
+        VkResult vkResult = VK_SUCCESS;
+        XR_CHECK(createVkInstance(appPtr->xrInstance, &xrInfo, &out, &vkResult));
+        return vkResult;
+    };
 
-    PFN_xrCreateVulkanInstanceKHR createVkInstance = nullptr;
-    XR_CHECK(xrGetInstanceProcAddr(app.xrInstance, "xrCreateVulkanInstanceKHR",
-                                   reinterpret_cast<PFN_xrVoidFunction*>(&createVkInstance)));
-    XrVulkanInstanceCreateInfoKHR xrInstanceInfo{XR_TYPE_VULKAN_INSTANCE_CREATE_INFO_KHR};
-    xrInstanceInfo.systemId = app.systemId;
-    xrInstanceInfo.pfnGetInstanceProcAddr = vkGetInstanceProcAddr;
-    xrInstanceInfo.vulkanCreateInfo = &instanceInfo;
-    VkResult vkResult = VK_SUCCESS;
-    XR_CHECK(createVkInstance(app.xrInstance, &xrInstanceInfo, &app.vkInstance, &vkResult));
-    VK_CHECK(vkResult);
+    hooks.pickPhysicalDevice = [appPtr](VkInstance instance) -> VkPhysicalDevice {
+        PFN_xrGetVulkanGraphicsDevice2KHR getDevice = nullptr;
+        XR_CHECK(xrGetInstanceProcAddr(appPtr->xrInstance, "xrGetVulkanGraphicsDevice2KHR",
+                                       reinterpret_cast<PFN_xrVoidFunction*>(&getDevice)));
+        XrVulkanGraphicsDeviceGetInfoKHR getInfo{XR_TYPE_VULKAN_GRAPHICS_DEVICE_GET_INFO_KHR};
+        getInfo.systemId = appPtr->systemId;
+        getInfo.vulkanInstance = instance;
+        VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
+        XR_CHECK(getDevice(appPtr->xrInstance, &getInfo, &physicalDevice));
+        return physicalDevice;
+    };
 
-    PFN_xrGetVulkanGraphicsDevice2KHR getDevice = nullptr;
-    XR_CHECK(xrGetInstanceProcAddr(app.xrInstance, "xrGetVulkanGraphicsDevice2KHR",
-                                   reinterpret_cast<PFN_xrVoidFunction*>(&getDevice)));
-    XrVulkanGraphicsDeviceGetInfoKHR deviceGetInfo{XR_TYPE_VULKAN_GRAPHICS_DEVICE_GET_INFO_KHR};
-    deviceGetInfo.systemId = app.systemId;
-    deviceGetInfo.vulkanInstance = app.vkInstance;
-    XR_CHECK(getDevice(app.xrInstance, &deviceGetInfo, &app.physicalDevice));
+    hooks.createDevice = [appPtr](VkPhysicalDevice physicalDevice, const VkDeviceCreateInfo& ci, VkDevice& out) -> VkResult {
+        PFN_xrCreateVulkanDeviceKHR createVkDevice = nullptr;
+        XR_CHECK(xrGetInstanceProcAddr(appPtr->xrInstance, "xrCreateVulkanDeviceKHR",
+                                       reinterpret_cast<PFN_xrVoidFunction*>(&createVkDevice)));
+        XrVulkanDeviceCreateInfoKHR xrInfo{XR_TYPE_VULKAN_DEVICE_CREATE_INFO_KHR};
+        xrInfo.systemId = appPtr->systemId;
+        xrInfo.pfnGetInstanceProcAddr = vkGetInstanceProcAddr;
+        xrInfo.vulkanPhysicalDevice = physicalDevice;
+        xrInfo.vulkanCreateInfo = &ci;
+        VkResult vkResult = VK_SUCCESS;
+        XR_CHECK(createVkDevice(appPtr->xrInstance, &xrInfo, &out, &vkResult));
+        return vkResult;
+    };
 
-    uint32_t familyCount = 0;
-    vkGetPhysicalDeviceQueueFamilyProperties(app.physicalDevice, &familyCount, nullptr);
-    std::vector<VkQueueFamilyProperties> families(familyCount);
-    vkGetPhysicalDeviceQueueFamilyProperties(app.physicalDevice, &familyCount, families.data());
-    for (uint32_t i = 0; i < familyCount; ++i) {
-        if (families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
-            app.queueFamily = i;
-            break;
-        }
-    }
+    // Desktop list minus VK_KHR_swapchain (the XrSwapchain provides images).
+    hooks.deviceExtensionOverride = {
+        VK_KHR_MULTIVIEW_EXTENSION_NAME,
+        VK_KHR_MAINTENANCE2_EXTENSION_NAME,
+        VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME,
+        VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME,
+    };
 
-    float priority = 1.0f;
-    VkDeviceQueueCreateInfo queueInfo{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
-    queueInfo.queueFamilyIndex = app.queueFamily;
-    queueInfo.queueCount = 1;
-    queueInfo.pQueuePriorities = &priority;
+    eng.base->init(nullptr);
 
-    VkPhysicalDeviceMultiviewFeatures multiview{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES};
-    multiview.multiview = VK_TRUE;
+    app.vkInstance = eng.base->vkinstance;
+    app.physicalDevice = eng.base->vkPhysicalDevice;
+    app.device = eng.base->device;
+    app.queueFamily = eng.base->vulkandevice->queueID;
+    app.queue = eng.base->queue;
 
-    VkDeviceCreateInfo deviceInfo{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
-    deviceInfo.pNext = &multiview;
-    deviceInfo.queueCreateInfoCount = 1;
-    deviceInfo.pQueueCreateInfos = &queueInfo;
-
-    PFN_xrCreateVulkanDeviceKHR createVkDevice = nullptr;
-    XR_CHECK(xrGetInstanceProcAddr(app.xrInstance, "xrCreateVulkanDeviceKHR",
-                                   reinterpret_cast<PFN_xrVoidFunction*>(&createVkDevice)));
-    XrVulkanDeviceCreateInfoKHR xrDeviceInfo{XR_TYPE_VULKAN_DEVICE_CREATE_INFO_KHR};
-    xrDeviceInfo.systemId = app.systemId;
-    xrDeviceInfo.pfnGetInstanceProcAddr = vkGetInstanceProcAddr;
-    xrDeviceInfo.vulkanPhysicalDevice = app.physicalDevice;
-    xrDeviceInfo.vulkanCreateInfo = &deviceInfo;
-    XR_CHECK(createVkDevice(app.xrInstance, &xrDeviceInfo, &app.device, &vkResult));
-    VK_CHECK(vkResult);
-
-    vkGetDeviceQueue(app.device, app.queueFamily, 0, &app.queue);
-
-    VkCommandPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
-    poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    poolInfo.queueFamilyIndex = app.queueFamily;
-    VK_CHECK(vkCreateCommandPool(app.device, &poolInfo, nullptr, &app.commandPool));
-
-    VkCommandBufferAllocateInfo allocInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-    allocInfo.commandPool = app.commandPool;
-    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandBufferCount = 1;
-    VK_CHECK(vkAllocateCommandBuffers(app.device, &allocInfo, &app.commandBuffer));
-
-    VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-    VK_CHECK(vkCreateFence(app.device, &fenceInfo, nullptr, &app.fence));
+    VkPhysicalDeviceProperties props{};
+    vkGetPhysicalDeviceProperties(app.physicalDevice, &props);
+    LOGI("Engine Vulkan device created through OpenXR: %s, maxStorageBufferRange %u MB",
+         props.deviceName, props.limits.maxStorageBufferRange / (1024u * 1024u));
 }
 
 // --------------------------------------------------- session + swapchain ---
@@ -264,7 +397,7 @@ void createSessionAndSwapchain(App& app)
     swapchainInfo.width = static_cast<uint32_t>(app.swapchainWidth);
     swapchainInfo.height = static_cast<uint32_t>(app.swapchainHeight);
     swapchainInfo.faceCount = 1;
-    swapchainInfo.arraySize = 2; // both eyes in one array image (multiview-ready)
+    swapchainInfo.arraySize = 2; // both eyes in one array image (multiview)
     swapchainInfo.mipCount = 1;
     XR_CHECK(xrCreateSwapchain(app.session, &swapchainInfo, &app.swapchain));
 
@@ -275,63 +408,201 @@ void createSessionAndSwapchain(App& app)
         app.swapchain, imageCount, &imageCount,
         reinterpret_cast<XrSwapchainImageBaseHeader*>(app.swapchainImages.data())));
     LOGI("Swapchain: %u images, format %d", imageCount, app.swapchainFormat);
+
+    app.frameFences.resize(imageCount);
+    for (uint32_t i = 0; i < imageCount; ++i) {
+        VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+        fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+        VK_CHECK(vkCreateFence(app.device, &fenceInfo, nullptr, &app.frameFences[i]));
+    }
+}
+
+// -------------------------------------------------------- engine bring-up ---
+// Mirrors main.cpp's initVulkan() wiring, with the Assimp-loaded cube mesh
+// replaced by a procedural one (the brick proxy expects positions -2..+2,
+// SdfBrickVS converts to the centered unit cube).
+
+void initEngineScene(App& app, Engine& eng)
+{
+    VulkanBase* base = eng.base;
+    VulkanPlatformHooks& hooks = base->platformHooks;
+
+    hooks.presentExtentOverride = { static_cast<uint32_t>(app.swapchainWidth),
+                                    static_cast<uint32_t>(app.swapchainHeight) };
+    // Offscreen scene target is UNORM to match the desktop swapchain
+    // (B8G8R8A8_UNORM): shaders write raw values there and the monitor
+    // displays them as sRGB. Copying those raw bits into the sRGB XR
+    // swapchain image makes the compositor interpret them the same way -
+    // rendering with an sRGB attachment instead would re-encode on write
+    // and wash all colors out.
+    hooks.presentFormatOverride = VK_FORMAT_R8G8B8A8_UNORM;
+    hooks.presentImageCount = static_cast<uint32_t>(app.swapchainImages.size());
+    hooks.presentImages.clear();
+    for (const XrSwapchainImageVulkan2KHR& image : app.swapchainImages) {
+        hooks.presentImages.push_back(image.image);
+    }
+    base->createCommandBuffers();
+
+    ResourceManager::setVulkanBase(base);
+
+    eng.scene = new Scene(base);
+    eng.renderer = new Renderer(base);
+    eng.scene->renderer = eng.renderer;
+    eng.scene->camera = &eng.camera;
+    eng.scene->input = nullptr; // no desktop input on this platform
+    eng.camera.viewportResolution = glm::vec2(float(app.swapchainWidth), float(app.swapchainHeight));
+
+    eng.ctx.base = base;
+    eng.ctx.scene = eng.scene;
+    eng.ctx.renderer = eng.renderer;
+    eng.ctx.camera = &eng.camera;
+    eng.ctx.input = nullptr;
+
+    eng.scene->init(); // framebuffer (multiview) + the 5 scene pipelines
+
+    // Procedural brick-proxy cube, positions -2..+2 (what SdfBrickVS expects).
+    Mesh mesh{};
+    const float h = 2.0f;
+    const glm::vec3 corners[8] = {
+        {-h,-h,-h}, { h,-h,-h}, { h, h,-h}, {-h, h,-h},
+        {-h,-h, h}, { h,-h, h}, { h, h, h}, {-h, h, h},
+    };
+    for (const glm::vec3& c : corners) {
+        Vertex v{};
+        v.pos = c;
+        v.normal = glm::normalize(c);
+        v.texCoord = glm::vec2(0.0f);
+        mesh.vertices.push_back(v);
+    }
+    // Winding chosen so the cube's NEAR faces survive the pipeline's
+    // back-face cull (under the engine's Vulkan-convention projection) -
+    // SdfBrickFS declares layout(depth_greater), which is only valid when
+    // marching starts at the near face. Wrong-side rasterization breaks the
+    // depth contract and Adreno's LRZ turns silhouettes into confetti.
+    mesh.indices = {
+        6,5,4, 4,7,6,  // +Z
+        3,0,1, 1,2,3,  // -Z
+        2,1,5, 5,6,2,  // +X
+        7,4,0, 0,3,7,  // -X
+        6,7,3, 3,2,6,  // +Y
+        0,4,5, 5,1,0,  // -Y
+    };
+    mesh.color = glm::vec4(1.0f);
+    mesh.texID = -1;
+    base->vbuffer->createVertexBuffer(mesh);
+    base->vbuffer->createIndexBuffer(mesh);
+    base->vbuffer->createInstanceIdBuffer(mesh, 64u * 64u * 64u);
+    eng.scene->meshes.push_back(mesh);
+
+    Object obj{};
+    obj.name = "SdfChunk";
+    obj.hasMesh = true;
+    obj.hasAnimation = false;
+    obj.textureID = 0;
+    obj.meshID.push_back(0);
+    obj.ModelMatrix = glm::mat4(1.0f);
+    obj.finalMatrix = glm::mat4(1.0f);
+    VulkanShader shader{};
+    shader.graphicsPipeline = eng.scene->pipelines[4]; // volumetric brick pipeline
+    shader.ubos = base->vbuffer->createUniformBuffers(shader.graphicsPipeline->bufferSize);
+    obj.shader.push_back(shader);
+    eng.scene->objects.push_back(obj);
+
+    // SdfEditor locates the editable mesh by the volumetric pipeline and
+    // builds the brick atlas + GPU draw list (same as desktop).
+    eng.sdfEditor = new SdfEditor(eng.ctx);
+    eng.scene->SBOs.push_back(eng.sdfEditor->computeSBO);
+    eng.scene->brush = &eng.sdfEditor->brush;
+    eng.sdfEditor->brushInput = new ScriptedBrushInput();
+
+    // Volumetric material: placeholder 1x1x1 3D texture (same as desktop).
+    eng.scene->ptextures.push_back(base->vbuffer->createTexture3DGeneral(1, 1, 1));
+    Material material{};
+    material.type = TexturedMaterial;
+    MaterialTexturedData* matData = new MaterialTexturedData();
+    matData->DiffuseTexture = 0;
+    material.materialData = matData;
+    eng.scene->materials.push_back(material);
+    eng.scene->meshes[0].matID = 0;
+
+    eng.scene->objects[0].shader[0].sbos = {
+        eng.scene->SBOs[0][0],
+        eng.scene->SBOs[0][1],
+        eng.scene->SBOs[0][2],
+        eng.scene->SBOs[0][3],
+        eng.scene->SBOs[0][5]
+    };
+    base->vbuffer->updateIndirectInstanceList(eng.scene->meshes[0], {});
+
+    eng.scene->createSceneDescriptor();
+    eng.scene->renderPass(); // record per-image command buffers (incl. XR copy)
+    LOGI("Engine scene ready");
 }
 
 // ------------------------------------------------------------ frame loop ---
 
-void renderClear(App& app, VkImage image)
+// Vulkan-convention projection (y down, depth 0..1, right-handed) from the
+// XR fov. Scene::update does NOT y-flip on this platform, and SdfEditor's
+// frustum culling uses the same matrix - conventions stay consistent.
+glm::mat4 projFromXrFov(const XrFovf& fov, float nearZ, float farZ)
 {
-    VK_CHECK(vkResetCommandBuffer(app.commandBuffer, 0));
-    VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    VK_CHECK(vkBeginCommandBuffer(app.commandBuffer, &begin));
+    const float tl = std::tan(fov.angleLeft);
+    const float tr = std::tan(fov.angleRight);
+    const float td = std::tan(fov.angleDown);
+    const float tu = std::tan(fov.angleUp);
 
-    VkImageSubresourceRange range{};
-    range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    range.levelCount = 1;
-    range.layerCount = 2;
-
-    VkImageMemoryBarrier toTransfer{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
-    toTransfer.srcAccessMask = 0;
-    toTransfer.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    toTransfer.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    toTransfer.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    toTransfer.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    toTransfer.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    toTransfer.image = image;
-    toTransfer.subresourceRange = range;
-    vkCmdPipelineBarrier(app.commandBuffer,
-                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         0, 0, nullptr, 0, nullptr, 1, &toTransfer);
-
-    // Animated clear so a frozen frame is distinguishable from success.
-    VkClearColorValue color{};
-    color.float32[0] = 0.5f + 0.5f * std::sin(app.timeSeconds * 0.9f);
-    color.float32[1] = 0.5f + 0.5f * std::sin(app.timeSeconds * 0.7f + 2.0f);
-    color.float32[2] = 0.5f + 0.5f * std::sin(app.timeSeconds * 1.1f + 4.0f);
-    color.float32[3] = 1.0f;
-    vkCmdClearColorImage(app.commandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &color, 1, &range);
-
-    VkImageMemoryBarrier toAttachment = toTransfer;
-    toAttachment.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    toAttachment.dstAccessMask = 0;
-    toAttachment.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    toAttachment.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    vkCmdPipelineBarrier(app.commandBuffer,
-                         VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-                         0, 0, nullptr, 0, nullptr, 1, &toAttachment);
-
-    VK_CHECK(vkEndCommandBuffer(app.commandBuffer));
-
-    VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
-    submit.commandBufferCount = 1;
-    submit.pCommandBuffers = &app.commandBuffer;
-    VK_CHECK(vkQueueSubmit(app.queue, 1, &submit, app.fence));
-    VK_CHECK(vkWaitForFences(app.device, 1, &app.fence, VK_TRUE, UINT64_MAX));
-    VK_CHECK(vkResetFences(app.device, 1, &app.fence));
+    glm::mat4 p(0.0f);
+    p[0][0] = 2.0f / (tr - tl);
+    p[2][0] = (tr + tl) / (tr - tl);
+    p[1][1] = -2.0f / (tu - td);
+    p[2][1] = -(tu + td) / (tu - td);
+    p[2][2] = farZ / (nearZ - farZ);
+    p[3][2] = -(farZ * nearZ) / (farZ - nearZ);
+    p[2][3] = -1.0f;
+    return p;
 }
 
-void renderFrame(App& app)
+void updateCameraFromXr(Engine& eng, const XrView views[2])
+{
+    const glm::mat4 stageFromWorld = glm::translate(glm::mat4(1.0f), kWorldToStage);
+    for (int e = 0; e < 2; ++e) {
+        const XrPosef& pose = views[e].pose;
+        const glm::quat q(pose.orientation.w, pose.orientation.x, pose.orientation.y, pose.orientation.z);
+        const glm::mat4 eyeToStage =
+            glm::translate(glm::mat4(1.0f), glm::vec3(pose.position.x, pose.position.y, pose.position.z)) *
+            glm::mat4_cast(q);
+        eng.camera.view[e] = glm::inverse(eyeToStage) * stageFromWorld;
+        eng.camera.proj[e] = projFromXrFov(views[e].fov, 0.05f, 100.0f);
+    }
+    // Combined-eye culling frustum for the GPU draw-list build: one frustum
+    // from the center-eye pose whose per-side fov is the wider of the two
+    // eyes, padded to absorb the eyes' positional (IPD) offset from the
+    // center. Without this, culling uses eye 0 only and bricks vanish at the
+    // right eye's temporal edge.
+    const glm::vec3 posL(views[0].pose.position.x, views[0].pose.position.y, views[0].pose.position.z);
+    const glm::vec3 posR(views[1].pose.position.x, views[1].pose.position.y, views[1].pose.position.z);
+    const glm::vec3 center = 0.5f * (posL + posR);
+    const XrPosef& headPose = views[0].pose; // eye orientations are identical
+    const glm::quat hq(headPose.orientation.w, headPose.orientation.x, headPose.orientation.y, headPose.orientation.z);
+    const glm::mat4 centerToStage = glm::translate(glm::mat4(1.0f), center) * glm::mat4_cast(hq);
+    eng.camera.cullView = glm::inverse(centerToStage) * glm::translate(glm::mat4(1.0f), kWorldToStage);
+
+    // ~11 deg of slack per side fully covers the half-IPD parallax for
+    // content farther than ~16cm from the face; closer than that a brick on
+    // the very edge of one eye could pop, which Phase 4 can refine.
+    const float kCullMarginRad = 0.2f;
+    XrFovf cullFov;
+    cullFov.angleLeft = std::min(views[0].fov.angleLeft, views[1].fov.angleLeft) - kCullMarginRad;
+    cullFov.angleRight = std::max(views[0].fov.angleRight, views[1].fov.angleRight) + kCullMarginRad;
+    cullFov.angleDown = std::min(views[0].fov.angleDown, views[1].fov.angleDown) - kCullMarginRad;
+    cullFov.angleUp = std::max(views[0].fov.angleUp, views[1].fov.angleUp) + kCullMarginRad;
+    eng.camera.cullProj = projFromXrFov(cullFov, 0.05f, 100.0f);
+
+    // World-space head center for draw-list sorting and brush distance.
+    eng.camera.position = center - kWorldToStage;
+}
+
+void renderFrame(App& app, Engine& eng)
 {
     XrFrameWaitInfo waitInfo{XR_TYPE_FRAME_WAIT_INFO};
     XrFrameState frameState{XR_TYPE_FRAME_STATE};
@@ -340,7 +611,11 @@ void renderFrame(App& app)
     XrFrameBeginInfo beginInfo{XR_TYPE_FRAME_BEGIN_INFO};
     XR_CHECK(xrBeginFrame(app.session, &beginInfo));
 
-    app.timeSeconds = static_cast<float>(frameState.predictedDisplayTime) * 1e-9f;
+    if (!app.haveBaseTime) {
+        app.baseTime = frameState.predictedDisplayTime;
+        app.haveBaseTime = true;
+    }
+    const float timeSec = static_cast<float>(frameState.predictedDisplayTime - app.baseTime) * 1e-9f;
 
     XrCompositionLayerProjection layer{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
     XrCompositionLayerProjectionView projViews[2] = {
@@ -362,6 +637,20 @@ void renderFrame(App& app)
         uint32_t viewCount = 0;
         XR_CHECK(xrLocateViews(app.session, &locateInfo, &viewState, 2, &viewCount, views));
 
+        // The per-object UBOs are single-buffered: Scene::update overwrites
+        // the matrices the in-flight command buffer is still reading, and on
+        // a tiled GPU that splits a frame between old and new head poses
+        // (tearing-like smears on rotation). Wait out the previous frame's
+        // GPU work before touching the UBOs - xrWaitFrame already paces us,
+        // so this costs almost nothing at 72Hz. (Proper per-frame UBO
+        // buffering is part of the Phase 4 perf pass.)
+        if (app.lastSubmittedFence != VK_NULL_HANDLE) {
+            VK_CHECK(vkWaitForFences(app.device, 1, &app.lastSubmittedFence, VK_TRUE, UINT64_MAX));
+        }
+
+        updateCameraFromXr(eng, views);
+        eng.scene->update(timeSec); // maps frame UBOs; records cmd bufs once
+
         uint32_t imageIndex = 0;
         XrSwapchainImageAcquireInfo acquireInfo{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
         XR_CHECK(xrAcquireSwapchainImage(app.swapchain, &acquireInfo, &imageIndex));
@@ -369,7 +658,16 @@ void renderFrame(App& app)
         imageWait.timeout = XR_INFINITE_DURATION;
         XR_CHECK(xrWaitSwapchainImage(app.swapchain, &imageWait));
 
-        renderClear(app, app.swapchainImages[imageIndex].image);
+        // Pre-recorded command buffer: multiview scene pass + copy into XR
+        // image i. Per-image fence keeps re-submission off in-flight buffers.
+        VkFence fence = app.frameFences[imageIndex];
+        VK_CHECK(vkWaitForFences(app.device, 1, &fence, VK_TRUE, UINT64_MAX));
+        VK_CHECK(vkResetFences(app.device, 1, &fence));
+        VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+        submit.commandBufferCount = 1;
+        submit.pCommandBuffers = &eng.base->commandBuffers[imageIndex];
+        VK_CHECK(vkQueueSubmit(app.queue, 1, &submit, fence));
+        app.lastSubmittedFence = fence;
 
         XrSwapchainImageReleaseInfo releaseInfo{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
         XR_CHECK(xrReleaseSwapchainImage(app.swapchain, &releaseInfo));
@@ -390,6 +688,14 @@ void renderFrame(App& app)
     }
 
     XR_CHECK(xrEndFrame(app.session, &endInfo));
+
+    if (frameState.shouldRender) {
+        // Brush color cycles while the scripted stroke runs.
+        eng.sdfEditor->brush.color = glm::vec4(hsv2rgb(std::fmod(timeSec * 0.12f, 1.0f), 0.85f, 1.0f), 1.0f);
+        // Compute (brush stamps + draw-list rebuild) after submission,
+        // mirroring the desktop frame order (clines->update after present).
+        eng.sdfEditor->update(timeSec);
+    }
 }
 
 // ---------------------------------------------------------------- events ---
@@ -455,14 +761,22 @@ void onAppCmd(android_app* androidApp, int32_t cmd)
 void android_main(android_app* androidApp)
 {
     App app;
+    Engine eng;
     app.androidApp = androidApp;
     androidApp->userData = &app;
     androidApp->onAppCmd = onAppCmd;
 
-    LOGI("BakeItQuest starting");
-    createXrInstance(app);
-    createVulkanViaXr(app);
-    createSessionAndSwapchain(app);
+    LOGI("BakeItQuest starting (Phase 2: SDF brick renderer)");
+    try {
+        extractShaderAssets(androidApp);
+        createXrInstance(app);
+        initEngineVulkan(app, eng);
+        createSessionAndSwapchain(app);
+        initEngineScene(app, eng);
+    } catch (const std::exception& e) {
+        LOGE("Engine init failed: %s", e.what());
+        std::abort();
+    }
 
     while (!androidApp->destroyRequested) {
         // Drain Android events; block while paused with no session running.
@@ -482,20 +796,23 @@ void android_main(android_app* androidApp)
         pollXrEvents(app);
 
         if (app.sessionRunning) {
-            renderFrame(app);
+            try {
+                renderFrame(app, eng);
+            } catch (const std::exception& e) {
+                LOGE("Frame failed: %s", e.what());
+                std::abort();
+            }
         }
     }
 
+    // Process teardown: the OS reclaims everything; just stop GPU work first
+    // so the runtime isn't mid-read when the heap unwinds.
     if (app.device != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(app.device);
     }
     if (app.swapchain != XR_NULL_HANDLE) xrDestroySwapchain(app.swapchain);
     if (app.localSpace != XR_NULL_HANDLE) xrDestroySpace(app.localSpace);
     if (app.session != XR_NULL_HANDLE) xrDestroySession(app.session);
-    if (app.fence != VK_NULL_HANDLE) vkDestroyFence(app.device, app.fence, nullptr);
-    if (app.commandPool != VK_NULL_HANDLE) vkDestroyCommandPool(app.device, app.commandPool, nullptr);
-    if (app.device != VK_NULL_HANDLE) vkDestroyDevice(app.device, nullptr);
-    if (app.vkInstance != VK_NULL_HANDLE) vkDestroyInstance(app.vkInstance, nullptr);
     if (app.xrInstance != XR_NULL_HANDLE) xrDestroyInstance(app.xrInstance);
     LOGI("BakeItQuest exiting");
 }
