@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Quest standalone: head-tracked VR device required. -->
+    <uses-feature android:name="android.hardware.vr.headtracking" android:required="true" android:version="1" />
+    <uses-feature android:name="android.hardware.vulkan.level" android:required="true" android:version="1" />
+
+    <application
+        android:label="BakeIt Quest"
+        android:hasCode="false"
+        android:allowBackup="false">
+
+        <meta-data android:name="com.oculus.supportedDevices" android:value="quest2|questpro|quest3" />
+
+        <activity
+            android:name="android.app.NativeActivity"
+            android:label="BakeIt Quest"
+            android:launchMode="singleTask"
+            android:screenOrientation="landscape"
+            android:excludeFromRecents="false"
+            android:resizeableActivity="false"
+            android:exported="true"
+            android:configChanges="screenSize|screenLayout|orientation|keyboardHidden|keyboard|navigation|uiMode|density">
+
+            <!-- Native entry point library: libbakeit_quest.so -->
+            <meta-data android:name="android.app.lib_name" android:value="bakeit_quest" />
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="com.oculus.intent.category.VR" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
