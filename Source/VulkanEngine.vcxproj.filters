@@ -145,6 +145,9 @@
     <ClCompile Include="Platform\Desktop\DesktopBrushInput.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Platform\Desktop\QuestDeploy.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="Features\Sdf\Edit\SdfDrawList.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -221,6 +224,7 @@
     <ClInclude Include="Features\Sdf\Edit\BrushInputSource.h" />
     <ClInclude Include="Platform\Desktop\Input.h" />
     <ClInclude Include="Platform\Desktop\DesktopBrushInput.h" />
+    <ClInclude Include="Platform\Desktop\QuestDeploy.h" />
     <ClInclude Include="Platform\Platform.h" />
     <ClInclude Include="World\Camera\Camera.h" />
   </ItemGroup>

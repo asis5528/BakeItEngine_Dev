@@ -2,11 +2,13 @@
 #include "World/Scene.h"
 #include "Features/Sdf/SdfVolume.h"
 #include "Features/Sdf/Edit/BrushState.h"
+#include "Platform/Desktop/QuestDeploy.h"
 #include "EngineContext.h"
 class Renderer;
 class EditorGui
 {
 public:
+	QuestDeploy questDeploy; // one-click APK build + install ("Quest" panel)
 	Scene* m_scene;
 	VulkanBase* m_base;
 	Renderer* renderer = nullptr;         // wired in main.cpp

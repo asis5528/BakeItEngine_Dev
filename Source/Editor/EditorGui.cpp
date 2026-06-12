@@ -302,6 +302,31 @@ void DrawSdfAtlasUsageBar(const char* label, float fraction, int usedBricks, int
      ImGui::Text("Shift+LMB: Recolor existing blocks");
      ImGui::End();
     
+     // One-click Quest build + deploy (runs on a worker thread; the log
+     // streams in while the editor stays interactive).
+     ImGui::Begin("Quest");
+     const bool deploying = questDeploy.isRunning();
+     if (deploying) {
+         ImGui::BeginDisabled();
+     }
+     if (ImGui::Button("Build & Deploy to Quest", ImVec2(-1.0f, 0.0f))) {
+         questDeploy.start();
+     }
+     if (deploying) {
+         ImGui::EndDisabled();
+     }
+     ImGui::Text("Status: %s", questDeploy.status().c_str());
+     ImGui::Separator();
+     ImGui::BeginChild("questlog", ImVec2(0, 150), true);
+     for (const std::string& line : questDeploy.logTail(40)) {
+         ImGui::TextUnformatted(line.c_str());
+     }
+     if (deploying) {
+         ImGui::SetScrollHereY(1.0f);
+     }
+     ImGui::EndChild();
+     ImGui::End();
+
      /*
      ImGui::Begin("inspector");
     if( ImGui::Button("MeshToSDF Dispatch")) {
