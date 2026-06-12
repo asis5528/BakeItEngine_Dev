@@ -81,9 +81,13 @@ void VulkanDevice::createLogicalDevice() {
     features.multiview = VK_TRUE;
   //  vkphysicandevicevulkan
     VkPhysicalDeviceFeatures deviceFeatures{};
-    
-    deviceFeatures.samplerAnisotropy = VK_TRUE;
-    deviceFeatures.multiViewport = VK_TRUE;
+
+    // Request only what the GPU actually has - asking for an unsupported
+    // feature fails device creation (Adreno on Quest lacks multiViewport).
+    VkPhysicalDeviceFeatures supportedFeatures{};
+    vkGetPhysicalDeviceFeatures(physicalDevice, &supportedFeatures);
+    deviceFeatures.samplerAnisotropy = supportedFeatures.samplerAnisotropy;
+    deviceFeatures.multiViewport = supportedFeatures.multiViewport;
     VkDeviceCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     createInfo.pNext = &features;

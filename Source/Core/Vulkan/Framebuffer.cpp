@@ -3,11 +3,12 @@
 #include <stdexcept>
 #include <vector>
 //REMEMBER TO NO APPLY MULTISAMPLED COLOR FOR NO MSAA SAMPLES FRAMEBUFFERS FOR OPTIMIZATION
-Framebuffer::Framebuffer(VulkanDevice *vulkandevice , uint32_t width, uint32_t height, VkSampleCountFlagBits msaaSamples, VkFormat colorFormat, VkFormat depthFormat,int MultiLayerView) {
+Framebuffer::Framebuffer(VulkanDevice *vulkandevice , uint32_t width, uint32_t height, VkSampleCountFlagBits msaaSamples, VkFormat colorFormat, VkFormat depthFormat,int MultiLayerView, bool multiviewEnable) {
 	this->width = width;
 	this->height = height;
     this->vulkandevice = vulkandevice;
     this->multiLayerView = MultiLayerView;
+    this->multiviewEnable = multiviewEnable && MultiLayerView > 1;
    // this->device = device;
     //this->physicalDevice = physicalDevice;
     this->msaaSamples = msaaSamples;
@@ -382,6 +383,16 @@ void Framebuffer::createRenderPass() {
         attachments.push_back(depthAttachmentResolve);
     }
 
+    // True multiview (renderpass2 style): subpass.viewMask 0b11 broadcasts
+    // each draw to both array layers (gl_ViewIndex = eye), the framebuffer is
+    // then created with layers = 1. The old VkRenderPassMultiviewCreateInfo
+    // was renderpass1-only and silently ignored here - desktop keeps that
+    // legacy single-view behavior (multiviewEnable false, only layer 0 drawn).
+    const uint32_t viewMask = 0b11;
+    if (multiviewEnable) {
+        subpass.viewMask = viewMask;
+    }
+
     VkRenderPassCreateInfo2 renderPassInfo{};
     renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2;
     renderPassInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
@@ -391,18 +402,31 @@ void Framebuffer::createRenderPass() {
     renderPassInfo.dependencyCount = dependencies.size();
     renderPassInfo.pDependencies = dependencies.data();
     renderPassInfo.pNext = nullptr;
+    if (multiviewEnable) {
+        renderPassInfo.correlatedViewMaskCount = 1;
+        renderPassInfo.pCorrelatedViewMasks = &viewMask;
+    }
 
-    // Multiview note: VkRenderPassMultiviewCreateInfo is renderpass1-only and
-    // was previously passed here illegally (and ignored by the driver - no
-    // multiview rendering actually happened; only layer 0 is drawn). With
-    // vkCreateRenderPass2, multiview is enabled by setting subpass.viewMask
-    // (e.g. 0b11) plus renderPassInfo.pCorrelatedViewMasks - and the
-    // framebuffer must then be created with layers = 1. Do that when the
-    // VR/OpenXR path actually renders both eyes.
-
+#ifdef BAKEIT_PLATFORM_ANDROID
+    // vkCreateRenderPass2 is core 1.2; Quest's driver/loader is Vulkan 1.1,
+    // so resolve the identical-signature KHR extension entry point instead.
+    static PFN_vkCreateRenderPass2KHR pfnCreateRenderPass2 = nullptr;
+    if (!pfnCreateRenderPass2) {
+        pfnCreateRenderPass2 = reinterpret_cast<PFN_vkCreateRenderPass2KHR>(
+            vkGetDeviceProcAddr(vulkandevice->device, "vkCreateRenderPass2KHR"));
+        if (!pfnCreateRenderPass2) {
+            pfnCreateRenderPass2 = reinterpret_cast<PFN_vkCreateRenderPass2KHR>(
+                vkGetDeviceProcAddr(vulkandevice->device, "vkCreateRenderPass2"));
+        }
+    }
+    if (!pfnCreateRenderPass2 || pfnCreateRenderPass2(vulkandevice->device, &renderPassInfo, nullptr, &renderPass) != VK_SUCCESS) {
+        throw std::runtime_error("failed to create render pass!");
+    }
+#else
     if (vkCreateRenderPass2(vulkandevice->device, &renderPassInfo, nullptr, &renderPass) != VK_SUCCESS) {
         throw std::runtime_error("failed to create render pass!");
     }
+#endif
     
     
 }
@@ -419,7 +443,9 @@ void Framebuffer::createFrameBuffer() {
         viewType = VK_IMAGE_VIEW_TYPE_2D;
     }
     ColorImage = new VulkanImage(vulkandevice->device, vulkandevice->physicalDevice);
-    ColorImage->createImage(width, height,1, VK_IMAGE_TYPE_2D,1, this->msaaSamples, colorFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT , VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, multiLayerView);
+    // TRANSFER_SRC: the Quest path copies the rendered color layers into the
+    // XrSwapchain image after the pass (Renderer::recordCommandBuffers).
+    ColorImage->createImage(width, height,1, VK_IMAGE_TYPE_2D,1, this->msaaSamples, colorFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT , VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, multiLayerView);
     ColorImage->createImageView(colorFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1, viewType, multiLayerView);
 
     AuxColorImage = new VulkanImage(vulkandevice->device, vulkandevice->physicalDevice);
@@ -439,7 +465,7 @@ void Framebuffer::createFrameBuffer() {
         // 1-sample resolve targets; consumers sample these. (Misnamed for
         // historical reasons: "Multisampled*" here means "the resolved image".)
         MultisampledColorImage = new VulkanImage(vulkandevice->device, vulkandevice->physicalDevice);
-        MultisampledColorImage->createImage(width, height,1, VK_IMAGE_TYPE_2D, 1, VK_SAMPLE_COUNT_1_BIT, colorFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT , VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, multiLayerView);
+        MultisampledColorImage->createImage(width, height,1, VK_IMAGE_TYPE_2D, 1, VK_SAMPLE_COUNT_1_BIT, colorFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT , VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, multiLayerView);
         MultisampledColorImage->createImageView(colorFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1, viewType, multiLayerView);
 
         MultisampledAuxColorImage = new VulkanImage(vulkandevice->device, vulkandevice->physicalDevice);
@@ -482,7 +508,9 @@ void Framebuffer::createFrameBuffer() {
     framebufferInfo.pAttachments = attachments.data();
     framebufferInfo.width = width;
     framebufferInfo.height = height;
-    framebufferInfo.layers = multiLayerView;
+    // With multiview the spec requires layers = 1 (the viewMask spreads the
+    // draw across the attachment array layers instead).
+    framebufferInfo.layers = multiviewEnable ? 1 : multiLayerView;
 
     if (vkCreateFramebuffer(vulkandevice->device, &framebufferInfo, nullptr, &framebuffer) != VK_SUCCESS) {
         throw std::runtime_error("failed to create framebuffer!");

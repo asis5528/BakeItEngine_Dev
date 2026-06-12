@@ -10,6 +10,12 @@ class Camera
 public:
 	glm::mat4 proj[2];
 	glm::mat4 view[2];
+	// Optional combined-eye culling override (VR): a single frustum that
+	// contains both eye frustums, fed to GPU frustum culling (SdfEditor's
+	// draw-list build). Left zeroed on desktop - culling then uses
+	// proj[0]*view[0]. The VR platform layer refreshes it every frame.
+	glm::mat4 cullProj = glm::mat4(0.0f);
+	glm::mat4 cullView = glm::mat4(0.0f);
 	glm::vec3 position = glm::vec3(0.0f);
 	float fovDegrees = 45.0f;
 	float nearPlane = 0.001f;

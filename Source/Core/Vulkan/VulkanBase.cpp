@@ -1,12 +1,16 @@
 #include "VulkanBase.h"
 
-#ifdef NDEBUG
+// Validation layers: desktop debug builds only. The Quest APK ships no layer
+// binaries, so requesting them would abort instance creation.
+#if defined(NDEBUG) || defined(BAKEIT_PLATFORM_ANDROID)
 const bool enableValidationLayers = false;
 #else
 const bool enableValidationLayers = true;
 #endif
 #include <iostream>
+#ifdef BAKEIT_PLATFORM_DESKTOP
 #include <GLFW/glfw3.h>
+#endif
 #include "VulkanUtils.h"
 const std::vector<const char*> validationLayers = {
     "VK_LAYER_KHRONOS_validation"
@@ -16,7 +20,9 @@ void VulkanBase::init(GLFWwindow* window) {
     this->window = window;
     createInstance();
 
+#ifdef BAKEIT_PLATFORM_DESKTOP
     setupSurface();
+#endif
     pickPhysicalDevice();
    
     vulkandevice = new VulkanDevice(vkPhysicalDevice);
@@ -44,16 +50,18 @@ void VulkanBase::init(GLFWwindow* window) {
 
     vulkandevice->createLogicalDevice();
     vulkandevice->createCommandPool();
-    
+
+    this->device = vulkandevice->device;
+    this->queue = vulkandevice->Queue;
+    msaaSamples = vulkandevice->getMaxUsableSampleCount();
+#ifdef BAKEIT_PLATFORM_DESKTOP
     VkBool32 R;
     vkGetPhysicalDeviceSurfaceSupportKHR(vkPhysicalDevice, vulkandevice->queueID, vksurface,&R );
     if (!R) {
         throw std::runtime_error("surface doesn't support the device");
     }
-    this->device = vulkandevice->device;
-    this->queue = vulkandevice->Queue;
-    msaaSamples = vulkandevice->getMaxUsableSampleCount();
     this->swapChain = new SwapChain(vkPhysicalDevice,device,vksurface, window,this->queue, msaaSamples);
+#endif
     createCommandBuffers();
 
 
@@ -67,17 +75,32 @@ void VulkanBase::init(GLFWwindow* window) {
 }
 
 VkExtent2D VulkanBase::presentExtent() const {
+    if (platformHooks.presentImageCount > 0) {
+        return platformHooks.presentExtentOverride;
+    }
+#ifdef BAKEIT_PLATFORM_DESKTOP
     return swapChain->swapChainExtent;
+#else
+    return VkExtent2D{ 0, 0 }; // unreachable: Android always sets the override
+#endif
 }
 
 VkFormat VulkanBase::presentFormat() const {
+    if (platformHooks.presentImageCount > 0) {
+        return platformHooks.presentFormatOverride;
+    }
+#ifdef BAKEIT_PLATFORM_DESKTOP
     return swapChain->swapChainImageFormat;
+#else
+    return VK_FORMAT_UNDEFINED; // unreachable: Android always sets the override
+#endif
 }
 
 void VulkanBase::recreate() {
+#ifdef BAKEIT_PLATFORM_DESKTOP
   //  swapChain->create();
     swapChain->create();
-    
+
     createCommandBuffers();
   //  vkResetCommandPool(vulkandevice->device, vulkandevice->commandPool, 0);
    // offscreenbuffer->width = swapChain->swapChainExtent.width;
@@ -85,6 +108,7 @@ void VulkanBase::recreate() {
   //  offscreenbuffer->recreate();
   //  offscreenbuffer->colorFormat = swapChain->swapChainImageFormat;
     imagesInFlight.resize(swapChain->swapChainImages.size(), VK_NULL_HANDLE);
+#endif
 }
 
 void VulkanBase::createInstance() {
@@ -98,7 +122,13 @@ void VulkanBase::createInstance() {
     appInfo.applicationVersion = VK_MAKE_VERSION(1, 2, 0);
     appInfo.pEngineName = "No Engine";
     appInfo.engineVersion = VK_MAKE_VERSION(1, 2, 0);
+#ifdef BAKEIT_PLATFORM_ANDROID
+    // Quest's Adreno driver is Vulkan 1.1; 1.2-only entry points are resolved
+    // through vkGetDeviceProcAddr KHR fallbacks (see Framebuffer renderpass2).
+    appInfo.apiVersion = VK_API_VERSION_1_1;
+#else
     appInfo.apiVersion = VK_API_VERSION_1_2;
+#endif
 
     VkInstanceCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
@@ -172,15 +202,25 @@ void VulkanBase::pickPhysicalDevice() {
 
 
 void VulkanBase::setupSurface() {
-    
+#ifdef BAKEIT_PLATFORM_DESKTOP
     if (glfwCreateWindowSurface(vkinstance, window, nullptr, &vksurface) != VK_SUCCESS) {
         throw std::runtime_error("failed to create window surface!");
     }
-    
+#endif
 }
 
 void VulkanBase::createCommandBuffers() {
+#ifdef BAKEIT_PLATFORM_DESKTOP
     commandBuffers.resize(swapChain->swapChainFramebuffers.size());
+#else
+    // One command buffer per XR swapchain image (set via platform hooks).
+    // During init() the XR swapchain doesn't exist yet, so the count is 0:
+    // no-op here, the platform layer calls this again once it's known.
+    if (platformHooks.presentImageCount == 0) {
+        return;
+    }
+    commandBuffers.resize(platformHooks.presentImageCount);
+#endif
     VkCommandBufferAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     allocInfo.commandPool = vulkandevice->commandPool;
@@ -227,7 +267,11 @@ void VulkanBase::createSyncObjects() {
     imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
     renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
     inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
+#ifdef BAKEIT_PLATFORM_DESKTOP
     imagesInFlight.resize(swapChain->swapChainImages.size(), VK_NULL_HANDLE);
+#else
+    imagesInFlight.resize(platformHooks.presentImageCount, VK_NULL_HANDLE);
+#endif
 
     VkSemaphoreCreateInfo semaphoreInfo{};
     semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
@@ -246,6 +290,11 @@ void VulkanBase::createSyncObjects() {
 }
 uint32_t VulkanBase::getFrameIndex()
 {
+#ifdef BAKEIT_PLATFORM_ANDROID
+    // Never called on Quest: frame pacing and image acquisition belong to
+    // OpenXR (xrWaitFrame / xrAcquireSwapchainImage) in the platform layer.
+    return 0;
+#else
     vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
 
     uint32_t imageIndex;
@@ -267,10 +316,16 @@ uint32_t VulkanBase::getFrameIndex()
     this->imageIndex = imageIndex;
     submitCommandBuffers.push_back(commandBuffers[imageIndex]);
     return imageIndex;
+#endif
 }
 
 void VulkanBase::presentQueue(VkResult &result)
 {
+#ifdef BAKEIT_PLATFORM_ANDROID
+    // Never called on Quest: submission + xrReleaseSwapchainImage live in the
+    // platform layer.
+    result = VK_SUCCESS;
+#else
     if (imagesInFlight[imageIndex] != VK_NULL_HANDLE) {
         vkWaitForFences(device, 1, &imagesInFlight[imageIndex], VK_TRUE, UINT64_MAX);
     }
@@ -313,6 +368,7 @@ void VulkanBase::presentQueue(VkResult &result)
 
      currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
      submitCommandBuffers.clear();
+#endif
 }
 
 void VulkanBase::setupDebugMessenger() {
@@ -327,11 +383,17 @@ void VulkanBase::setupDebugMessenger() {
 }
 
 std::vector<const char*> VulkanBase::getRequiredExtensions() {
+#ifdef BAKEIT_PLATFORM_DESKTOP
     uint32_t glfwExtensionCount = 0;
     const char** glfwExtensions;
     glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
 
     std::vector<const char*> extensions(glfwExtensions, glfwExtensions + glfwExtensionCount);
+#else
+    // No surface extensions: the OpenXR runtime appends what it needs inside
+    // xrCreateVulkanInstanceKHR (the createInstance hook).
+    std::vector<const char*> extensions;
+#endif
 
     if (enableValidationLayers) {
         extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
@@ -380,8 +442,10 @@ VulkanBase::VulkanBase()
 VulkanBase::~VulkanBase()
 {
   //  delete offscreenbuffer;
+#ifdef BAKEIT_PLATFORM_DESKTOP
     delete swapChain;
     swapChain = nullptr;
+#endif
 
     for (int i = 0; i < commandBuffers.size(); i++) {
         vkFreeCommandBuffers(device, vulkandevice->commandPool, 1, &commandBuffers[i]);
@@ -400,7 +464,9 @@ VulkanBase::~VulkanBase()
         DestroyDebugUtilsMessengerEXT(vkinstance, vkDebugMessenger, nullptr);
     }
 
+#ifdef BAKEIT_PLATFORM_DESKTOP
     vkDestroySurfaceKHR(vkinstance, vksurface, nullptr);
+#endif
     vkDestroyInstance(vkinstance, nullptr);
     
     

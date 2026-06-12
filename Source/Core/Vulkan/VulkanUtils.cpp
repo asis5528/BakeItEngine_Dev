@@ -1,7 +1,6 @@
 #include "VulkanUtils.h"
 #include <stdexcept>
 #include <fstream>
-#include <windows.h>
 #include <string>
 #include <iostream>
 namespace utils{
@@ -41,15 +40,10 @@ namespace utils{
     }
      std::vector<char> readFile(const std::string& filename) {
 
-         TCHAR buffer1[MAX_PATH] = { 0 };
-         GetModuleFileName(NULL, buffer1, MAX_PATH);
-         std::wstring::size_type pos = std::wstring(buffer1).find_last_of(L"\\/");
-         std::wstring k =  std::wstring(buffer1).substr(0, pos);
-
         std::ifstream file(filename, std::ios::ate | std::ios::binary);
 
         if (!file.is_open()) {
-            throw std::runtime_error("failed to open file!");
+            throw std::runtime_error("failed to open file: " + filename);
         }
 
         size_t fileSize = (size_t)file.tellg();

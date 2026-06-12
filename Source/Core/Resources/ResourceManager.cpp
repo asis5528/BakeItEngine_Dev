@@ -5,7 +5,7 @@ const VulkanBase* ResourceManager::base = nullptr;
 
 
 
-__int64 ResourceManager::addTexture( VulkanTexture texture) {
+int64_t ResourceManager::addTexture( VulkanTexture texture) {
     textureList.push_back(texture);
     return textureList.size()-1;
 }

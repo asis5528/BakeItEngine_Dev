@@ -39,7 +39,9 @@ void Scene::update(float iTime) {
         animation.boneTransform(time);
     }
     float angle = (sin(iTime/3.)*3.1415)*0.;
-#ifndef VR
+    // Free-fly camera is desktop-only; OpenVR (VR define) and the Quest build
+    // write camera view/proj from headset poses before Scene::update runs.
+#if !defined(VR) && !defined(BAKEIT_PLATFORM_ANDROID)
     camera->update(*input, delTime,
         float(base->presentExtent().width),
         float(base->presentExtent().height));
@@ -49,11 +51,18 @@ void Scene::update(float iTime) {
 
     ubo.view[0] = camera->view[0];
     ubo.proj[0] = camera->proj[0];
-    ubo.proj[0][1][1] *= -1;
 
     ubo.view[1] = camera->view[1];
     ubo.proj[1] = camera->proj[1];
+
+#ifndef BAKEIT_PLATFORM_ANDROID
+    // Desktop camera proj is GL-convention (y up); flip for Vulkan here. The
+    // Quest path builds camera->proj directly in Vulkan convention from the
+    // XR fov (asymmetric - the y offset flips with the scale), so no flip:
+    // this keeps SdfEditor's frustum-cull matrix consistent with rendering.
+    ubo.proj[0][1][1] *= -1;
     ubo.proj[1][1][1] *= -1;
+#endif
 
     
 

@@ -81,7 +81,7 @@ const float CELLS_PER_BLOCK = 8.0;
 //   span end - never by running out of steps. (Budgets that can be exhausted
 //   by grazing rays advancing at MIN_STEP discard mid-block and let the
 //   background streak through.) Typical rays still exit in 3-6 steps.
-const int   MAX_STEPS = 32;
+const int   MAX_STEPS = 48;
 const float MIN_STEP = 0.5 / CELLS_PER_BLOCK;
 const float HIT_EPSILON = 0.0005;
 

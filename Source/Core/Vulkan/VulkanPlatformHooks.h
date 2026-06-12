@@ -29,4 +29,17 @@ struct VulkanPlatformHooks
 
 	// When non-empty, replaces the default device-extension list wholesale.
 	std::vector<const char*> deviceExtensionOverride;
+
+	// Present-target description for platforms without VkSwapchainKHR.
+	// When presentImageCount > 0, VulkanBase skips surface/swapchain creation
+	// entirely: presentExtent()/presentFormat() report these values, one
+	// command buffer is allocated per present image, and Renderer's Android
+	// path copies the offscreen color into presentImages[i] (the XrSwapchain
+	// images, each a 2-layer array) instead of running a swapchain pass.
+	// Fill before VulkanBase::init(); presentImages may be filled later but
+	// must be set before the first command-buffer record.
+	VkExtent2D presentExtentOverride{ 0, 0 };
+	VkFormat presentFormatOverride = VK_FORMAT_UNDEFINED;
+	uint32_t presentImageCount = 0;
+	std::vector<VkImage> presentImages;
 };

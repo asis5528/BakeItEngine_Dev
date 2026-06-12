@@ -93,7 +93,16 @@ bool IntersectAabb(const glm::vec3& ro, const glm::vec3& rd, const glm::vec3& bm
 }
 
 constexpr int kBrickSamplesPerBlock = 9 * 9 * 9;
+#ifdef BAKEIT_PLATFORM_ANDROID
+// Adreno's maxStorageBufferRange caps SSBO ranges far below desktop's; the
+// 512^3 float atlas (512 MiB) sits past it and over-limit ranges read as
+// garbage/zero (the "flat cubes" look). 256^3 = 64 MiB, ~23k bricks - plenty
+// until the Phase 4 FP16/3D-texture atlas lands. Shaders index the atlas
+// linearly by brick, so capacity is a CPU-side decision only.
+constexpr int kAtlasDim = 256;
+#else
 constexpr int kAtlasDim = 512;
+#endif
 constexpr float kBrushCenterBias = 0.031f;
 constexpr int32_t kBlockEmpty = -999999;
 }
@@ -402,8 +411,9 @@ void SdfEditor::update(float time)
 
 		// Block-units -> world is a uniform scale + translation (inverse of
 		// the camBlockUnits mapping above); chained with proj * view it gives
-		// the matrix the frustum planes are extracted from. (VR note: eye 0
-		// only - revisit when VR is re-enabled.)
+		// the matrix the frustum planes are extracted from. VR platforms set
+		// the camera's combined-eye cull override (one frustum containing
+		// both eyes); desktop leaves it zeroed and eye 0 is used.
 		const float s = chunkBlockSizeWS;
 		const glm::vec3 origin =
 			chunkTranslationWS + ChunkLocalCenterOrigin(s) - glm::vec3(0.5f * s);
@@ -412,8 +422,11 @@ void SdfEditor::update(float time)
 		blockToWorld[1][1] = s;
 		blockToWorld[2][2] = s;
 		blockToWorld[3] = glm::vec4(origin, 1.0f);
-		const glm::mat4 blockToClip =
-			scene->camera->proj[0] * scene->camera->view[0] * blockToWorld;
+		const bool hasCullOverride = scene->camera->cullView != glm::mat4(0.0f);
+		const glm::mat4 cullViewProj = hasCullOverride
+			? scene->camera->cullProj * scene->camera->cullView
+			: scene->camera->proj[0] * scene->camera->view[0];
+		const glm::mat4 blockToClip = cullViewProj * blockToWorld;
 
 		if (stampedThisFrame || blockToClip != lastDrawListBlockToClip) {
 			drawList->build(camBlockUnits, blockToClip);

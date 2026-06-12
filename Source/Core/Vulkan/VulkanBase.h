@@ -1,6 +1,12 @@
 #pragma once
+#include "Platform/Platform.h"
+#ifdef BAKEIT_PLATFORM_DESKTOP
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
+#else
+#include <vulkan/vulkan.h>
+struct GLFWwindow; // opaque; init(nullptr) on platforms without GLFW
+#endif
 #include <vector>
 #include "VulkanPlatformHooks.h"
 #include "VulkanDevice.h"
@@ -25,7 +31,7 @@ public:
 	VkDebugUtilsMessengerEXT vkDebugMessenger;
 	VkSampleCountFlagBits msaaSamples;
 	VulkanDevice* vulkandevice;
-	SwapChain* swapChain;
+	SwapChain* swapChain = nullptr; // desktop only; stays null on Quest
 	//Framebuffer* offscreenbuffer;
 	VkPipelineCache pipelineCache;
 //	GraphicsPipeline* objectPipeline;
@@ -50,6 +56,11 @@ public:
 
 	void init(GLFWwindow* window);
 	void setupSurface();
+	// Public for the Quest path: the XR swapchain (whose image count sizes
+	// the command-buffer array) can only be created after init() has built
+	// the device, so the platform layer fills platformHooks.presentImage*
+	// and then calls this. Inside init() it no-ops while the count is 0.
+	void createCommandBuffers();
 	void beginCommandBuffers(unsigned int index);
 	uint32_t getFrameIndex();
 	void presentQueue(VkResult &result);
@@ -69,6 +80,5 @@ private:
 	void setupDebugMessenger();
 	VkResult CreateDebugUtilsMessengerEXT(VkInstance instance, const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkDebugUtilsMessengerEXT* pDebugMessenger);
 	void DestroyDebugUtilsMessengerEXT(VkInstance instance, VkDebugUtilsMessengerEXT debugMessenger, const VkAllocationCallbacks* pAllocator);
-	void createCommandBuffers();
 	void createSyncObjects();
 };

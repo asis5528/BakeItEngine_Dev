@@ -1,4 +1,5 @@
 #pragma once
+#include "Platform/Platform.h"
 #include <cstdint>
 #include <vulkan/vulkan.h>
 #include <array>
@@ -30,7 +31,12 @@ class Framebuffer
 		// viewport) - the attachment views are 2D_ARRAY when multiLayerView > 1.
 		VkImageView displayImageView = VK_NULL_HANDLE;
 		int multiLayerView;
-		Framebuffer(VulkanDevice *vulkandevice , uint32_t width, uint32_t height,VkSampleCountFlagBits msaaSamples,VkFormat colorFormat, VkFormat depthFormat, int MultiLayerView = 1);
+		// True multiview rendering (subpass viewMask 0b11): one draw rasterizes
+		// into both array layers, gl_ViewIndex selecting the eye. Desktop leaves
+		// this off (layered images exist but only view 0 is drawn); the Quest
+		// path turns it on so both eyes render in a single pass.
+		bool multiviewEnable = false;
+		Framebuffer(VulkanDevice *vulkandevice , uint32_t width, uint32_t height,VkSampleCountFlagBits msaaSamples,VkFormat colorFormat, VkFormat depthFormat, int MultiLayerView = 1, bool multiviewEnable = false);
 		~Framebuffer();
 		void clean();
 		void recreate();

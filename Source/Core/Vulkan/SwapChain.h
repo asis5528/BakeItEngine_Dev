@@ -1,4 +1,9 @@
 #pragma once
+#include "Platform/Platform.h"
+// Desktop-only: VkSwapchainKHR over a GLFW surface. The Quest build never
+// instantiates this (the XrSwapchain owns the images; see VulkanPlatformHooks
+// present overrides) - VulkanBase keeps a null SwapChain* there.
+#ifdef BAKEIT_PLATFORM_DESKTOP
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 #include <vector>
@@ -48,4 +53,7 @@ private:
 
 
 };
+#else
+class SwapChain; // never defined on this platform
+#endif // BAKEIT_PLATFORM_DESKTOP
 

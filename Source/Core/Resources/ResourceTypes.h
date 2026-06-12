@@ -1,8 +1,9 @@
 #pragma once
+#include <cstdint>
 namespace ResourceTypes
 {
 	struct Texture {
-		__int64 id;
+		int64_t id;
 		int width;
 		int height;
 		int depth;

@@ -1,8 +1,11 @@
 #pragma once
+#include "Platform/Platform.h"
+#ifdef BAKEIT_PLATFORM_DESKTOP
 #ifndef GLFW_INCLUDE_VULKAN
 #define GLFW_INCLUDE_VULKAN
 #endif
 #include <GLFW/glfw3.h>
+#endif
 #include <glm/glm.hpp>
 
 // Engine-side input state.
@@ -39,6 +42,7 @@ struct Input
 	bool cameraMoveMode = false;
 };
 
+#ifdef BAKEIT_PLATFORM_DESKTOP
 class DesktopInput
 {
 public:
@@ -64,3 +68,4 @@ private:
 	static void mouseButtonCallback(GLFWwindow* win, int button, int action, int mods);
 	static void scrollCallback(GLFWwindow* win, double xoffset, double yoffset);
 };
+#endif // BAKEIT_PLATFORM_DESKTOP
