@@ -195,6 +195,6 @@ You should see the ImGui-based editor layout, the viewport rendering the default
 
 ## Notes
 
-- VR support via OpenVR exists behind a compile-time `#define VR` in `main.cpp`; it is disabled by default.
+- VR support via OpenXR exists behind a compile-time `#define VR` in `main.cpp`; it is disabled by default.
 - Many features are experimental; expect rough edges and incomplete tools.
 - This README (`readme2.md`) is meant as a high-level guide; consult the source for implementation details and current behavior.
