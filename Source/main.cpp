@@ -81,6 +81,7 @@ const bool enableValidationLayers = true;
 #include "Platform/Desktop/Input.h"
 #include "Platform/Desktop/DesktopBrushInput.h"
 #include "Render/Renderer.h"
+#include "Core/Pipelines/ShaderHotReload.h"
 #include "EngineContext.h"
 
 
@@ -125,6 +126,7 @@ private:
     Camera camera;
     Renderer* renderer;
     EngineContext ctx;
+    ShaderHotReload* shaderReload = nullptr; // live render-shader reload (desktop)
     void initWindow() {
         glfwInit();
 
@@ -228,14 +230,24 @@ private:
         editorGui->sdfVolume = &clines->sdfEditor->volume;
         editorGui->brush = &clines->sdfEditor->brush;
         scene->brush = &clines->sdfEditor->brush; // brush indicator overlay (post pass)
+        scene->sdfVolume = &clines->sdfEditor->volume; // post pass reads blockSizeWS for deferred normals
         // Platform brush source: desktop = cursor ray + mouse/keyboard; the
         // Quest entry point wires an OpenXR controller source here instead.
         clines->sdfEditor->brushInput = new DesktopBrushInput(ctx);
-        scene->ptextures.push_back(base->vbuffer->createTexture3DGeneral(1, 1, 1));
+        // Object 0 (the SDF brick object) samples a 3D-texture field through its
+        // material/diffuse slot - binding 2 (sampler3D texSampler) in SdfBrickFS.
+        // BAKEIT_SDF_TEXTURE_ATLAS: the sparse tile pool (texture-native field).
+        // Otherwise: the dense fine atlas for the SSBO-vs-texture A/B test
+        // (ubo2.color.w selects the FS fetch path). Both are R16F volumes SdfEditor
+        // created + registered in scene->ptextures.
         Material material;
         material.type = TexturedMaterial;
         MaterialTexturedData* matData = new MaterialTexturedData();
-        matData->DiffuseTexture = scene->ptextures.size() - 1;
+#ifdef BAKEIT_SDF_TEXTURE_ATLAS
+        matData->DiffuseTexture = clines->sdfEditor->tilePoolTextureIndex;
+#else
+        matData->DiffuseTexture = clines->sdfEditor->fineAtlasTextureIndex;
+#endif
         material.materialData = matData;
         scene->materials.push_back(material);
         scene->meshes[scene->objects[0].meshID[0]].matID = scene->materials.size() - 1;
@@ -245,7 +257,9 @@ private:
             scene->SBOs[0][1],
             scene->SBOs[0][2],
             scene->SBOs[0][3],
-            scene->SBOs[0][5]
+            scene->SBOs[0][5],
+            clines->sdfEditor->coarseSBO[1], // binding 8: coarse block table
+            clines->sdfEditor->coarseSBO[0]  // binding 9: coarse brick atlas
         };
         base->vbuffer->updateIndirectInstanceList(scene->meshes[scene->objects[0].meshID[0]], {});
        
@@ -276,6 +290,23 @@ private:
         guitex.imageView = renderer->postprocessingManager->framebuffers[renderer->postprocessingManager->bufferSize - 1]->displayImageView;
         guitex.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         editorGui->createdescriptor(guitex);
+
+#ifdef BAKEIT_PLATFORM_DESKTOP
+        // Live render-shader reload: edit a .vert/.frag under shaders/ and it
+        // recompiles + swaps into the running engine on save (see ShaderHotReload).
+        // Pipeline pointers are stable across resize (rebuilt in place), so a
+        // one-time registration holds. Scene pipelines + the post-process quad
+        // (SdfBrickVS/FS, the object shaders, PostPassVS/FS) are all covered.
+        shaderReload = new ShaderHotReload(base->device);
+        for (GraphicsPipeline* p : renderer->scenePipelines->pipelines) {
+            shaderReload->registerPipeline(p);
+        }
+        if (renderer->postprocessingManager && renderer->postprocessingManager->postPass) {
+            for (Quad* q : renderer->postprocessingManager->postPass->quads) {
+                shaderReload->registerPipeline(q->graphicsPipeline);
+            }
+        }
+#endif
     }
 
     void mainLoop() {
@@ -283,6 +314,13 @@ private:
             current_ticks = clock();
             glfwPollEvents();
             input.update();
+
+#ifdef BAKEIT_PLATFORM_DESKTOP
+            // Pick up any saved shader edits before recording this frame.
+            if (shaderReload && shaderReload->poll()) {
+                renderer->renderPassDirty = true;
+            }
+#endif
 
             drawFrame();
             delta_ticks = clock() - current_ticks; //the time, in ms, that took to render the scene
@@ -323,6 +361,7 @@ private:
      //   vkDestroyImageView(base->device,ct3D.imageView, nullptr);
        // vkDestroyImage(base->device, ct3D.image, nullptr);
         //vkFreeMemory(base->device, ct3D.imageMemory, nullptr);
+        delete shaderReload;
         delete clines;
         ResourceManager::cleanTextures();
         ResourceManager::cleanTextureSamplers();

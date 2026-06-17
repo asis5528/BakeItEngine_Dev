@@ -1,0 +1,76 @@
+#version 450
+
+// SdfFineToTexCS - converts the sparse SSBO brick atlas into a DENSE fine 3D
+// texture (64*8 + 1 = 513^3, R16F), used by SdfBrickFS's "sample 3D texture"
+// test path. DESKTOP-ONLY perf experiment - not part of the Quest path.
+//
+// LOCALIZED rebuild: the CPU dispatches this only over the brush's dirty block
+// region (pc.regionBase = that region's min block), so the cost scales with the
+// edit, not the whole 64^3 volume. One workgroup per block, 9x9x9 threads.
+//
+// Two phases (pc.phase), barriered on the CPU side:
+//   phase 0 (CLEAR): every block writes +FAR (outside) to its own 8^3 cells, so
+//     erased/empty blocks in the region reset. It SKIPS the region's outer -X/
+//     -Y/-Z faces (workgroup id 0 on that axis, localOffset 0) so it can't
+//     clobber the real pad value of a surface block just OUTSIDE the region
+//     (that block isn't reconverted). It writes no +pad plane.
+//   phase 1 (DATA): surface blocks write their real 9^3 (INCLUDING the +pad, so
+//     they own their boundary samples); interior blocks write -FAR over their
+//     8^3; empty blocks write nothing (the phase-0 +FAR stands).
+// Because phase 1 runs after phase 0 (barrier), a surface block's real pad
+// always wins over the cleared +FAR at a surface/empty boundary - no write race,
+// and bulges/silhouettes that graze a block face are preserved.
+
+layout(local_size_x = 9, local_size_y = 9, local_size_z = 9) in;
+
+layout(binding = 0, r16f) uniform image3D fineAtlas;
+layout(std430, binding = 1) readonly buffer BlockBuffer { int blocks[]; };
+layout(std430, binding = 2) readonly buffer BrickBuffer { float bricks[]; };
+
+layout(push_constant) uniform PC {
+    ivec4 regionBase; // xyz: dirty-region min block; w: unused
+    ivec4 phase;      // x: 0 = clear, 1 = data
+} pc;
+
+const int BLOCK_EMISSIVE_FLAG = (1 << 30);
+const int BLOCK_INDEX_MASK = BLOCK_EMISSIVE_FLAG - 1;
+const int BLOCK_INTERIOR = -999998;
+const float FAR_VALUE = 100.01;
+const int BLOCKS_PER_AXIS = 64;
+
+void main()
+{
+    ivec3 blockId = ivec3(gl_WorkGroupID) + pc.regionBase.xyz;
+    if (any(greaterThanEqual(blockId, ivec3(BLOCKS_PER_AXIS)))) return;
+
+    int index = blockId.x
+              + blockId.y * BLOCKS_PER_AXIS
+              + blockId.z * BLOCKS_PER_AXIS * BLOCKS_PER_AXIS;
+    int raw = blocks[index];
+
+    ivec3 localOffset = ivec3(gl_LocalInvocationID);   // 0..8
+    int   lid = int(gl_LocalInvocationIndex);          // brick 9^3 sample index
+    ivec3 pos = blockId * 8 + localOffset;             // global fine cell, 0..512
+
+    if (pc.phase.x == 0) {
+        // CLEAR: +FAR over own 8^3, minus the region's outer -faces (so the
+        // unreconverted outside neighbour's pad survives).
+        if (any(greaterThanEqual(localOffset, ivec3(8)))) return; // no pad
+        bvec3 onMinFace = equal(localOffset, ivec3(0));
+        bvec3 atRegionMinEdge = equal(gl_WorkGroupID, uvec3(0));
+        if (any(bvec3(onMinFace.x && atRegionMinEdge.x,
+                      onMinFace.y && atRegionMinEdge.y,
+                      onMinFace.z && atRegionMinEdge.z))) return;
+        imageStore(fineAtlas, pos, vec4(FAR_VALUE, 0.0, 0.0, 0.0));
+        return;
+    }
+
+    // DATA phase.
+    if (raw >= 0) {
+        // Surface: real 9^3 incl. pad - owns its boundary texels.
+        imageStore(fineAtlas, pos, vec4(bricks[(raw & BLOCK_INDEX_MASK) + lid], 0.0, 0.0, 0.0));
+    } else if (raw == BLOCK_INTERIOR && all(lessThan(localOffset, ivec3(8)))) {
+        imageStore(fineAtlas, pos, vec4(-FAR_VALUE, 0.0, 0.0, 0.0));
+    }
+    // Empty: leave the phase-0 +FAR.
+}

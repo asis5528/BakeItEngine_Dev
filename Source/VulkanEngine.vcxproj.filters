@@ -18,6 +18,8 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="shaders\Sdf\SdfBrushCS.comp" />
+    <None Include="shaders\Sdf\SdfBrushTexCS.comp" />
+    <None Include="shaders\Sdf\SdfFineToTexCS.comp" />
     <None Include="shaders\Sdf\SdfDrawListCountCS.comp" />
     <None Include="shaders\Sdf\SdfDrawListScanCS.comp" />
     <None Include="shaders\Sdf\SdfDrawListScatterCS.comp" />
@@ -71,6 +73,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Core\Pipelines\GraphicsPipeline.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Core\Pipelines\ShaderHotReload.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="World\Mesh.cpp">
@@ -192,6 +197,7 @@
     <ClInclude Include="Core\Vulkan\VulkanUtils.h" />
     <ClInclude Include="Core\Resources\VulkanBuffer.h" />
     <ClInclude Include="Core\Pipelines\GraphicsPipeline.h" />
+    <ClInclude Include="Core\Pipelines\ShaderHotReload.h" />
     <ClInclude Include="World\Mesh.h" />
     <ClInclude Include="Core\Resources\VulkanDescriptor.h" />
     <ClInclude Include="Editor\VulkanImgui.h" />
@@ -218,6 +224,7 @@
     <ClInclude Include="Core\Resources\ResourceManager.h" />
     <ClInclude Include="Core\Resources\ResourceTypes.h" />
     <ClInclude Include="Features\Sdf\Edit\SdfEditor.h" />
+    <ClInclude Include="Features\Sdf\SdfBackend.h" />
     <ClInclude Include="Features\Sdf\SdfVolume.h" />
     <ClInclude Include="Features\Sdf\Edit\BrushState.h" />
     <ClInclude Include="Features\Sdf\Edit\SdfDrawList.h" />

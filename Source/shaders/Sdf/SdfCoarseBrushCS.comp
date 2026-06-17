@@ -1,0 +1,148 @@
+#version 450
+
+// SdfCoarseBrushCS - coarse-LOD brush stamp that stores the coarse distance
+// field in a DENSE 3D TEXTURE instead of a sparse SSBO brick atlas.
+//
+// The coarse domain is small - 16 coarse blocks x 8 cells = 128, +1 boundary
+// sample = 129^3 - so one dense 3D texture holds the whole field. Each thread
+// writes its sample with imageStore; the render samples it with a sampler3D
+// (hardware trilinear), so there is no per-brick tile addressing, no brick
+// allocation, and no apron. The coarse block table (binding 2) is still written
+// so SdfBrickVS knows which coarse cubes carry a surface.
+//
+// One workgroup per coarse block, 9x9x9 threads. Each block stores only its own
+// 8^3 cells (local 0..7); the shared +face sample belongs to the neighbour
+// block, so no two workgroups ever write the same texel (no store race).
+
+layout(local_size_x = 9, local_size_y = 9, local_size_z = 9) in;
+
+layout(binding = 0) uniform computeUbo {
+    vec4  BrushData;     // xyz: negated brush center (chunk local), w: radius
+    vec4  BrushColor;
+    float BrushAction;   // 1.0 add, 0.0 remove
+    float time;
+    float BrushShape;    // 0.0 cube, 1.0 sphere, 2.0 plane
+    float BrushSmoothness;
+    float BrushEmissive;
+    float BrushRecolor;
+    float _pad0;         // coarse grid cells (128)
+    float _pad1;
+    ivec4 DispatchBaseBlock; // xyz: coarse region origin; w unused here
+} ubo;
+
+// The dense coarse field. Same image is bound to the render as a sampler3D
+// (binding 2 there) - written here, read there, both in GENERAL layout.
+layout(binding = 1, r16f) uniform image3D coarseAtlas;
+
+layout(binding = 2) buffer BlockBuffer {
+    int blocks[];        // coarse block table (16^3): >=0 surface, else sentinel
+};
+
+const int   BLOCK_EMPTY = -999999;    // outside the shape
+const int   BLOCK_INTERIOR = -999998; // deep inside the shape
+const float FAR_VALUE = 100.01;
+
+shared uint sHasNegative;
+shared uint sHasPositive;
+shared uint sNearSurfaceCount;
+
+float smin(float a, float b, float k) {
+    float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+    return mix(b, a, h) - k * h * (1.0 - h);
+}
+float sdfBox(vec3 p, vec3 he) {
+    vec3 q = abs(p) - he;
+    return length(max(q, vec3(0.0))) + min(max(q.x, max(q.y, q.z)), 0.0);
+}
+float sdfSphere(vec3 p, float r) { return length(p) - r; }
+float sdfPlanePatch(vec3 p, float r) { return sdfBox(p, vec3(r, 0.001, r)); }
+
+void main()
+{
+    int gridCells = int(ubo._pad0 + 0.5);
+    if (gridCells <= 0) { gridCells = 16 * 8; }
+    const ivec3 dims = ivec3(gridCells);
+    const ivec3 blockDim = ivec3(8);
+    const ivec3 blocksPerAxis = dims / blockDim;
+
+    ivec3 blockId = ivec3(gl_WorkGroupID) + ubo.DispatchBaseBlock.xyz;
+    if (any(greaterThanEqual(blockId, blocksPerAxis)))
+        return;
+
+    int index =
+        blockId.x +
+        blockId.y * blocksPerAxis.x +
+        blockId.z * blocksPerAxis.x * blocksPerAxis.y;
+
+    ivec3 localOffset = ivec3(gl_LocalInvocationID); // 0..8
+    ivec3 pos = blockId * blockDim + localOffset;
+    uint lid = gl_LocalInvocationIndex;
+
+    if (lid == 0u) {
+        sHasNegative = 0u;
+        sHasPositive = 0u;
+        sNearSurfaceCount = 0u;
+    }
+    barrier();
+
+    // Previous field value straight from the dense texture (pre-cleared to
+    // +FAR, so the first stamp's smin/boolean starts clean). No sentinels: the
+    // texture always holds the real (continuous) field.
+    float h = imageLoad(coarseAtlas, pos).r;
+
+    vec3 p = (vec3(pos) - vec3(dims) * 0.5) / vec3(dims);
+    vec3 pq = p + ubo.BrushData.xyz - 0.031; // kBrushCenterBias
+
+    float brushRadius = ubo.BrushData.w;
+    if (ubo.BrushAction < 0.5) {
+        brushRadius *= 1.15;
+    }
+
+    int shapeMode = int(floor(ubo.BrushShape + 0.5));
+    float brush;
+    if (shapeMode == 1) {
+        brush = sdfSphere(pq, brushRadius);
+    } else if (shapeMode == 2) {
+        brush = sdfPlanePatch(pq, brushRadius);
+    } else {
+        brush = sdfBox(pq, vec3(brushRadius));
+    }
+
+    if (ubo.BrushAction < 0.5) {
+        h = max(-brush, h);
+    } else {
+        h = smin(brush, h, max(ubo.BrushSmoothness, 0.0001));
+    }
+
+    float keepBand = max(2.0 / float(dims.x), 2.0 * ubo.BrushSmoothness);
+    if (abs(h) <= keepBand) {
+        atomicAdd(sNearSurfaceCount, 1u);
+    }
+    if (h < 0.0) {
+        atomicOr(sHasNegative, 1u);
+    }
+    if (h > 0.0) {
+        atomicOr(sHasPositive, 1u);
+    }
+    barrier();
+
+    // Store only this block's own 8^3 cells (local 0..7). The +face sample is
+    // owned by the neighbour block, so coverage is exact with no overlap.
+    if (all(lessThan(localOffset, ivec3(8)))) {
+        imageStore(coarseAtlas, pos, vec4(h, 0.0, 0.0, 0.0));
+    }
+
+    // Block-level surface decision (thread 0). See SdfBrushCS for the band /
+    // remove-exception rationale; the coarse field has no bricks to free.
+    if (lid == 0u) {
+        bool hasCrossing = (sHasNegative != 0u) && (sHasPositive != 0u);
+        bool bandKeep = (sNearSurfaceCount > 0u) &&
+            (ubo.BrushAction >= 0.5 || sHasNegative != 0u);
+        bool hasSurface = hasCrossing || bandKeep;
+        if (hasSurface) {
+            blocks[index] = 0; // >=0: VS emits this coarse cube
+        } else {
+            blocks[index] = (sHasNegative != 0u) ? BLOCK_INTERIOR : BLOCK_EMPTY;
+        }
+    }
+}

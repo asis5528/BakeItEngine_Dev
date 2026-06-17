@@ -25,11 +25,17 @@ layout(binding = 0) uniform IndicatorUbo {
     vec4 brushParams;       // x: shape (0 cube, 1 sphere, 2 plane), y: visible, z: action (1 add, 0 remove)
     vec4 brushColor;        // rgb: brush color
     vec4 hudA;              // x: show HUD, y: fps, z: used bricks, w: atlas usage %
-    vec4 hudB;              // x: radius*1000, y: smoothness*10000
+    vec4 hudB;              // x: radius*1000, y: smoothness*10000, z: cage, w: deferred
+    vec4 chunkMin;          // sculptable bounds, world space
+    vec4 chunkMax;
 } ubo;
 
 layout(binding = 1) uniform sampler2DArray srcColor;
 layout(binding = 2) uniform sampler2DArray sceneDepth;
+// Deferred-shading G-buffer (desktop): the brick shader's world-space normal in
+// xyz, coverage in w (1 surface, 0 cleared background). On Quest this binds the
+// color image as a placeholder and is never sampled (hudB.w = 0).
+layout(binding = 3) uniform sampler2DArray gNormal;
 
 // Wireframe factor of an axis-aligned box: 1 on the edges of the hit face.
 // No early-outs: fwidth needs uniform control flow, misses are masked.
@@ -118,6 +124,39 @@ float hudNumber(vec2 uv, vec2 origin, int value, int digits)
     return sevenSegDigit(lp, dig);
 }
 
+// Edge factor of one box face (the median trick: the median of |q| reaches 1
+// exactly on the face's edges). Branch-free for fwidth safety.
+float cageFace(vec3 ro, vec3 rd, vec3 c, vec3 he, float t, float sceneT)
+{
+    vec3 q = abs(ro + rd * t - c) / he;
+    float m = min(max(q.x, q.y), min(max(q.y, q.z), max(q.z, q.x)));
+    float w = max(fwidth(m), 1e-4) * 1.5;
+    float edge = 1.0 - smoothstep(0.0, w, 1.0 - m);
+    float visible = (t >= 0.0) ? 1.0 : 0.0;
+    float fade = (t > sceneT + 1e-4) ? 0.3 : 1.0; // ghost behind the surface
+    return edge * visible * fade;
+}
+
+// Boundary cage of the sculptable chunk: the edges of both the entry and
+// exit faces of the bounds box along this pixel's ray, depth-faded against
+// the scene like the brush outline.
+float boundsCage(vec3 ro, vec3 rd, vec3 c, vec3 he, float sceneT)
+{
+    vec3 s = step(0.0, rd) * 2.0 - 1.0;
+    vec3 inv = s / max(abs(rd), vec3(1e-6));
+    vec3 t0 = (c - he - ro) * inv;
+    vec3 t1 = (c + he - ro) * inv;
+    vec3 tmin = min(t0, t1);
+    vec3 tmax = max(t0, t1);
+    float tEnter = max(max(tmin.x, tmin.y), tmin.z);
+    float tExit = min(min(tmax.x, tmax.y), tmax.z);
+    float hit = (tExit >= max(tEnter, 0.0)) ? 1.0 : 0.0;
+    float cage = max(
+        cageFace(ro, rd, c, he, tEnter, sceneT),
+        cageFace(ro, rd, c, he, tExit, sceneT));
+    return cage * hit;
+}
+
 // Stats HUD (device builds; hudA.x = 0 on desktop, which has ImGui).
 // Rows top to bottom: fps | used bricks | atlas usage % | brush radius x1000
 // | smoothness x10000. Must be called LAST in main(): it blends over
@@ -136,6 +175,7 @@ void drawHud()
     v = max(v, hudNumber(texcoord, hudOrigin + vec2(0.0, rowStep * 3.0), int(ubo.hudB.x + 0.5), 3));
     v = max(v, hudNumber(texcoord, hudOrigin + vec2(0.0, rowStep * 4.0), int(ubo.hudB.y + 0.5), 3));
     outColor.rgb = mix(outColor.rgb, vec3(0.0, 0.25, 0.9), v);
+    outColor.a = max(outColor.a, v); // visible over passthrough
 }
 
 // Silhouette ring of a sphere.
@@ -154,6 +194,41 @@ void main()
 {
     const int vi = gl_ViewIndex;
     vec4 scene = texture(srcColor, vec3(texcoord, float(vi)));
+
+    // Deferred shading (ubo.hudB.w; desktop only): the brick shader computed the
+    // world normal (cache-coherent) and wrote it + albedo to the G-buffer; do
+    // only the lighting here. No atlas, no normal reconstruction.
+    if (ubo.hudB.w > 0.5) {
+        vec4 gn = texture(gNormal, vec3(texcoord, float(vi)));
+        if (gn.w > 0.5) {
+            // MSAA averages the normal across samples (and with cleared zeros at
+            // edges); normalize() recovers the direction.
+            vec3 n = normalize(gn.xyz);
+
+            // View direction = this pixel's camera ray (no depth needed).
+            vec2 ndc = vec2(texcoord.x * 2.0 - 1.0, 1.0 - texcoord.y * 2.0);
+            vec4 rv = ubo.invProj[vi] * vec4(ndc, -1.0, 1.0);
+            rv = vec4(rv.xy, -1.0, 0.0);
+            vec3 dir = normalize((ubo.invView[vi] * rv).xyz);
+
+            vec3 albedo = scene.rgb;
+            vec3 light = normalize(vec3(10.0, 10.0, 10.0));
+            float dif = clamp(dot(light, n), 0.0, 1.0);
+            vec3 reflectDir = reflect(light, n);
+            float spec = pow(max(dot(dir, reflectDir), 0.0), 32.0);
+            float baseLum = dot(albedo, vec3(0.2126, 0.7152, 0.0722));
+            float baseChroma = max(albedo.r, max(albedo.g, albedo.b)) - min(albedo.r, min(albedo.g, albedo.b));
+            bool matteFloorLike = (baseLum > 0.82 && baseChroma < 0.08);
+            vec3 lit;
+            if (matteFloorLike) {
+                lit = albedo * (0.18 + 0.82 * dif);
+            } else {
+                lit = albedo * dif * 0.7 + 0.1 + clamp(dot(dir, n) + 1.0, 0.0, 1.0) * 0.5 * vec3(1.0) + spec * 0.5;
+            }
+            scene.rgb = lit;
+        }
+    }
+
     outColor = scene;
 
     if (ubo.brushParams.y < 0.5) {
@@ -201,10 +276,22 @@ void main()
     float footprintFill = (hasSurface && sd < 0.0) ? 0.25 : 0.0;
     float footprintContour = hasSurface ? (1.0 - smoothstep(0.0, cw, abs(sd))) : 0.0;
 
-    // Add = brush color, remove = red.
+    // Add = brush color, remove = red. Alpha rises with the overlay so the
+    // indicator stays visible over the passthrough background (alpha 0
+    // pixels show the real world on Quest).
     vec3 lineColor = (ubo.brushParams.z >= 0.5) ? ubo.brushColor.rgb : vec3(1.0, 0.15, 0.15);
     float overlay = max(outline * occlusionFade * 0.9, max(footprintFill, footprintContour * 0.95));
-    outColor = vec4(mix(scene.rgb, lineColor, overlay), scene.a);
+    outColor = vec4(mix(scene.rgb, lineColor, overlay), max(scene.a, overlay));
+
+    // Sculptable-bounds cage: subtle blue box edges marking where stamps can
+    // land. Drawn after the composite above (which rebuilds from scene.rgb).
+    if (ubo.hudB.z > 0.5) {
+        vec3 boundsCenter = 0.5 * (ubo.chunkMin.xyz + ubo.chunkMax.xyz);
+        vec3 boundsHalf = 0.5 * (ubo.chunkMax.xyz - ubo.chunkMin.xyz);
+        float cage = boundsCage(ro, rd, boundsCenter, boundsHalf, sceneT);
+        outColor.rgb = mix(outColor.rgb, vec3(0.2, 0.45, 0.9), cage * 0.55);
+        outColor.a = max(outColor.a, cage * 0.55);
+    }
 
     // HUD draws last: anything composited from scene.rgb above must not
     // wipe it (that exact bug hid the digits on Quest, where the indicator

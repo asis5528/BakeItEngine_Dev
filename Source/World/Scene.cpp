@@ -1,6 +1,7 @@
 #include "Scene.h"
 #include <chrono>
 #include <iostream>
+#include "Features/Sdf/SdfBackend.h"
 #include "Core/Vulkan/VulkanUtils.h"
 #include "Core/Resources/ResourceManager.h"
 #include "Render/Renderer.h"
@@ -155,8 +156,25 @@ void Scene::update(float iTime) {
                         else {
                             BasicUbo bubo{};
                             if (object.shader[i].graphicsPipeline == pipelines[4]) {
-                                // Volumetric object base color; per-block emissive comes from block metadata.
-                                bubo.color = glm::vec4(1.0f, 0.35f, 0.75f, iTime);
+                                // Volumetric: .x carries the block-wireframe
+                                // debug flag, .y the deferred-lighting test flag
+                                // (SdfBrickFS reads those; surface color comes
+                                // from the block SSBO). Deferred is desktop-only.
+                                float deferredFlag = 0.0f;
+#ifndef BAKEIT_PLATFORM_ANDROID
+                                deferredFlag = deferredLighting ? 1.0f : 0.0f;
+#endif
+                                // .z carries the coarse-LOD level N (0 off, 2/4/8), read by SdfBrickVS/FS.
+                                // .w selects the FINE fetch path in SdfBrickFS: 0 = SSBO, 1 = dense
+                                // texture (A/B test), 2 = sparse tile pool (texture-native build). The
+                                // brick shaders never read iTime, so this channel is free.
+                                float fineTexFlag = 0.0f;
+#if defined(BAKEIT_SDF_TEXTURE_ATLAS)
+                                fineTexFlag = 2.0f; // tile pool is the only field store
+#elif !defined(BAKEIT_PLATFORM_ANDROID)
+                                fineTexFlag = fineTexFetch ? 1.0f : 0.0f;
+#endif
+                                bubo.color = glm::vec4(showBlockWireframe ? 1.0f : 0.0f, deferredFlag, float(coarseLodLevel), fineTexFlag);
                             } else {
                                 // Legacy behavior for non-volumetric basic materials.
                                 bubo.color = glm::inverse(ubo.model) * glm::vec4(camera->position, 1.);

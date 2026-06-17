@@ -24,7 +24,10 @@ struct alignas(16) BrushIndicatorUbo
 	// leaves hudA.x = 0). Rows top to bottom: fps, used bricks, atlas usage %,
 	// brush radius (x1000), brush smoothness (x10000).
 	glm::vec4 hudA; // x: show, y: fps, z: used bricks, w: atlas usage %
-	glm::vec4 hudB; // x: radius*1000, y: smoothness*10000
+	glm::vec4 hudB; // x: radius*1000, y: smoothness*10000, z: cage, w: deferred shading
+	// Sculptable chunk bounds, world space (the boundary cage).
+	glm::vec4 chunkMin;
+	glm::vec4 chunkMax;
 };
 }
 
@@ -33,15 +36,17 @@ PostProcessPass::PostProcessPass(VulkanBase* base, Scene *scene, Framebuffer* pr
 	this->base = base;
     this->scene = scene;
     this->previousFB = previousFB;
-    // Inherit the scene FB's layer/multiview setup so the Quest path renders
-    // both eyes of the post pass in one go.
-    Framebuffer* outputFB = new Framebuffer(base->vulkandevice, base->presentExtent().width, base->presentExtent().height, base->vulkandevice->getMaxUsableSampleCount(), base->presentFormat(), utils::findDepthFormat(base->vulkandevice->physicalDevice), previousFB->multiLayerView, previousFB->multiviewEnable);
+    // Inherit the scene FB's layer/multiview/aux setup so the Quest path
+    // renders both eyes of the post pass in one go without G-buffer slots.
+    Framebuffer* outputFB = new Framebuffer(base->vulkandevice, base->presentExtent().width, base->presentExtent().height, base->vulkandevice->getMaxUsableSampleCount(), base->presentFormat(), utils::findDepthFormat(base->vulkandevice->physicalDevice), previousFB->multiLayerView, previousFB->multiviewEnable, previousFB->auxAttachments);
     framebuffers.push_back(outputFB);
 
     Quad* quad = new Quad(base, framebuffers[0]);
     std::vector<descriptorTypes> passDescTypes = {
         descriptorTypes{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT },
         descriptorTypes{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+        descriptorTypes{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+        // Deferred-shading G-buffer: the brick shader's world normal (aux slot).
         descriptorTypes{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT }
     };
     quad->createGraphicsPipeline("shaders/Render/PostPassVS.spv", "shaders/Render/PostPassFS.spv", passDescTypes);
@@ -65,12 +70,24 @@ PostProcessPass::PostProcessPass(VulkanBase* base, Scene *scene, Framebuffer* pr
     sceneDepthTex.imageSampler = base->vbuffer->createTextureSampler(1);
     sceneDepthTex.imageViewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
     quad->textures.push_back(sceneDepthTex);
+
+    // Deferred-shading G-buffer: the scene pass's world-normal target (the aux
+    // slot). Quest has no aux/motion attachments, so bind the color image there
+    // as a harmless placeholder - the deferred flag (hudB.w) is desktop-only, so
+    // this sampler is never actually read on device.
+    VulkanTexture gNormalTex;
+    gNormalTex.imageView = previousFB->auxAttachments
+        ? previousFB->MultisampledAuxColorImage->imageView
+        : previousFB->MultisampledColorImage->imageView;
+    gNormalTex.imageSampler = base->vbuffer->createTextureSampler(1);
+    gNormalTex.imageViewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+    quad->textures.push_back(gNormalTex);
     quads.push_back(quad);
 }
 
 void PostProcessPass::createDescriptors() {
     for (auto q : quads) {
-		q->createdescriptors();
+        q->createdescriptors();
     }
 }
 
@@ -98,9 +115,12 @@ void PostProcessPass::update() {
     // desktop hides it while the camera is being flown.
     const bool visible = brush != nullptr && (scene->input == nullptr || !scene->input->cameraMoveMode);
     if (brush != nullptr) {
-        // brush->data.xyz is the negated world-space center (compute convention);
-        // remove stamps are 15% larger than add stamps, mirror that here.
-        const float effectiveRadius = brush->radius * (brush->action < 0.5f ? 1.15f : 1.0f);
+        // brush->data is the world-space mirror: xyz = negated center
+        // (compute convention), w = radius with the model's world-zoom scale
+        // applied - brush->radius is the raw object-space value and would
+        // draw the indicator at the wrong size while zoomed. Remove stamps
+        // are 15% larger than add stamps, mirror that here.
+        const float effectiveRadius = brush->data.w * (brush->action < 0.5f ? 1.15f : 1.0f);
         u.brushCenterRadius = glm::vec4(-glm::vec3(brush->data), effectiveRadius);
         u.brushParams = glm::vec4(float(brush->shapeMode), visible ? 1.0f : 0.0f, brush->action, 0.0f);
         u.brushColor = brush->color;
@@ -110,9 +130,13 @@ void PostProcessPass::update() {
     // On-device stats HUD; desktop shows these in the ImGui panels instead.
     u.hudA.x = 1.0f;
     u.hudA.y = scene->fps;
-    if (scene->sdfStats != nullptr) {
-        u.hudA.z = float(scene->sdfStats->usedBricks);
-        u.hudA.w = scene->sdfStats->usage * 100.0f;
+    if (scene->sdfVolume != nullptr) {
+        u.hudA.z = float(scene->sdfVolume->stats.usedBricks);
+        u.hudA.w = scene->sdfVolume->stats.usage * 100.0f;
+        // Boundary cage so the user can see the sculptable region.
+        u.hudB.z = 1.0f;
+        u.chunkMin = glm::vec4(scene->sdfVolume->boundsMinWS, 0.0f);
+        u.chunkMax = glm::vec4(scene->sdfVolume->boundsMaxWS, 0.0f);
     }
     if (brush != nullptr) {
         u.hudB.x = brush->radius * 1000.0f;
@@ -126,6 +150,19 @@ void PostProcessPass::update() {
                                 "hud: show=%.0f fps=%.0f bricks=%.0f uboSize=%zu",
                                 double(u.hudA.x), double(u.hudA.y), double(u.hudA.z), sizeof(u));
         }
+    }
+#endif
+#ifndef BAKEIT_PLATFORM_ANDROID
+    // Deferred-shading toggle (desktop): when set the brick shader writes the
+    // normal to the G-buffer and the post pass does the lighting. Off on Quest.
+    u.hudB.w = scene->deferredLighting ? 1.0f : 0.0f;
+    // Sculptable-bounds cage (desktop): same blue box the Quest build always
+    // shows, here behind the editor's "Show Bounds" toggle. hudB.z enables it in
+    // PostPassFS; the box spans the SDF volume's world-space bounds.
+    if (scene->showChunkBounds && scene->sdfVolume != nullptr) {
+        u.hudB.z = 1.0f;
+        u.chunkMin = glm::vec4(scene->sdfVolume->boundsMinWS, 0.0f);
+        u.chunkMax = glm::vec4(scene->sdfVolume->boundsMaxWS, 0.0f);
     }
 #endif
     indicatorUbo[0].map(base->device, sizeof(u), &u);
@@ -154,6 +191,9 @@ void PostProcessPass::recreate(VkExtent2D ex)
     if (!quads.empty()) {
         quads[0]->textures[0].imageView = previousFB->MultisampledColorImage->imageView;
         quads[0]->textures[1].imageView = previousFB->MultisampledDepthImage->imageView;
+        quads[0]->textures[2].imageView = previousFB->auxAttachments
+            ? previousFB->MultisampledAuxColorImage->imageView
+            : previousFB->MultisampledColorImage->imageView;
     }
 }
 

@@ -4,10 +4,13 @@ C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\Features\Flu
 C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\Features\Sdf\Edit\SdfEditor.cpp;C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\x64\Debug\SdfEditor.obj
 C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\Features\Sdf\Edit\SdfDrawList.cpp;C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\x64\Debug\SdfDrawList.obj
 C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\Platform\Desktop\Input.cpp;C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\x64\Debug\Input.obj
+C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\Platform\Desktop\DesktopBrushInput.cpp;C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\x64\Debug\DesktopBrushInput.obj
+C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\Platform\Desktop\QuestDeploy.cpp;C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\x64\Debug\QuestDeploy.obj
 C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\World\Camera\Camera.cpp;C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\x64\Debug\Camera.obj
 C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\Core\Pipelines\ComputePipeline.cpp;C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\x64\Debug\ComputePipeline.obj
 C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\Editor\EditorGui.cpp;C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\x64\Debug\EditorGui.obj
 C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\Core\Pipelines\GraphicsPipeline.cpp;C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\x64\Debug\GraphicsPipeline.obj
+C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\Core\Pipelines\ShaderHotReload.cpp;C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\x64\Debug\ShaderHotReload.obj
 C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\Core\Vulkan\Framebuffer.cpp;C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\x64\Debug\Framebuffer.obj
 C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\Imgui\imgui.cpp;C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\x64\Debug\imgui.obj
 C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\Imgui\imgui_demo.cpp;C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\x64\Debug\imgui_demo.obj

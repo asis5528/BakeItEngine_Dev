@@ -123,7 +123,14 @@ float sdfPlanePatch(vec3 p, float radius) {
 
 void main()
 {
-    const ivec3 dims = ivec3(64 * 8);       // 512^3 sample domain
+    // Sample-domain resolution is a parameter (ubo._pad0): the fine atlas uses
+    // 64*8 = 512, a coarse LOD atlas uses fewer cells (e.g. 16*8 = 128) so the
+    // SAME brush op stamps a clean low-res SDF directly into the coarse level -
+    // no downsampling of the discretized fine field (which aliased thin
+    // features into blobs). 0 falls back to fine for safety.
+    int gridCells = int(ubo._pad0 + 0.5);
+    if (gridCells <= 0) { gridCells = 64 * 8; }
+    const ivec3 dims = ivec3(gridCells);
     const ivec3 blockDim = ivec3(8);
     const ivec3 blocksPerAxis = dims / blockDim;
 
@@ -224,7 +231,18 @@ void main()
     // that grazes the surface at a corner/edge discards values its neighbors
     // still store, and the mismatch renders as crease lines along block
     // boundaries when the block is stamped again later.
-    bool hasSurface = hasCrossing || (sNearSurfaceCount > 0u);
+    //
+    // REMOVE exception: the eraser's own boundary writes small positive
+    // values (h = max(-brush, h)) through empty space, so the band rule kept
+    // "ghost" bricks alive after their surface was fully erased (stale
+    // wireframe cages that only a bigger eraser cleaned up). During remove,
+    // band-only keeps additionally require a negative sample - material in
+    // this brick or its +XYZ padding row. Tradeoff: a remove grazing a
+    // surface that lies just past the -X/-Y/-Z faces frees a graze block a
+    // future re-add would have blended with (possible faint crease there).
+    bool bandKeep = (sNearSurfaceCount > 0u) &&
+        (ubo.BrushAction >= 0.5 || sHasNegative != 0u);
+    bool hasSurface = hasCrossing || bandKeep;
 
     // Block-level storage decision (thread 0 only).
     if (lid == 0u) {

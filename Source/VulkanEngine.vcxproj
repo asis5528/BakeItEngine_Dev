@@ -167,6 +167,8 @@ if exist "$(SolutionDir)ThirdParty\Libs\glfw3.dll" copy /Y "$(SolutionDir)ThirdP
     <None Include="shaders\Fluid\GaussianFluidSimCS.comp" />
     <None Include="shaders\Sdf\MeshToSdfCS.comp" />
     <None Include="shaders\Sdf\SdfBrushCS.comp" />
+    <None Include="shaders\Sdf\SdfBrushTexCS.comp" />
+    <None Include="shaders\Sdf\SdfFineToTexCS.comp" />
     <None Include="shaders\Sdf\SdfDrawListCountCS.comp" />
     <None Include="shaders\Sdf\SdfDrawListScanCS.comp" />
     <None Include="shaders\Sdf\SdfDrawListScatterCS.comp" />
@@ -184,6 +186,7 @@ if exist "$(SolutionDir)ThirdParty\Libs\glfw3.dll" copy /Y "$(SolutionDir)ThirdP
     <ClCompile Include="Core\Pipelines\ComputePipeline.cpp" />
     <ClCompile Include="Editor\EditorGui.cpp" />
     <ClCompile Include="Core\Pipelines\GraphicsPipeline.cpp" />
+    <ClCompile Include="Core\Pipelines\ShaderHotReload.cpp" />
     <ClCompile Include="Core\Vulkan\Framebuffer.cpp" />
     <ClCompile Include="Imgui\imgui.cpp" />
     <ClCompile Include="Imgui\imgui_demo.cpp" />
@@ -223,6 +226,7 @@ if exist "$(SolutionDir)ThirdParty\Libs\glfw3.dll" copy /Y "$(SolutionDir)ThirdP
     <ClInclude Include="EngineContext.h" />
     <ClInclude Include="Features\Fluid\GaussianFluidSim.h" />
     <ClInclude Include="Features\Sdf\Edit\SdfEditor.h" />
+    <ClInclude Include="Features\Sdf\SdfBackend.h" />
     <ClInclude Include="Features\Sdf\SdfVolume.h" />
     <ClInclude Include="Features\Sdf\Edit\BrushState.h" />
     <ClInclude Include="Features\Sdf\Edit\SdfDrawList.h" />
@@ -235,6 +239,7 @@ if exist "$(SolutionDir)ThirdParty\Libs\glfw3.dll" copy /Y "$(SolutionDir)ThirdP
     <ClInclude Include="Core\Pipelines\ComputePipeline.h" />
     <ClInclude Include="Editor\EditorGui.h" />
     <ClInclude Include="Core\Pipelines\GraphicsPipeline.h" />
+    <ClInclude Include="Core\Pipelines\ShaderHotReload.h" />
     <ClInclude Include="Core\Vulkan\Framebuffer.h" />
     <ClInclude Include="Core\Vulkan\VulkanPlatformHooks.h" />
     <ClInclude Include="Imgui\imconfig.h" />

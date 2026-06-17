@@ -36,7 +36,14 @@ class Framebuffer
 		// this off (layered images exist but only view 0 is drawn); the Quest
 		// path turns it on so both eyes render in a single pass.
 		bool multiviewEnable = false;
-		Framebuffer(VulkanDevice *vulkandevice , uint32_t width, uint32_t height,VkSampleCountFlagBits msaaSamples,VkFormat colorFormat, VkFormat depthFormat, int MultiLayerView = 1, bool multiviewEnable = false);
+		// G-buffer slots (aux worldpos + motion vectors, RGBA32F). Desktop
+		// keeps them for future deferred work; the Quest path turns them off -
+		// two unread 16B/px attachments are pure store bandwidth on a tiler
+		// (the dominant cost at eye-buffer resolution). When false the pass is
+		// color+depth only and pipelines must use colorAttachmentCount = 1.
+		// Aux-less mode supports 1-sample only (no resolve chain).
+		bool auxAttachments = true;
+		Framebuffer(VulkanDevice *vulkandevice , uint32_t width, uint32_t height,VkSampleCountFlagBits msaaSamples,VkFormat colorFormat, VkFormat depthFormat, int MultiLayerView = 1, bool multiviewEnable = false, bool auxAttachments = true);
 		~Framebuffer();
 		void clean();
 		void recreate();

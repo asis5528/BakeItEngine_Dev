@@ -1,0 +1,108 @@
+#version 450
+
+// SdfDownsampleCS - builds the COARSE (downsampled) SDF brick atlas for one LOD
+// level. One workgroup per coarse block (coarse grid = 64/N per axis), 9^3
+// threads (one per coarse brick sample). Each coarse sample re-samples the FINE
+// field at its world position, producing a 1/N-resolution brick that covers N
+// fine blocks. A coarse cube can then march an 8-cell brick instead of the full
+// N*8-cell region - that is what makes a coarse pixel as cheap as a fine one.
+//
+// Rebuilt wholesale per call with a bump allocator (coarseTail reset to 0 by the
+// CPU before dispatch); the incremental dirty-rebuild + idle phasing come later.
+
+layout(local_size_x = 9, local_size_y = 9, local_size_z = 9) in;
+
+layout(binding = 0) uniform CoarseUbo {
+    ivec4 dims;   // x: coarseN, y: coarseBlocksPerAxis, z: fineBlocksPerAxis
+    vec4  params; // x: clampVal (world-dist clamp ~= coarse block size)
+} ubo;
+
+layout(std430, binding = 1) readonly buffer FineBrickBuffer { float fineBricks[]; };
+layout(std430, binding = 2) readonly buffer FineBlockBuffer { int   fineBlocks[]; };
+layout(std430, binding = 3) buffer CoarseBrickBuffer { float coarseBricks[]; };
+layout(std430, binding = 4) buffer CoarseBlockBuffer { int   coarseBlocks[]; };
+layout(std430, binding = 5) buffer CoarseCounter      { int   coarseTail; };
+
+const int BLOCK_EMISSIVE_FLAG = (1 << 30);
+const int BLOCK_INDEX_MASK = BLOCK_EMISSIVE_FLAG - 1;
+const int BLOCK_INTERIOR = -999998;
+const int BRICK_DIM = 9;
+const int BRICK_STRIDE = 9 * 9 * 9;
+const int CELLS = 8; // fine cells per block
+
+shared uint sActive;
+shared int  sBase;
+
+float fetchFine(int base, ivec3 p)
+{
+    return fineBricks[base + p.x + p.y * BRICK_DIM + p.z * BRICK_DIM * BRICK_DIM];
+}
+
+// Nearest fine field value (world distance) at an integer voxel. Surface blocks
+// give the stored brick value; brick-less blocks give a clamped sentinel
+// (empty -> +clamp, interior -> -clamp).
+float sampleFineNearest(ivec3 v, int fineBPA, float clampVal)
+{
+    v = clamp(v, ivec3(0), ivec3(fineBPA * CELLS - 1));
+    ivec3 bc = v / CELLS;
+    int raw = fineBlocks[bc.x + bc.y * fineBPA + bc.z * fineBPA * fineBPA];
+    if (raw < 0) {
+        return (raw == BLOCK_INTERIOR) ? -clampVal : clampVal;
+    }
+    int brick = raw & BLOCK_INDEX_MASK;
+    ivec3 lc = v - bc * CELLS; // 0..7
+    return clamp(fetchFine(brick, lc), -clampVal, clampVal);
+}
+
+void main()
+{
+    int N         = ubo.dims.x;
+    int coarseBPA = ubo.dims.y;
+    int fineBPA   = ubo.dims.z;
+    float clampVal = ubo.params.x;
+
+    ivec3 coarseCoord = ivec3(gl_WorkGroupID);
+    int coarseIndex = coarseCoord.x + coarseCoord.y * coarseBPA + coarseCoord.z * coarseBPA * coarseBPA;
+    uint lid = gl_LocalInvocationIndex;
+
+    if (lid == 0u) {
+        sActive = 0u;
+        sBase = -1;
+        // Active coarse block = any fine child is a surface block.
+        ivec3 childBase = coarseCoord * N;
+        for (int dz = 0; dz < N; ++dz)
+            for (int dy = 0; dy < N; ++dy)
+                for (int dx = 0; dx < N; ++dx) {
+                    ivec3 cc = childBase + ivec3(dx, dy, dz);
+                    int raw = fineBlocks[cc.x + cc.y * fineBPA + cc.z * fineBPA * fineBPA];
+                    if (raw >= 0) { sActive = 1u; }
+                }
+        if (sActive != 0u) {
+            sBase = atomicAdd(coarseTail, BRICK_STRIDE);
+        }
+    }
+    barrier();
+
+    if (sActive == 0u) {
+        if (lid == 0u) { coarseBlocks[coarseIndex] = -1; } // empty / no brick
+        return;
+    }
+
+    // Each thread writes one coarse brick sample. CONSERVATIVE (min-pooled)
+    // downsample: take the most-inside fine value over the N^3 fine cells this
+    // coarse sample covers, so thin necks (anywhere in the cell) survive instead
+    // of aliasing into disconnected blobs. Slightly fattens the surface, which
+    // is invisible at the distance coarse LOD is used.
+    ivec3 localOffset = ivec3(gl_LocalInvocationID);                 // 0..8
+    ivec3 baseVoxel = coarseCoord * (N * CELLS) + localOffset * N;   // coarse sample's fine voxel
+    float val = clampVal;
+    for (int oz = 0; oz < N; ++oz)
+        for (int oy = 0; oy < N; ++oy)
+            for (int ox = 0; ox < N; ++ox) {
+                ivec3 v = baseVoxel + ivec3(ox, oy, oz) - ivec3(N / 2);
+                val = min(val, sampleFineNearest(v, fineBPA, clampVal));
+            }
+    coarseBricks[sBase + int(lid)] = val;
+
+    if (lid == 0u) { coarseBlocks[coarseIndex] = sBase; }
+}

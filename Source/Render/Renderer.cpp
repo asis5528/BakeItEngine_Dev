@@ -14,12 +14,16 @@ void Renderer::init(Scene* scene)
 	standardSampler = base->vbuffer->createTextureSampler(1);
 
 #ifdef BAKEIT_PLATFORM_ANDROID
-	// Quest: true multiview - one pass rasterizes both eye layers.
+	// Quest: true multiview - one pass rasterizes both eye layers. The
+	// aux/motion G-buffer slots stay desktop-only: two unread RGBA32F
+	// attachments are pure store bandwidth on a tiled GPU.
 	const bool multiview = true;
+	const bool aux = false;
 #else
 	const bool multiview = false;
+	const bool aux = true;
 #endif
-	Framebuffer* frameBuffer = new Framebuffer(base->vulkandevice, base->presentExtent().width, base->presentExtent().height, base->vulkandevice->getMaxUsableSampleCount(), base->presentFormat(), utils::findDepthFormat(base->vulkandevice->physicalDevice), 2, multiview);
+	Framebuffer* frameBuffer = new Framebuffer(base->vulkandevice, base->presentExtent().width, base->presentExtent().height, base->vulkandevice->getMaxUsableSampleCount(), base->presentFormat(), utils::findDepthFormat(base->vulkandevice->physicalDevice), 2, multiview, aux);
 	framebuffers.push_back(frameBuffer);
 	// Post-process chain runs on both platforms (it carries the brush
 	// indicator overlay); on Quest its output framebuffer inherits the

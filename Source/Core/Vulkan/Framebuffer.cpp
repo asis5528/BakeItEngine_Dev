@@ -3,12 +3,16 @@
 #include <stdexcept>
 #include <vector>
 //REMEMBER TO NO APPLY MULTISAMPLED COLOR FOR NO MSAA SAMPLES FRAMEBUFFERS FOR OPTIMIZATION
-Framebuffer::Framebuffer(VulkanDevice *vulkandevice , uint32_t width, uint32_t height, VkSampleCountFlagBits msaaSamples, VkFormat colorFormat, VkFormat depthFormat,int MultiLayerView, bool multiviewEnable) {
+Framebuffer::Framebuffer(VulkanDevice *vulkandevice , uint32_t width, uint32_t height, VkSampleCountFlagBits msaaSamples, VkFormat colorFormat, VkFormat depthFormat,int MultiLayerView, bool multiviewEnable, bool auxAttachments) {
 	this->width = width;
 	this->height = height;
     this->vulkandevice = vulkandevice;
     this->multiLayerView = MultiLayerView;
     this->multiviewEnable = multiviewEnable && MultiLayerView > 1;
+    this->auxAttachments = auxAttachments;
+    if (!auxAttachments && msaaSamples != VK_SAMPLE_COUNT_1_BIT) {
+        throw std::runtime_error("aux-less framebuffer supports 1-sample only");
+    }
    // this->device = device;
     //this->physicalDevice = physicalDevice;
     this->msaaSamples = msaaSamples;
@@ -26,8 +30,10 @@ void Framebuffer::clean() {
         displayImageView = VK_NULL_HANDLE;
     }
     ColorImage->destroy();
-    AuxColorImage->destroy();
-    MotionVectorImage->destroy();
+    if (auxAttachments) {
+        AuxColorImage->destroy();
+        MotionVectorImage->destroy();
+    }
     DepthImage->destroy();
     // In 1-sample mode the Multisampled* pointers alias the base images
     // (no resolve targets exist) - avoid destroying them twice.
@@ -318,12 +324,17 @@ void Framebuffer::createRenderPass() {
     // base images (createFrameBuffer aliases the Multisampled* pointers).
     const bool msaaEnabled = (msaaSamples != VK_SAMPLE_COUNT_1_BIT);
 
+    // Aux-less (Quest) layout: color = 0, depth = 1, single color output.
+    if (!auxAttachments) {
+        depthAttachmentRef.attachment = 1;
+    }
+
     VkSubpassDescription2 subpass{};
     subpass.sType = VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_2;
     subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
     std::array<VkAttachmentReference2, 3> colorAttachments = { colorAttachmentRef, auxColorAttachmentRef, motionAttachmentRef };
     std::array<VkAttachmentReference2, 3> colorResolveAttachments = { colorAttachmentResolveRef, auxColorAttachmentResolveRef, motionAttachmentResolveRef };
-    subpass.colorAttachmentCount = static_cast<uint32_t>(colorAttachments.size());
+    subpass.colorAttachmentCount = auxAttachments ? static_cast<uint32_t>(colorAttachments.size()) : 1u;
     subpass.pColorAttachments = colorAttachments.data();
     subpass.pDepthStencilAttachment = &depthAttachmentRef;
     subpass.pResolveAttachments = msaaEnabled ? colorResolveAttachments.data() : nullptr;
@@ -370,17 +381,17 @@ void Framebuffer::createRenderPass() {
     dependencies[1].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
     dependencies[1].viewOffset = 0;
 
-    std::vector<VkAttachmentDescription2> attachments = {
-        colorAttachment,
-        auxColorAttachment,
-        motionAttachment,
-        depthAttachment
-    };
-    if (msaaEnabled) {
-        attachments.push_back(colorAttachmentResolve);
-        attachments.push_back(auxColorAttachmentResolve);
-        attachments.push_back(motionAttachmentResolve);
-        attachments.push_back(depthAttachmentResolve);
+    std::vector<VkAttachmentDescription2> attachments;
+    if (auxAttachments) {
+        attachments = { colorAttachment, auxColorAttachment, motionAttachment, depthAttachment };
+        if (msaaEnabled) {
+            attachments.push_back(colorAttachmentResolve);
+            attachments.push_back(auxColorAttachmentResolve);
+            attachments.push_back(motionAttachmentResolve);
+            attachments.push_back(depthAttachmentResolve);
+        }
+    } else {
+        attachments = { colorAttachment, depthAttachment };
     }
 
     // True multiview (renderpass2 style): subpass.viewMask 0b11 broadcasts
@@ -448,13 +459,18 @@ void Framebuffer::createFrameBuffer() {
     ColorImage->createImage(width, height,1, VK_IMAGE_TYPE_2D,1, this->msaaSamples, colorFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT , VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, multiLayerView);
     ColorImage->createImageView(colorFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1, viewType, multiLayerView);
 
-    AuxColorImage = new VulkanImage(vulkandevice->device, vulkandevice->physicalDevice);
-    AuxColorImage->createImage(width, height, 1, VK_IMAGE_TYPE_2D, 1, this->msaaSamples, VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, multiLayerView);
-    AuxColorImage->createImageView(VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, 1, viewType, multiLayerView);
+    if (auxAttachments) {
+        AuxColorImage = new VulkanImage(vulkandevice->device, vulkandevice->physicalDevice);
+        AuxColorImage->createImage(width, height, 1, VK_IMAGE_TYPE_2D, 1, this->msaaSamples, VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, multiLayerView);
+        AuxColorImage->createImageView(VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, 1, viewType, multiLayerView);
 
-    MotionVectorImage = new VulkanImage(vulkandevice->device, vulkandevice->physicalDevice);
-    MotionVectorImage->createImage(width, height, 1, VK_IMAGE_TYPE_2D, 1, this->msaaSamples, VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, multiLayerView);
-    MotionVectorImage->createImageView(VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, 1, viewType, multiLayerView);
+        MotionVectorImage = new VulkanImage(vulkandevice->device, vulkandevice->physicalDevice);
+        MotionVectorImage->createImage(width, height, 1, VK_IMAGE_TYPE_2D, 1, this->msaaSamples, VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, multiLayerView);
+        MotionVectorImage->createImageView(VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, 1, viewType, multiLayerView);
+    } else {
+        AuxColorImage = nullptr;
+        MotionVectorImage = nullptr;
+    }
 
     DepthImage = new VulkanImage(vulkandevice->device, vulkandevice->physicalDevice);
     DepthImage->createImage(width, height,1, VK_IMAGE_TYPE_2D, 1,this->msaaSamples, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, multiLayerView);
@@ -489,17 +505,22 @@ void Framebuffer::createFrameBuffer() {
         MultisampledDepthImage = DepthImage;
     }
 
-    std::vector<VkImageView> attachments = {
-        ColorImage->imageView,
-        AuxColorImage->imageView,
-        MotionVectorImage->imageView,
-        DepthImage->imageView
-    };
-    if (msaaEnabled) {
-        attachments.push_back(MultisampledColorImage->imageView);
-        attachments.push_back(MultisampledAuxColorImage->imageView);
-        attachments.push_back(MultisampledMotionVectorImage->imageView);
-        attachments.push_back(MultisampledDepthImage->imageView);
+    std::vector<VkImageView> attachments;
+    if (auxAttachments) {
+        attachments = {
+            ColorImage->imageView,
+            AuxColorImage->imageView,
+            MotionVectorImage->imageView,
+            DepthImage->imageView
+        };
+        if (msaaEnabled) {
+            attachments.push_back(MultisampledColorImage->imageView);
+            attachments.push_back(MultisampledAuxColorImage->imageView);
+            attachments.push_back(MultisampledMotionVectorImage->imageView);
+            attachments.push_back(MultisampledDepthImage->imageView);
+        }
+    } else {
+        attachments = { ColorImage->imageView, DepthImage->imageView };
     }
     VkFramebufferCreateInfo framebufferInfo{};
     framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
@@ -544,12 +565,21 @@ void Framebuffer::beginRenderPass(VkCommandBuffer commandBuffer) {
     resolution.height = height;
     renderPassInfo.renderArea.extent = resolution;
 
-    std::array<VkClearValue, 4> clearValues{};
-    clearValues[0].color = { {1.f, 1.f, 1.f, 1.f} };
-    clearValues[1].color = { {0.f, 0.f, 0.f, 0.f} };
-    clearValues[2].color = { {0.f, 0.f, 0.f, 0.f} };
-    clearValues[3].depthStencil = { 1.0f, 0 };
-
+    std::vector<VkClearValue> clearValues;
+    VkClearValue clearColor{};
+    // Aux-less (Quest) framebuffers clear alpha to 0: the compositor blends
+    // the projection layer over passthrough by alpha, so background pixels
+    // show the real world while sculpted surfaces (alpha 1) stay solid.
+    clearColor.color = { {1.f, 1.f, 1.f, auxAttachments ? 1.f : 0.f} };
+    VkClearValue clearZero{};
+    clearZero.color = { {0.f, 0.f, 0.f, 0.f} };
+    VkClearValue clearDepth{};
+    clearDepth.depthStencil = { 1.0f, 0 };
+    if (auxAttachments) {
+        clearValues = { clearColor, clearZero, clearZero, clearDepth };
+    } else {
+        clearValues = { clearColor, clearDepth };
+    }
 
     renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
     renderPassInfo.pClearValues = clearValues.data();

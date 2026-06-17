@@ -13,8 +13,9 @@
 //   Right controller: aim ray = brush wand, trigger = draw, grip = erase,
 //                     thumbstick X/Y = radius / brush distance,
 //                     A = shape toggle, B = emissive toggle.
-//   Left controller:  thumbstick Y = smoothness, trigger = recolor modifier,
-//                     X = clear scene.
+//   Left controller:  thumbstick X/Y = smoothness / world zoom,
+//                     trigger = recolor modifier, grip (hold) = block
+//                     wireframe view, X = clear scene.
 //
 // Shader .spv files ship as APK assets, are extracted to internal storage at
 // startup, and chdir() makes the engine's relative "shaders/..." paths work
@@ -99,6 +100,7 @@ struct XrInput
     XrAction shapeButton = XR_NULL_HANDLE;   // A (bool)
     XrAction emissiveButton = XR_NULL_HANDLE;// B (bool)
     XrAction recolorTrigger = XR_NULL_HANDLE;// left trigger (float)
+    XrAction wireframeSqueeze = XR_NULL_HANDLE; // left grip (float) - hold for block wireframe
     XrAction clearButton = XR_NULL_HANDLE;   // X (bool)
     XrSpace aimSpace = XR_NULL_HANDLE;
 
@@ -109,6 +111,7 @@ struct XrInput
     bool drawDown = false;
     bool eraseDown = false;
     bool recolorDown = false;
+    bool wireframeDown = false; // left grip held
     bool shapePressed = false;    // this-frame edges
     bool emissivePressed = false;
     bool clearPressed = false;
@@ -151,6 +154,13 @@ struct App
 
     XrInput input;
     float lastFrameTimeSec = -1.0f;
+    float worldScale = 1.0f; // left stick Y zooms the sculpt volume
+
+    // XR_FB_passthrough: the real world as the background (the projection
+    // layer alpha-blends over it; scene clear alpha is 0 on Quest).
+    bool passthroughSupported = false;
+    XrPassthroughFB passthrough = XR_NULL_HANDLE;
+    XrPassthroughLayerFB passthroughLayer = XR_NULL_HANDLE;
 };
 
 // The engine, wired the same way main.cpp wires it on desktop (minus
@@ -201,7 +211,7 @@ public:
         // range in a couple of seconds (SdfEditor scales these deltas).
         b.radiusDelta = stickDeadzone(in->stickR.x) * 3.5f;
         b.distanceDelta = stickDeadzone(in->stickR.y) * 1.2f;
-        b.smoothnessDelta = stickDeadzone(in->stickL.y) * 0.35f;
+        b.smoothnessDelta = stickDeadzone(in->stickL.x) * 0.35f;
 
         // SdfEditor's stroke gate wants a 2D cursor that moves while the
         // stroke moves (stamp when it travels > ~0.5 units). Feed it the
@@ -278,10 +288,24 @@ void createXrInstance(App& app)
     loaderInit.applicationContext = app.androidApp->activity->clazz;
     XR_CHECK(initializeLoader(reinterpret_cast<const XrLoaderInitInfoBaseHeaderKHR*>(&loaderInit)));
 
-    const char* extensions[] = {
+    // Passthrough is optional (graceful fallback to the void background).
+    uint32_t extCount = 0;
+    xrEnumerateInstanceExtensionProperties(nullptr, 0, &extCount, nullptr);
+    std::vector<XrExtensionProperties> extProps(extCount, {XR_TYPE_EXTENSION_PROPERTIES});
+    xrEnumerateInstanceExtensionProperties(nullptr, extCount, &extCount, extProps.data());
+    for (const XrExtensionProperties& p : extProps) {
+        if (std::strcmp(p.extensionName, XR_FB_PASSTHROUGH_EXTENSION_NAME) == 0) {
+            app.passthroughSupported = true;
+        }
+    }
+
+    std::vector<const char*> extensions = {
         XR_KHR_VULKAN_ENABLE2_EXTENSION_NAME,
         XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME,
     };
+    if (app.passthroughSupported) {
+        extensions.push_back(XR_FB_PASSTHROUGH_EXTENSION_NAME);
+    }
 
     XrInstanceCreateInfoAndroidKHR androidInfo{XR_TYPE_INSTANCE_CREATE_INFO_ANDROID_KHR};
     androidInfo.applicationVM = app.androidApp->activity->vm;
@@ -294,8 +318,8 @@ void createXrInstance(App& app)
     createInfo.applicationInfo.applicationVersion = 1;
     createInfo.applicationInfo.engineVersion = 1;
     createInfo.applicationInfo.apiVersion = XR_MAKE_VERSION(1, 0, 0);
-    createInfo.enabledExtensionCount = 2;
-    createInfo.enabledExtensionNames = extensions;
+    createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
+    createInfo.enabledExtensionNames = extensions.data();
     XR_CHECK(xrCreateInstance(&createInfo, &app.xrInstance));
 
     XrSystemGetInfo systemInfo{XR_TYPE_SYSTEM_GET_INFO};
@@ -455,6 +479,47 @@ void createSessionAndSwapchain(App& app)
     }
 }
 
+// --------------------------------------------------------- passthrough -----
+// XR_FB_passthrough: feed the headset cameras as the background layer. The
+// projection layer alpha-blends over it (scene clear alpha is 0 on Quest),
+// so the sculpture floats in the real room - mixed-reality cake decorating.
+
+void createPassthrough(App& app)
+{
+    if (!app.passthroughSupported) {
+        LOGI("Passthrough: extension not available, keeping void background");
+        return;
+    }
+
+    PFN_xrCreatePassthroughFB createPassthroughFB = nullptr;
+    PFN_xrCreatePassthroughLayerFB createLayerFB = nullptr;
+    XR_CHECK(xrGetInstanceProcAddr(app.xrInstance, "xrCreatePassthroughFB",
+                                   reinterpret_cast<PFN_xrVoidFunction*>(&createPassthroughFB)));
+    XR_CHECK(xrGetInstanceProcAddr(app.xrInstance, "xrCreatePassthroughLayerFB",
+                                   reinterpret_cast<PFN_xrVoidFunction*>(&createLayerFB)));
+
+    XrPassthroughCreateInfoFB ptInfo{XR_TYPE_PASSTHROUGH_CREATE_INFO_FB};
+    ptInfo.flags = XR_PASSTHROUGH_IS_RUNNING_AT_CREATION_BIT_FB;
+    XrResult result = createPassthroughFB(app.session, &ptInfo, &app.passthrough);
+    if (XR_FAILED(result)) {
+        LOGE("Passthrough create failed (%d), keeping void background", result);
+        app.passthroughSupported = false;
+        return;
+    }
+
+    XrPassthroughLayerCreateInfoFB layerInfo{XR_TYPE_PASSTHROUGH_LAYER_CREATE_INFO_FB};
+    layerInfo.passthrough = app.passthrough;
+    layerInfo.purpose = XR_PASSTHROUGH_LAYER_PURPOSE_RECONSTRUCTION_FB;
+    layerInfo.flags = XR_PASSTHROUGH_IS_RUNNING_AT_CREATION_BIT_FB;
+    result = createLayerFB(app.session, &layerInfo, &app.passthroughLayer);
+    if (XR_FAILED(result)) {
+        LOGE("Passthrough layer create failed (%d), keeping void background", result);
+        app.passthroughSupported = false;
+        return;
+    }
+    LOGI("Passthrough background active");
+}
+
 // ------------------------------------------------------------ XR input -----
 
 XrAction makeAction(XrActionSet set, XrActionType type, const char* name, const char* localized)
@@ -485,6 +550,7 @@ void createXrInput(App& app)
     in.shapeButton = makeAction(in.actionSet, XR_ACTION_TYPE_BOOLEAN_INPUT, "shape_toggle", "Shape Toggle");
     in.emissiveButton = makeAction(in.actionSet, XR_ACTION_TYPE_BOOLEAN_INPUT, "emissive_toggle", "Emissive Toggle");
     in.recolorTrigger = makeAction(in.actionSet, XR_ACTION_TYPE_FLOAT_INPUT, "recolor", "Recolor Modifier");
+    in.wireframeSqueeze = makeAction(in.actionSet, XR_ACTION_TYPE_FLOAT_INPUT, "wireframe", "Block Wireframe");
     in.clearButton = makeAction(in.actionSet, XR_ACTION_TYPE_BOOLEAN_INPUT, "clear_scene", "Clear Scene");
 
     auto path = [&](const char* p) {
@@ -502,6 +568,7 @@ void createXrInput(App& app)
         { in.emissiveButton, path("/user/hand/right/input/b/click") },
         { in.stickLeft, path("/user/hand/left/input/thumbstick") },
         { in.recolorTrigger, path("/user/hand/left/input/trigger/value") },
+        { in.wireframeSqueeze, path("/user/hand/left/input/squeeze/value") },
         { in.clearButton, path("/user/hand/left/input/x/click") },
     };
     XrInteractionProfileSuggestedBinding suggested{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
@@ -565,6 +632,8 @@ void syncXrInput(App& app, XrTime displayTime)
     const float eraseValue = getFloat(in.eraseSqueeze);
     in.eraseDown = eraseValue > (in.eraseDown ? 0.35f : 0.6f);
     in.recolorDown = getFloat(in.recolorTrigger) > 0.5f;
+    const float wireValue = getFloat(in.wireframeSqueeze);
+    in.wireframeDown = wireValue > (in.wireframeDown ? 0.35f : 0.6f);
 
     in.shapePressed = getPressedEdge(in.shapeButton);
     in.emissivePressed = getPressedEdge(in.emissiveButton);
@@ -708,7 +777,7 @@ void initEngineScene(App& app, Engine& eng)
     eng.sdfEditor = new SdfEditor(eng.ctx);
     eng.scene->SBOs.push_back(eng.sdfEditor->computeSBO);
     eng.scene->brush = &eng.sdfEditor->brush;
-    eng.scene->sdfStats = &eng.sdfEditor->volume.stats; // HUD source
+    eng.scene->sdfVolume = &eng.sdfEditor->volume; // HUD stats + boundary cage
     eng.sdfEditor->brushInput = new QuestBrushInput(&app.input, &kWorldToStage);
 
     // Volumetric material: placeholder 1x1x1 3D texture (same as desktop).
@@ -726,7 +795,11 @@ void initEngineScene(App& app, Engine& eng)
         eng.scene->SBOs[0][1],
         eng.scene->SBOs[0][2],
         eng.scene->SBOs[0][3],
-        eng.scene->SBOs[0][5]
+        eng.scene->SBOs[0][5],
+        // Coarse-LOD bindings 8/9 are desktop-only; bind valid placeholders so
+        // the shared pipeline layout is satisfied (never read - coarse LOD off).
+        eng.scene->SBOs[0][1],
+        eng.scene->SBOs[0][0]
     };
     base->vbuffer->updateIndirectInstanceList(eng.scene->meshes[0], {});
     // Brush indicator: same as desktop - the post-process pass overlays the
@@ -819,8 +892,17 @@ void renderFrame(App& app, Engine& eng)
     XrCompositionLayerProjection layer{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
     XrCompositionLayerProjectionView projViews[2] = {
         {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW}, {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW}};
-    const XrCompositionLayerBaseHeader* layers[] = {
-        reinterpret_cast<const XrCompositionLayerBaseHeader*>(&layer)};
+    XrCompositionLayerPassthroughFB passthroughLayer{XR_TYPE_COMPOSITION_LAYER_PASSTHROUGH_FB};
+    passthroughLayer.layerHandle = app.passthroughLayer;
+    const XrCompositionLayerBaseHeader* layers[2] = {};
+    uint32_t layerCount = 0;
+    if (app.passthroughSupported && app.passthroughLayer != XR_NULL_HANDLE) {
+        // Passthrough underneath; the projection layer alpha-blends over it.
+        layers[layerCount++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&passthroughLayer);
+        layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT |
+                           XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
+    }
+    layers[layerCount++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&layer);
 
     XrFrameEndInfo endInfo{XR_TYPE_FRAME_END_INFO};
     endInfo.displayTime = frameState.predictedDisplayTime;
@@ -866,6 +948,24 @@ void renderFrame(App& app, Engine& eng)
             eng.scene->fps = (eng.scene->fps <= 0.0f) ? inst : glm::mix(eng.scene->fps, inst, 0.05f);
         }
 
+        // World zoom: left stick Y (push up = zoom in) scales the sculpt
+        // volume about its center (exponential so it feels even in both
+        // directions). The engine's brush/raymarch/cull math is model-aware,
+        // so sculpting keeps working at any zoom; the bounds cage and brush
+        // indicator scale with it.
+        const float zoomInput = stickDeadzone(app.input.stickL.y);
+        if (zoomInput != 0.0f && dt > 0.0f) {
+            app.worldScale = glm::clamp(app.worldScale * std::exp(zoomInput * 0.9f * dt), 0.3f, 3.0f);
+        }
+        const glm::vec3 pivot(-0.03125f); // chunk center: -0.5 + 30/64 per axis
+        eng.scene->objects[0].ModelMatrix =
+            glm::translate(glm::mat4(1.0f), pivot) *
+            glm::scale(glm::mat4(1.0f), glm::vec3(app.worldScale)) *
+            glm::translate(glm::mat4(1.0f), -pivot);
+
+        // Hold left grip for the block-wireframe debug view.
+        eng.scene->showBlockWireframe = app.input.wireframeDown;
+
         eng.scene->update(timeSec); // maps frame UBOs; records cmd bufs once
 
         uint32_t imageIndex = 0;
@@ -900,7 +1000,7 @@ void renderFrame(App& app, Engine& eng)
         layer.space = app.localSpace;
         layer.viewCount = 2;
         layer.views = projViews;
-        endInfo.layerCount = 1;
+        endInfo.layerCount = layerCount;
         endInfo.layers = layers;
     }
 
@@ -987,6 +1087,7 @@ void android_main(android_app* androidApp)
         createXrInstance(app);
         initEngineVulkan(app, eng);
         createSessionAndSwapchain(app);
+        createPassthrough(app);
         createXrInput(app);
         initEngineScene(app, eng);
     } catch (const std::exception& e) {

@@ -1,5 +1,6 @@
 #include "GraphicsPipeline.h"
 #include "Core/Vulkan/VulkanUtils.h"
+#include "Platform/Platform.h"
 #include <stdexcept>
 
 
@@ -110,15 +111,20 @@ void GraphicsPipeline::setupPipeline(PipelineInput  pipelineInput) {
     infoLocal.rasterizer.rasterizerDiscardEnable = VK_FALSE;
     infoLocal.rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
     infoLocal.rasterizer.lineWidth = 1.0f;
-    // frontFaceCull (volumetric brick pipeline): disable culling entirely.
-    // The brick raymarch is only correct when marching starts at the NEAR
-    // face of the proxy cube; which side back-face culling keeps depends on
-    // the mesh winding x the projection's Y handedness - a trap that breaks
-    // per-platform (Quest: hollow bricks / flat cut faces). With both faces
-    // rasterized, near-face fragments march correctly and win the depth
-    // test; far-face fragments resolve at-or-behind them or discard, so
-    // layout(depth_greater) holds for every fragment.
-    infoLocal.rasterizer.cullMode = frontFaceCull ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT;
+    // frontFaceCull (volumetric brick pipeline): the brick raymarch is only
+    // correct when marching starts at the NEAR face of the proxy cube, and
+    // which side a cull keeps depends on the mesh winding x the projection's
+    // Y handedness. Per platform, the single-face cull that keeps the near
+    // faces (verified empirically; the wrong side shows hollow bricks / flat
+    // cut faces): desktop's glb cube wants BACK, the Quest procedural cube
+    // wants FRONT. Single-face culling halves the brick pass's fragment
+    // work versus CULL_NONE - significant on the Quest's tiled GPU.
+#ifdef BAKEIT_PLATFORM_ANDROID
+    const VkCullModeFlags volumetricCull = VK_CULL_MODE_FRONT_BIT;
+#else
+    const VkCullModeFlags volumetricCull = VK_CULL_MODE_BACK_BIT;
+#endif
+    infoLocal.rasterizer.cullMode = frontFaceCull ? volumetricCull : VK_CULL_MODE_BACK_BIT;
     infoLocal.rasterizer.depthBiasEnable = VK_FALSE;
 
 
@@ -192,7 +198,32 @@ void GraphicsPipeline ::recreatePipeline(VkExtent2D resolution, VkRenderPass ren
 void GraphicsPipeline::clean()
 {
     vkDestroyPipeline(pipelineInput.device, graphicsPipeline, nullptr);
-   
+
+}
+void GraphicsPipeline::reloadShaders()
+{
+    VkDevice device = pipelineInput.device;
+
+    // Read the SPIR-V the caller (ShaderHotReload) just recompiled. Done first
+    // so a corrupt/missing .spv throws before we tear down the live pipeline,
+    // leaving the old one intact.
+    auto vertShaderCode = utils::readFile(pipelineInput.vertexShaderpath);
+    auto fragShaderCode = utils::readFile(pipelineInput.fragmentShaderpath);
+    VkShaderModule newVert = createShaderModule(vertShaderCode);
+    VkShaderModule newFrag = createShaderModule(fragShaderCode);
+
+    // Drop the live pipeline and the modules it was built from, then rebuild
+    // from the new modules. Everything else (layout, vertex input, blending,
+    // viewport) is reused - this is a shader-only swap.
+    clean();
+    vkDestroyShaderModule(device, infoLocal.vertShaderStageInfo.module, nullptr);
+    vkDestroyShaderModule(device, infoLocal.fragShaderStageInfo.module, nullptr);
+
+    infoLocal.vertShaderStageInfo.module = newVert;
+    infoLocal.fragShaderStageInfo.module = newFrag;
+    infoLocal.shaderStagess = { infoLocal.vertShaderStageInfo, infoLocal.fragShaderStageInfo };
+
+    createGraphicsPipeline();
 }
 void GraphicsPipeline::createGraphicsPipeline() {
     

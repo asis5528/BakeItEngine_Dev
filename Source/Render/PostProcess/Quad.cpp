@@ -1,4 +1,5 @@
 #include "Quad.h"
+#include "Platform/Platform.h"
 
 Quad::Quad(VulkanBase* vbase,Framebuffer *fr)
 {
@@ -19,7 +20,12 @@ void Quad::createGraphicsPipeline(std::string vshaderpath, std::string fshaderpa
     input.renderPass = this->fr->renderPass;
     input.msaaSamples = base->msaaSamples;
     input.viewportExtent = base->presentExtent();
+#ifdef BAKEIT_PLATFORM_ANDROID
+    // Quest framebuffers are color+depth only (no aux/motion G-buffer slots).
+    input.colorAttachmentCount = 1;
+#else
     input.colorAttachmentCount = 3;
+#endif
     input.descriptorTypes = descriptorTypes;
     graphicsPipeline->setupPipeline(input);
     VkPipelineVertexInputStateCreateInfo vi{};

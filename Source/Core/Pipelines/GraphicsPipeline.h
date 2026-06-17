@@ -67,6 +67,10 @@ public:
     void setupPipeline(PipelineInput pipelineInput);
     void recreatePipeline(VkExtent2D resolution,VkRenderPass renderPass);
     void createGraphicsPipeline();
+    // Live shader reload: re-read the (freshly recompiled) .spv files, swap the
+    // shader modules and rebuild only the pipeline. Layout / descriptor set
+    // layout / fixed-function state are untouched. Used by ShaderHotReload.
+    void reloadShaders();
 private:
     void createDescriptorSetLayout();
     VkShaderModule createShaderModule(const std::vector<char>& code);

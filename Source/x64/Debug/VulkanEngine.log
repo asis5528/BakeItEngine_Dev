@@ -1,11 +1,18 @@
 ﻿  Animation.cpp
   ComputeShaderPipelines.cpp
   GaussianFluidSim.cpp
-  Pottery.cpp
+  SdfEditor.cpp
+  SdfDrawList.cpp
+C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\Features\Sdf\Edit\SdfEditor.cpp(189,2): error C3861: 'SDF_HEAPCHK': identifier not found
+C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\Source\Features\Sdf\Edit\SdfEditor.cpp(348,2): error C3861: 'SDF_HEAPCHK': identifier not found
   Input.cpp
+  DesktopBrushInput.cpp
+  QuestDeploy.cpp
+  Camera.cpp
   ComputePipeline.cpp
   EditorGui.cpp
   GraphicsPipeline.cpp
+  ShaderHotReload.cpp
   Framebuffer.cpp
   imgui.cpp
   imgui_demo.cpp
@@ -13,13 +20,13 @@
   imgui_impl_glfw.cpp
   imgui_impl_vulkan.cpp
   imgui_tables.cpp
+  Generating Code...
+  Compiling...
   imgui_widgets.cpp
   Loader.cpp
   main.cpp
   VulkanBase.cpp
   VulkanDevice.cpp
-  Generating Code...
-  Compiling...
   SwapChain.cpp
   VulkanImage.cpp
   VulkanUtils.cpp
@@ -33,16 +40,12 @@
   Model.cpp
   Object.cpp
   PostProcessingManager.cpp
+  Renderer.cpp
   Quad.cpp
+  Generating Code...
+  Compiling...
   ResourceManager.cpp
   ScenePipelines.cpp
   Scene.cpp
-  VolumeRendering.cpp
+  PostProcessPass.cpp
   Generating Code...
-LINK : warning LNK4098: defaultlib 'MSVCRT' conflicts with use of other libs; use /NODEFAULTLIB:library
-  VulkanEngine.vcxproj -> C:\Users\Asis\Documents\PersonalProjects\BakeIT\BakeITEngine\x64\Debug\BakeItEngine.exe
-  'pwsh.exe' is not recognized as an internal or external command,
-  operable program or batch file.
-          1 file(s) copied.
-          1 file(s) copied.
-          1 file(s) copied.

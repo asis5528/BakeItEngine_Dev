@@ -5,7 +5,10 @@
 struct ComputeInput {
     std::string computeShaderPath;
     std::vector<VkDescriptorType> descriptorTypes;
-
+    // Optional push-constant block size (bytes), VK_SHADER_STAGE_COMPUTE_BIT,
+    // offset 0. 0 = none. Lets a single pipeline be re-dispatched with small
+    // per-dispatch params (e.g. a region offset + phase) without a UBO rebind.
+    uint32_t pushConstantSize = 0;
 };
 
 

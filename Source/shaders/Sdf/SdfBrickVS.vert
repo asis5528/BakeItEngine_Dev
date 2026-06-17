@@ -18,6 +18,11 @@ layout(binding = 0) uniform UniformBufferObject {
     mat4 proj[2];
 } ubo;
 
+// BasicUbo: .x block wireframe, .y deferred shading, .z coarse-LOD test toggle.
+layout(binding = 1) uniform BasicUbo {
+    vec4 color;
+} ubo2;
+
 layout(std430, binding = 4) readonly buffer BlockBuffer {
     int blocks[];   // 64^3 block table: brick index | flags, negative = empty
 };
@@ -26,6 +31,11 @@ layout(std430, binding = 6) readonly buffer BlockColorBuffer {
 };
 layout(std430, binding = 7) readonly buffer BlockSpatialBuffer {
     vec4 blockSpatial[]; // xyz: block center (object space), w: block size
+};
+// Coarse-LOD downsampled block table (16^3 for the N=4 level): brick base in the
+// coarse atlas, or -1 if that coarse block has no downsampled brick yet.
+layout(std430, binding = 8) readonly buffer CoarseBlockBuffer {
+    int coarseBlocks[];
 };
 
 layout(location = 0) in vec3 inPosition;   // cube mesh: -2..+2
@@ -41,6 +51,8 @@ layout(location = 8) flat out vec3 blockColor;
 layout(location = 9) flat out float blockSizeWSOut;
 layout(location = 10) flat out vec3 blockCenterObject;
 layout(location = 11) flat out ivec3 blockCoordOut;
+layout(location = 12) flat out float coarseLevelOut; // 0 fine, else N (coarse-LOD)
+layout(location = 13) flat out int coarseBrickBaseOut; // downsampled brick base, or -1
 
 const int BLOCK_EMISSIVE_FLAG = (1 << 30);
 const int BLOCK_INDEX_MASK = BLOCK_EMISSIVE_FLAG - 1;
@@ -75,8 +87,56 @@ void main()
 
     vec4 spatial = blockSpatial[blockId];
     float blockSizeWS = spatial.w;
-    blockSizeWSOut = blockSizeWS;
     vec3 centerObject = spatial.xyz;
+
+    // Step-1 coarse-LOD test (ubo2.color.z): render ONE 4x cube per 4^3 coarse
+    // block, using the corner child (coord % 4 == 0) as its representative and
+    // degenerating the other children. The 4x cube marches the full-res field
+    // globally in the FS, so it shows the same surface as the 64 fine cubes it
+    // replaces - just far fewer triangles. Coarse blocks whose corner child is
+    // empty leave holes; that's expected for this reuse-the-fine-list test (the
+    // coarse draw list in the next step emits one cube per active coarse block).
+    // ubo2.color.z carries the coarse-LOD level: 0 = off (fine), else N, where a
+    // coarse block = N x N x N fine blocks (2 / 4 / 8). N divides 64.
+    int coarseN = int(ubo2.color.z + 0.5);
+    bool coarse = coarseN >= 2;
+    coarseBrickBaseOut = -1;
+    if (coarse) {
+        // Exactly one coarse cube per active N^3 coarse block: this instance
+        // emits only if it is the lowest-linear-id active child (the "anchor");
+        // the others degenerate. Anchor to the block's geometric CORNER (not the
+        // anchor child) so the cube sits right even when the corner child is
+        // empty - that corner-only assumption was leaving holes.
+        ivec3 childBase = (blockCoordOut / coarseN) * coarseN;
+        int cornerId = childBase.x + childBase.y * BLOCKS_PER_AXIS + childBase.z * BLOCKS_PER_AXIS * BLOCKS_PER_AXIS;
+        int minActive = 0x7fffffff;
+        for (int dz = 0; dz < coarseN; ++dz)
+            for (int dy = 0; dy < coarseN; ++dy)
+                for (int dx = 0; dx < coarseN; ++dx) {
+                    ivec3 cc = childBase + ivec3(dx, dy, dz);
+                    int cid = cc.x + cc.y * BLOCKS_PER_AXIS + cc.z * BLOCKS_PER_AXIS * BLOCKS_PER_AXIS;
+                    if (blocks[cid] >= 0) { minActive = min(minActive, cid); }
+                }
+        if (blockId != minActive) {
+            gl_Position = vec4(2e9, 2e9, 2e9, 1.0);
+            return;
+        }
+        vec4 cornerSpatial = blockSpatial[cornerId];
+        centerObject = cornerSpatial.xyz + vec3(float(coarseN - 1) * 0.5) * cornerSpatial.w; // corner -> coarse center
+        blockSizeWS = cornerSpatial.w * float(coarseN);                                      // N blocks across
+        blockCoordOut = childBase; // FS derives the coarse corner (x8) from this
+
+        // Dense-coarse 3D-texture path is SHELVED: binding 2 (texSampler) is now
+        // wired to the FINE dense atlas for the SSBO-vs-texture fine test, so the
+        // coarse cube must NOT sample it. Leaving coarseBrickBaseOut = -1 makes
+        // the FS fall back to its SSBO full-res coarse march (block-skip DDA over
+        // the fine atlas). To re-enable the coarse-tex test, point binding 2 back
+        // at coarseAtlasTextureIndex and restore the `coarseN == 2` gate here.
+        coarseBrickBaseOut = -1;
+    }
+    coarseLevelOut = coarse ? float(coarseN) : 0.0; // carries N to the FS
+
+    blockSizeWSOut = blockSizeWS;
     blockCenterObject = centerObject;
 
     vec3 centerWorld = (ubo.model * vec4(centerObject, 1.0)).xyz;
@@ -87,11 +147,14 @@ void main()
     // so camera = -transpose(R) * t - no full matrix inverse needed.
     mat4 view = ubo.view[gl_ViewIndex];
     cameraPos = -(vec3(view[3]) * mat3(view));
-    // camLocal must live in OBJECT space (the cube/grid axes): when the
-    // model rotates (pottery spin), bring the camera into object space with
-    // the rigid inverse instead of assuming object == world.
-    mat3 modelRotInv = transpose(mat3(ubo.model));
-    vec3 cameraObject = modelRotInv * (cameraPos - vec3(ubo.model[3]));
+    // camLocal must live in OBJECT space (the cube/grid axes): bring the
+    // camera into object space with the model's inverse instead of assuming
+    // object == world. The model is rotation + uniform scale + translation,
+    // so inverse(R*s) = transpose(R*s) / s^2 (the dot of a column with
+    // itself is s^2).
+    vec3 modelCol0 = vec3(ubo.model[0]);
+    float invScale2 = 1.0 / max(dot(modelCol0, modelCol0), 1e-12);
+    vec3 cameraObject = (transpose(mat3(ubo.model)) * (cameraPos - vec3(ubo.model[3]))) * invScale2;
     camLocal = (cameraObject - centerObject) / blockSizeWS;
 
     localCoord = v;

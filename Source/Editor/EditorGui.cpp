@@ -300,6 +300,24 @@ void DrawSdfAtlasUsageBar(const char* label, float fraction, int usedBricks, int
      }
      ImGui::Text("Mode: %s (MMB toggle)", (m_scene->input && m_scene->input->cameraMoveMode) ? "Camera" : "Edit");
      ImGui::Text("Shift+LMB: Recolor existing blocks");
+     ImGui::Checkbox("Block Wireframe", &m_scene->showBlockWireframe);
+     ImGui::Checkbox("Deferred Shading (test)", &m_scene->deferredLighting);
+     {
+         static const char* coarseItems[] = { "Off", "2x2x2", "4x4x4", "8x8x8" };
+         const int coarseMap[4] = { 0, 2, 4, 8 };
+         int curIdx = 0;
+         for (int i = 0; i < 4; ++i) { if (coarseMap[i] == m_scene->coarseLodLevel) { curIdx = i; } }
+         if (ImGui::Combo("Coarse LOD (test)", &curIdx, coarseItems, 4)) {
+             m_scene->coarseLodLevel = coarseMap[curIdx];
+         }
+     }
+     // Fine field fetch source: SSBO brick atlas vs dense 3D texture (perf A/B).
+     // The dense texture re-converts on idle frames while this is on, so flip it
+     // and watch the FPS on the same sculpt.
+     ImGui::Checkbox("Fine: 3D texture fetch (test)", &m_scene->fineTexFetch);
+     // Sculptable-bounds cage (the block region's blue box) - on by default to
+     // match the Quest build.
+     ImGui::Checkbox("Show Bounds", &m_scene->showChunkBounds);
      ImGui::End();
     
      // One-click Quest build + deploy (runs on a worker thread; the log

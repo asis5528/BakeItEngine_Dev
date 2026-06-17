@@ -4,6 +4,8 @@
     <!-- Quest standalone: head-tracked VR device required. -->
     <uses-feature android:name="android.hardware.vr.headtracking" android:required="true" android:version="1" />
     <uses-feature android:name="android.hardware.vulkan.level" android:required="true" android:version="1" />
+    <!-- Mixed reality: camera passthrough as the background (XR_FB_passthrough). -->
+    <uses-feature android:name="com.oculus.feature.PASSTHROUGH" android:required="false" />
 
     <application
         android:label="BakeIt Quest"

@@ -1,4 +1,5 @@
 #include "ScenePipelines.h"
+#include "Platform/Platform.h"
 
 
 ScenePipelines::ScenePipelines(VulkanBase *base,VkRenderPass renderPass) {
@@ -15,7 +16,12 @@ ScenePipelines::ScenePipelines(VulkanBase *base,VkRenderPass renderPass) {
     input.device = base->device;
     input.msaaSamples = base->msaaSamples;
     input.viewportExtent = base->presentExtent();
+#ifdef BAKEIT_PLATFORM_ANDROID
+    // Quest framebuffers are color+depth only (no aux/motion G-buffer slots).
+    input.colorAttachmentCount = 1;
+#else
     input.colorAttachmentCount = 3;
+#endif
     input.descriptorTypes = { descriptorTypes{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_SHADER_STAGE_VERTEX_BIT},
         descriptorTypes{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_SHADER_STAGE_VERTEX_BIT},
         descriptorTypes{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,VK_SHADER_STAGE_FRAGMENT_BIT} };
@@ -61,16 +67,20 @@ ScenePipelines::ScenePipelines(VulkanBase *base,VkRenderPass renderPass) {
     input.useInstanceIdAttribute = true;
 
     input.descriptorTypes = { descriptorTypes{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_SHADER_STAGE_ALL_GRAPHICS},
-         descriptorTypes{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_SHADER_STAGE_FRAGMENT_BIT},
+         descriptorTypes{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_SHADER_STAGE_ALL_GRAPHICS}, // BasicUbo: VS now reads it too (coarse-LOD toggle in .z)
          descriptorTypes{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,VK_SHADER_STAGE_FRAGMENT_BIT,
 },descriptorTypes{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,VK_SHADER_STAGE_FRAGMENT_BIT,
 } ,descriptorTypes{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,VK_SHADER_STAGE_ALL_GRAPHICS,
 },descriptorTypes{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,VK_SHADER_STAGE_FRAGMENT_BIT,
 },descriptorTypes{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,VK_SHADER_STAGE_ALL_GRAPHICS,
 },descriptorTypes{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,VK_SHADER_STAGE_VERTEX_BIT,
+// Coarse-LOD: binding 8 = coarse block table (VS reads the coarse brick base),
+// binding 9 = coarse downsampled brick atlas (FS marches it).
+},descriptorTypes{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,VK_SHADER_STAGE_VERTEX_BIT,
+},descriptorTypes{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,VK_SHADER_STAGE_FRAGMENT_BIT,
 } };
     pipelines[4]->bufferSize = { sizeof(UniformBufferObject),sizeof(BasicUbo) };
-    
+
     pipelines[4]->setupPipeline(input);
     //pipelines[4]->infoLocal.depthStencil.depthWriteEnable = false;
     pipelines[4]->createGraphicsPipeline();
