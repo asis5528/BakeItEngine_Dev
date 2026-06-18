@@ -161,6 +161,10 @@ struct App
     bool passthroughSupported = false;
     XrPassthroughFB passthrough = XR_NULL_HANDLE;
     XrPassthroughLayerFB passthroughLayer = XR_NULL_HANDLE;
+
+    // XR_FB_foveation: fixed foveated rendering (shade the lens periphery at a
+    // lower rate). Applied to the swapchain after creation; no render changes.
+    bool foveationSupported = false;
 };
 
 // The engine, wired the same way main.cpp wires it on desktop (minus
@@ -293,11 +297,17 @@ void createXrInstance(App& app)
     xrEnumerateInstanceExtensionProperties(nullptr, 0, &extCount, nullptr);
     std::vector<XrExtensionProperties> extProps(extCount, {XR_TYPE_EXTENSION_PROPERTIES});
     xrEnumerateInstanceExtensionProperties(nullptr, extCount, &extCount, extProps.data());
+    bool fovBase = false, fovConfig = false, fovUpdate = false;
     for (const XrExtensionProperties& p : extProps) {
         if (std::strcmp(p.extensionName, XR_FB_PASSTHROUGH_EXTENSION_NAME) == 0) {
             app.passthroughSupported = true;
         }
+        if (std::strcmp(p.extensionName, XR_FB_FOVEATION_EXTENSION_NAME) == 0) fovBase = true;
+        if (std::strcmp(p.extensionName, XR_FB_FOVEATION_CONFIGURATION_EXTENSION_NAME) == 0) fovConfig = true;
+        if (std::strcmp(p.extensionName, XR_FB_SWAPCHAIN_UPDATE_STATE_EXTENSION_NAME) == 0) fovUpdate = true;
     }
+    // Foveation needs all three FB extensions (the profile + the swapchain-state update).
+    app.foveationSupported = fovBase && fovConfig && fovUpdate;
 
     std::vector<const char*> extensions = {
         XR_KHR_VULKAN_ENABLE2_EXTENSION_NAME,
@@ -305,6 +315,11 @@ void createXrInstance(App& app)
     };
     if (app.passthroughSupported) {
         extensions.push_back(XR_FB_PASSTHROUGH_EXTENSION_NAME);
+    }
+    if (app.foveationSupported) {
+        extensions.push_back(XR_FB_FOVEATION_EXTENSION_NAME);
+        extensions.push_back(XR_FB_FOVEATION_CONFIGURATION_EXTENSION_NAME);
+        extensions.push_back(XR_FB_SWAPCHAIN_UPDATE_STATE_EXTENSION_NAME);
     }
 
     XrInstanceCreateInfoAndroidKHR androidInfo{XR_TYPE_INSTANCE_CREATE_INFO_ANDROID_KHR};
@@ -470,6 +485,51 @@ void createSessionAndSwapchain(App& app)
         app.swapchain, imageCount, &imageCount,
         reinterpret_cast<XrSwapchainImageBaseHeader*>(app.swapchainImages.data())));
     LOGI("Swapchain: %u images, format %d", imageCount, app.swapchainFormat);
+
+    // Fixed Foveated Rendering (XR_FB_foveation): shade the lens periphery at a
+    // lower rate - a big win for this fragment-bound per-pixel SDF march; the
+    // center stays full-res and you don't perceive the periphery sharply in a
+    // headset. MEDIUM is the usual sweet spot; LOW/HIGH trade sharpness vs perf
+    // (could be driven live by a controller button later). No render changes -
+    // the runtime builds the density map and the GPU shades accordingly.
+    if (app.foveationSupported) {
+        PFN_xrCreateFoveationProfileFB pfnCreateFoveation = nullptr;
+        PFN_xrUpdateSwapchainFB pfnUpdateSwapchain = nullptr;
+        PFN_xrDestroyFoveationProfileFB pfnDestroyFoveation = nullptr;
+        xrGetInstanceProcAddr(app.xrInstance, "xrCreateFoveationProfileFB",
+            reinterpret_cast<PFN_xrVoidFunction*>(&pfnCreateFoveation));
+        xrGetInstanceProcAddr(app.xrInstance, "xrUpdateSwapchainFB",
+            reinterpret_cast<PFN_xrVoidFunction*>(&pfnUpdateSwapchain));
+        xrGetInstanceProcAddr(app.xrInstance, "xrDestroyFoveationProfileFB",
+            reinterpret_cast<PFN_xrVoidFunction*>(&pfnDestroyFoveation));
+        if (pfnCreateFoveation && pfnUpdateSwapchain && pfnDestroyFoveation) {
+            // LOW keeps the image sharp (only the far edges drop); MEDIUM/HIGH
+            // give more perf but visibly soften the periphery. dynamic = the
+            // runtime only foveates under GPU load (sharp when the scene is
+            // light, foveates while sculpting) - good blur/perf balance.
+            XrFoveationLevelProfileCreateInfoFB levelProfile{XR_TYPE_FOVEATION_LEVEL_PROFILE_CREATE_INFO_FB};
+            levelProfile.level = XR_FOVEATION_LEVEL_LOW_FB; // LOW_FB / MEDIUM_FB / HIGH_FB
+            levelProfile.verticalOffset = 0.0f;
+            levelProfile.dynamic = XR_FOVEATION_DYNAMIC_LEVEL_ENABLED_FB; // _DISABLED_FB = fixed
+            XrFoveationProfileCreateInfoFB profileInfo{XR_TYPE_FOVEATION_PROFILE_CREATE_INFO_FB};
+            profileInfo.next = &levelProfile;
+            XrFoveationProfileFB profile = XR_NULL_HANDLE;
+            if (pfnCreateFoveation(app.session, &profileInfo, &profile) == XR_SUCCESS) {
+                XrSwapchainStateFoveationFB foveationState{XR_TYPE_SWAPCHAIN_STATE_FOVEATION_FB};
+                foveationState.profile = profile;
+                XrResult fr = pfnUpdateSwapchain(app.swapchain,
+                    reinterpret_cast<XrSwapchainStateBaseHeaderFB*>(&foveationState));
+                pfnDestroyFoveation(profile);
+                LOGI("Foveation: MEDIUM %s", fr == XR_SUCCESS ? "applied" : "update FAILED");
+            } else {
+                LOGI("Foveation: xrCreateFoveationProfileFB failed");
+            }
+        } else {
+            LOGI("Foveation: proc addresses missing");
+        }
+    } else {
+        LOGI("Foveation: XR_FB_foveation not supported, rendering full-res");
+    }
 
     app.frameFences.resize(imageCount);
     for (uint32_t i = 0; i < imageCount; ++i) {
@@ -780,12 +840,20 @@ void initEngineScene(App& app, Engine& eng)
     eng.scene->sdfVolume = &eng.sdfEditor->volume; // HUD stats + boundary cage
     eng.sdfEditor->brushInput = new QuestBrushInput(&app.input, &kWorldToStage);
 
-    // Volumetric material: placeholder 1x1x1 3D texture (same as desktop).
-    eng.scene->ptextures.push_back(base->vbuffer->createTexture3DGeneral(1, 1, 1));
+    // Volumetric material: binding-2 sampler3D in SdfBrickFS.
     Material material{};
     material.type = TexturedMaterial;
     MaterialTexturedData* matData = new MaterialTexturedData();
-    matData->DiffuseTexture = 0;
+#ifdef BAKEIT_SDF_TEXTURE_ATLAS
+    // Texture-native field: bind to SdfEditor's sparse tile pool (it created and
+    // registered the texture during construction). The brick FS samples it
+    // (texMode 2 = ubo2.color.w, set by Scene::update).
+    matData->DiffuseTexture = eng.sdfEditor->tilePoolTextureIndex;
+#else
+    // SSBO field: a 1x1x1 placeholder the brick FS never samples.
+    eng.scene->ptextures.push_back(base->vbuffer->createTexture3DGeneral(1, 1, 1));
+    matData->DiffuseTexture = static_cast<int>(eng.scene->ptextures.size()) - 1;
+#endif
     material.materialData = matData;
     eng.scene->materials.push_back(material);
     eng.scene->meshes[0].matID = 0;

@@ -88,6 +88,11 @@ void VulkanDevice::createLogicalDevice() {
     vkGetPhysicalDeviceFeatures(physicalDevice, &supportedFeatures);
     deviceFeatures.samplerAnisotropy = supportedFeatures.samplerAnisotropy;
     deviceFeatures.multiViewport = supportedFeatures.multiViewport;
+    // R16_SFLOAT is an "extended" storage-image format; the SDF tile pool is
+    // imageStore-d as R16F, which needs this feature on platforms where it's not
+    // mandatory (Adreno). Gated by support - false-if-unsupported, in which case
+    // the R16F storage image would have to become R32F.
+    deviceFeatures.shaderStorageImageExtendedFormats = supportedFeatures.shaderStorageImageExtendedFormats;
     VkDeviceCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     createInfo.pNext = &features;

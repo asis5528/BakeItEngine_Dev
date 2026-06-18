@@ -68,14 +68,68 @@ float sdfBox(vec3 p, vec3 halfExtents)
     return length(max(q, vec3(0.0))) + min(max(q.x, max(q.y, q.z)), 0.0);
 }
 
-float brushSdf(vec3 p, vec3 c, float r, int shape)
+// The rest of the brush shapes (mirror SdfBrushCS::brushShapeSdf so the surface
+// footprint matches the actual stamp). sdfBox is defined above.
+float sdfSphere(vec3 p, float r) { return length(p) - r; }
+float sdfRoundBox(vec3 p, float r) { float e = r * 0.3; return sdfBox(p, vec3(r - e)) - e; }
+float sdfPlanePatch(vec3 p, float r) { return sdfBox(p, vec3(r, 0.001, r)); }
+float sdfTorus(vec3 p, float r) { vec2 q = vec2(length(p.xz) - r * 0.65, p.y); return length(q) - r * 0.35; }
+float sdfCylinder(vec3 p, float r) {
+    vec2 d = abs(vec2(length(p.xz), p.y)) - vec2(r * 0.7, r);
+    return min(max(d.x, d.y), 0.0) + length(max(d, vec2(0.0)));
+}
+float sdfCappedCone(vec3 p, float h, float r1, float r2) {
+    vec2 q = vec2(length(p.xz), p.y);
+    vec2 k1 = vec2(r2, h);
+    vec2 k2 = vec2(r2 - r1, 2.0 * h);
+    vec2 ca = vec2(q.x - min(q.x, (q.y < 0.0) ? r1 : r2), abs(q.y) - h);
+    vec2 cb = q - k1 + k2 * clamp(dot(k1 - q, k2) / dot(k2, k2), 0.0, 1.0);
+    float s = (cb.x < 0.0 && ca.y < 0.0) ? -1.0 : 1.0;
+    return s * sqrt(min(dot(ca, ca), dot(cb, cb)));
+}
+float sdfCone(vec3 p, float r) { return sdfCappedCone(p, r, r * 0.8, r * 0.05); }
+float sdfCapsule(vec3 p, float r) { vec3 a = p; a.y -= clamp(a.y, -r * 0.55, r * 0.55); return length(a) - r * 0.45; }
+float sdfOctahedron(vec3 p, float r) { p = abs(p); return (p.x + p.y + p.z - r) * 0.57735027; }
+float sdfHexPrism(vec3 p, float r) {
+    const vec3 k = vec3(-0.8660254, 0.5, 0.57735);
+    p = abs(p);
+    p.xy -= 2.0 * min(dot(k.xy, p.xy), 0.0) * k.xy;
+    vec2 h = vec2(r * 0.7, r);
+    vec2 d = vec2(length(p.xy - vec2(clamp(p.x, -k.z * h.x, k.z * h.x), h.x)) * sign(p.y - h.x), p.z - h.y);
+    return min(max(d.x, d.y), 0.0) + length(max(d, vec2(0.0)));
+}
+float sdfEllipsoid(vec3 p, float r) {
+    vec3 rad = vec3(r * 0.95, r * 0.6, r * 0.95);
+    float k0 = length(p / rad); float k1 = length(p / (rad * rad));
+    return k0 * (k0 - 1.0) / max(k1, 1e-6);
+}
+float sdfPyramid(vec3 p, float r) {
+    vec3 q = p / r; q.y += 0.5;
+    const float h = 1.0; const float m2 = h * h + 0.25;
+    q.xz = abs(q.xz); q.xz = (q.z > q.x) ? q.zx : q.xz; q.xz -= 0.5;
+    vec3 w = vec3(q.z, h * q.y - 0.5 * q.x, h * q.x + 0.5 * q.y);
+    float s = max(-w.x, 0.0);
+    float t = clamp((w.y - 0.5 * q.z) / (m2 + 0.25), 0.0, 1.0);
+    float a = m2 * (w.x + s) * (w.x + s) + w.y * w.y;
+    float b = m2 * (w.x + 0.5 * t) * (w.x + 0.5 * t) + (w.y - m2 * t) * (w.y - m2 * t);
+    float d2 = (min(w.y, -w.x * m2 - w.y * 0.5) > 0.0) ? 0.0 : min(a, b);
+    return sqrt((d2 + w.z * w.z) / m2) * sign(max(w.z, -q.y)) * r;
+}
+
+float brushSdf(vec3 p, vec3 c, float r, int mode)
 {
     vec3 q = p - c;
-    if (shape == 1) {
-        return length(q) - r;
-    } else if (shape == 2) {
-        return sdfBox(q, vec3(r, 0.001, r));
-    }
+    if (mode == 1)  return sdfSphere(q, r);
+    if (mode == 2)  return sdfPlanePatch(q, r);
+    if (mode == 3)  return sdfRoundBox(q, r);
+    if (mode == 4)  return sdfTorus(q, r);
+    if (mode == 5)  return sdfCylinder(q, r);
+    if (mode == 6)  return sdfCone(q, r);
+    if (mode == 7)  return sdfCapsule(q, r);
+    if (mode == 8)  return sdfOctahedron(q, r);
+    if (mode == 9)  return sdfHexPrism(q, r);
+    if (mode == 10) return sdfEllipsoid(q, r);
+    if (mode == 11) return sdfPyramid(q, r);
     return sdfBox(q, vec3(r));
 }
 
@@ -190,6 +244,37 @@ float sphereOutline(vec3 ro, vec3 rd, vec3 c, float r, out float tHit)
     return vis * (1.0 - smoothstep(0.0, w, abs(d)));
 }
 
+// Generic silhouette outline for ANY brush shape (used for 3..11): march the
+// brush SDF through its bounding sphere, track the ray's closest signed approach
+// to the surface, and draw the rim where that approach crosses zero - i.e. the
+// shape's actual silhouette. Same idea as sphereOutline (ray-to-surface
+// distance), generalized to arbitrary SDFs via marching. Cost is bounded to the
+// brush's bounding sphere (most pixels miss it and return immediately).
+float shapeOutline(vec3 ro, vec3 rd, vec3 c, float r, int shape, out float tHit)
+{
+    vec3 oc = ro - c;
+    float R = 1.85 * r;                       // bounding sphere (cube corner ~1.73r)
+    float bb = dot(oc, rd);
+    float disc = bb * bb - (dot(oc, oc) - R * R);
+    tHit = 1e9;
+    if (disc < 0.0) return 0.0;               // ray misses the brush volume
+    float sd = sqrt(disc);
+    float t = max(-bb - sd, 0.0);
+    float tEnd = -bb + sd;
+    float minD = R;
+    float tMin = t;
+    float minStep = R * 0.04;
+    for (int i = 0; i < 40; i++) {
+        if (t > tEnd) break;
+        float d = brushSdf(ro + rd * t, c, r, shape);
+        if (d < minD) { minD = d; tMin = t; }
+        t += max(abs(d), minStep);            // sphere-trace, floored to bound steps
+    }
+    tHit = tMin;
+    float w = max(fwidth(minD), 1e-5) * 1.5;
+    return 1.0 - smoothstep(0.0, w, abs(minD));
+}
+
 void main()
 {
     const int vi = gl_ViewIndex;
@@ -249,12 +334,14 @@ void main()
 
     float tHit;
     float outline;
-    if (shape == 1) {
-        outline = sphereOutline(ro, rd, c, r, tHit);
+    if (shape == 0) {
+        outline = boxOutline(ro, rd, c, vec3(r), tHit);          // cube: edge wireframe
+    } else if (shape == 1) {
+        outline = sphereOutline(ro, rd, c, r, tHit);             // sphere: silhouette ring
     } else if (shape == 2) {
-        outline = boxOutline(ro, rd, c, vec3(r, 0.001, r), tHit);
+        outline = boxOutline(ro, rd, c, vec3(r, 0.001, r), tHit);// plane: flat slab edges
     } else {
-        outline = boxOutline(ro, rd, c, vec3(r), tHit);
+        outline = shapeOutline(ro, rd, c, r, shape, tHit);       // 3..11: generic silhouette
     }
 
     // Scene distance along this pixel's ray, reconstructed from the resolved

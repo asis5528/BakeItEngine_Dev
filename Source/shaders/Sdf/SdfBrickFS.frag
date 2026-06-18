@@ -585,7 +585,7 @@ void coarseShadeTex(float wire)
     vec3 n = coarseTexNormal(hitLocalPos, -viewDir);
     n = normalize(mat3(ubo.model) * n);
 
-    vec3 baseColor = vec3(0.8,0.8,0.8);
+    vec3 baseColor = vec3(1.8,0.8,0.8);
     vec3 light = normalize(vec3(10.0, 10.0, 10.0));
     float dif = clamp(dot(light, n), 0.0, 1.0);
     vec3 reflectDir = reflect(light, n);
@@ -862,7 +862,7 @@ void main()
     n = normalize(mat3(ubo.model) * n);
 
     // Surface albedo (user's debug experiment: flat green).
-    vec3 baseColor = vec3(0.8, 0.8, 0.8);
+    vec3 baseColor = vec3(1.8, 0.8, 0.8);
 
     if (ubo2.color.y > 0.5) {
         // Deferred shading (desktop): compute the normal HERE (cache-coherent)

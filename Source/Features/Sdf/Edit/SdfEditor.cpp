@@ -537,9 +537,8 @@ void SdfEditor::update(float time)
 	const glm::dvec2 currentCursorPos = bin.strokeCursor;
 
 	if (bin.shapeTogglePressed) {
-		BrushShapeMode = (BrushShapeMode + 1) % 3;
-		const char* shapeName = (BrushShapeMode == 0) ? "Cube" : ((BrushShapeMode == 1) ? "Sphere" : "Plane");
-		std::printf("Brush Shape: %s\n", shapeName);
+		BrushShapeMode = (BrushShapeMode + 1) % kBrushShapeCount;
+		std::printf("Brush Shape: %s\n", BrushShapeName(BrushShapeMode));
 	}
 	if (bin.emissiveTogglePressed) {
 		EmissiveMode = !EmissiveMode;

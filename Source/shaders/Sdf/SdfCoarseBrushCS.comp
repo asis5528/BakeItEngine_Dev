@@ -50,12 +50,70 @@ float smin(float a, float b, float k) {
     float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
     return mix(b, a, h) - k * h * (1.0 - h);
 }
-float sdfBox(vec3 p, vec3 he) {
-    vec3 q = abs(p) - he;
+// --- Brush shape SDFs (mirror of SdfBrushCS.comp; see BrushShapeName()) ------
+float sdfSphere(vec3 p, float r) { return length(p) - r; }
+float sdfBox(vec3 p, vec3 b) {
+    vec3 q = abs(p) - b;
     return length(max(q, vec3(0.0))) + min(max(q.x, max(q.y, q.z)), 0.0);
 }
-float sdfSphere(vec3 p, float r) { return length(p) - r; }
+float sdfRoundBox(vec3 p, float r) { float e = r * 0.3; return sdfBox(p, vec3(r - e)) - e; }
 float sdfPlanePatch(vec3 p, float r) { return sdfBox(p, vec3(r, 0.001, r)); }
+float sdfTorus(vec3 p, float r) { vec2 q = vec2(length(p.xz) - r * 0.65, p.y); return length(q) - r * 0.35; }
+float sdfCylinder(vec3 p, float r) {
+    vec2 d = abs(vec2(length(p.xz), p.y)) - vec2(r * 0.7, r);
+    return min(max(d.x, d.y), 0.0) + length(max(d, vec2(0.0)));
+}
+float sdfCappedCone(vec3 p, float h, float r1, float r2) {
+    vec2 q = vec2(length(p.xz), p.y);
+    vec2 k1 = vec2(r2, h);
+    vec2 k2 = vec2(r2 - r1, 2.0 * h);
+    vec2 ca = vec2(q.x - min(q.x, (q.y < 0.0) ? r1 : r2), abs(q.y) - h);
+    vec2 cb = q - k1 + k2 * clamp(dot(k1 - q, k2) / dot(k2, k2), 0.0, 1.0);
+    float s = (cb.x < 0.0 && ca.y < 0.0) ? -1.0 : 1.0;
+    return s * sqrt(min(dot(ca, ca), dot(cb, cb)));
+}
+float sdfCone(vec3 p, float r) { return sdfCappedCone(p, r, r * 0.8, r * 0.05); }
+float sdfCapsule(vec3 p, float r) { vec3 a = p; a.y -= clamp(a.y, -r * 0.55, r * 0.55); return length(a) - r * 0.45; }
+float sdfOctahedron(vec3 p, float r) { p = abs(p); return (p.x + p.y + p.z - r) * 0.57735027; }
+float sdfHexPrism(vec3 p, float r) {
+    const vec3 k = vec3(-0.8660254, 0.5, 0.57735);
+    p = abs(p);
+    p.xy -= 2.0 * min(dot(k.xy, p.xy), 0.0) * k.xy;
+    vec2 h = vec2(r * 0.7, r);
+    vec2 d = vec2(length(p.xy - vec2(clamp(p.x, -k.z * h.x, k.z * h.x), h.x)) * sign(p.y - h.x), p.z - h.y);
+    return min(max(d.x, d.y), 0.0) + length(max(d, vec2(0.0)));
+}
+float sdfEllipsoid(vec3 p, float r) {
+    vec3 rad = vec3(r * 0.95, r * 0.6, r * 0.95);
+    float k0 = length(p / rad); float k1 = length(p / (rad * rad));
+    return k0 * (k0 - 1.0) / max(k1, 1e-6);
+}
+float sdfPyramid(vec3 p, float r) {
+    vec3 q = p / r; q.y += 0.5;
+    const float h = 1.0; const float m2 = h * h + 0.25;
+    q.xz = abs(q.xz); q.xz = (q.z > q.x) ? q.zx : q.xz; q.xz -= 0.5;
+    vec3 w = vec3(q.z, h * q.y - 0.5 * q.x, h * q.x + 0.5 * q.y);
+    float s = max(-w.x, 0.0);
+    float t = clamp((w.y - 0.5 * q.z) / (m2 + 0.25), 0.0, 1.0);
+    float a = m2 * (w.x + s) * (w.x + s) + w.y * w.y;
+    float b = m2 * (w.x + 0.5 * t) * (w.x + 0.5 * t) + (w.y - m2 * t) * (w.y - m2 * t);
+    float d2 = (min(w.y, -w.x * m2 - w.y * 0.5) > 0.0) ? 0.0 : min(a, b);
+    return sqrt((d2 + w.z * w.z) / m2) * sign(max(w.z, -q.y)) * r;
+}
+float brushShapeSdf(vec3 p, float r, int mode) {
+    if (mode == 1)  return sdfSphere(p, r);
+    if (mode == 2)  return sdfPlanePatch(p, r);
+    if (mode == 3)  return sdfRoundBox(p, r);
+    if (mode == 4)  return sdfTorus(p, r);
+    if (mode == 5)  return sdfCylinder(p, r);
+    if (mode == 6)  return sdfCone(p, r);
+    if (mode == 7)  return sdfCapsule(p, r);
+    if (mode == 8)  return sdfOctahedron(p, r);
+    if (mode == 9)  return sdfHexPrism(p, r);
+    if (mode == 10) return sdfEllipsoid(p, r);
+    if (mode == 11) return sdfPyramid(p, r);
+    return sdfBox(p, vec3(r));
+}
 
 void main()
 {
@@ -99,14 +157,7 @@ void main()
     }
 
     int shapeMode = int(floor(ubo.BrushShape + 0.5));
-    float brush;
-    if (shapeMode == 1) {
-        brush = sdfSphere(pq, brushRadius);
-    } else if (shapeMode == 2) {
-        brush = sdfPlanePatch(pq, brushRadius);
-    } else {
-        brush = sdfBox(pq, vec3(brushRadius));
-    }
+    float brush = brushShapeSdf(pq, brushRadius, shapeMode);
 
     if (ubo.BrushAction < 0.5) {
         h = max(-brush, h);

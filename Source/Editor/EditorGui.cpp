@@ -264,10 +264,7 @@ void DrawSdfAtlasUsageBar(const char* label, float fraction, int usedBricks, int
      ImGui::Separator();
      if (brush) {
          ImGui::Text("Brush");
-         const char* brushShapeName = "Cube";
-         if (brush->shapeMode == 1) brushShapeName = "Sphere";
-         else if (brush->shapeMode == 2) brushShapeName = "Plane";
-         ImGui::Text("Shape   : %s (U to toggle)", brushShapeName);
+         ImGui::Text("Shape   : %s (U to cycle)", BrushShapeName(brush->shapeMode));
          ImGui::Text("Radius  : %.4f (A/D)", brush->radius);
          ImGui::Text("Smooth  : %.4f (Q/E)", brush->smoothness);
          ImGui::ColorEdit3("Color", &brush->color.x);
