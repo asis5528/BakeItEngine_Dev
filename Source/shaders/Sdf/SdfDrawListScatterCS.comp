@@ -20,11 +20,29 @@ layout(std430, binding = 2) writeonly buffer InstanceIds {
 layout(binding = 3) uniform SortParams {
     vec4 camAndScale;      // xyz: camera position in block units, w: dist -> bucket scale
     vec4 frustumPlanes[6]; // view frustum in block units, normalized, inward-facing
+    vec4 lodParams;        // distance bands (bucket thresholds): x = fine->2 split,
+                           // y = 2->4 split (farther). z = max level (0 off / 2 / 4).
+};
+// Anchor-claim slots in the SAME concatenated layout as the shared coarse table
+// (level-2 region then level-4): the first child of a coarse block to claim its slot
+// (atomic) becomes the cube's ANCHOR, so the brick VS skips the N^3 sibling scan.
+layout(std430, binding = 4) buffer CoarseAnchorClaim {
+    uint anchorClaim[];
 };
 
 const uint BLOCKS_PER_AXIS = 64u;
 const uint TOTAL_BLOCKS = BLOCKS_PER_AXIS * BLOCKS_PER_AXIS * BLOCKS_PER_AXIS;
 const int NUM_BUCKETS = 256;
+// Distance-LOD tags on the instance ID: COARSE = render as a coarse cube, ANCHOR =
+// this is the claimed child that emits the cube, LEVEL = the coarse level (0 -> N=2,
+// set -> N=4). Block IDs are < 64^3 (2^18), so bits 28/29/30 are free; must match
+// SdfBrickVS.vert.
+const int COARSE_INSTANCE_FLAG = 1 << 30;
+const int ANCHOR_INSTANCE_FLAG = 1 << 29;
+const int LEVEL_INSTANCE_BIT   = 1 << 28;
+// Shared coarse table layout: level-2 region [0,(64/2)^3) then level-4. Must match
+// coarseTableBaseFor in SdfBrickVS/FS and the tableBase math in SdfEditor.
+int coarseTableBaseFor(int N) { return (N <= 2) ? 0 : (32 * 32 * 32); }
 
 vec3 blockCenter(uint i)
 {
@@ -52,6 +70,14 @@ int bucketFor(vec3 center)
     return clamp(int(d * camAndScale.w), 0, NUM_BUCKETS - 1);
 }
 
+// Distance bucket of a block's coarse PARENT at the given level (classify by the
+// parent so all N^3 children of a coarse block fall in the same band - no seam).
+int parentBucket(ivec3 bc, int level)
+{
+    vec3 c = vec3((bc / level) * level) + vec3(float(level) * 0.5);
+    return bucketFor(c);
+}
+
 void main()
 {
     uint i = gl_GlobalInvocationID.x;
@@ -62,6 +88,38 @@ void main()
     if (!inFrustum(center)) {
         return;
     }
-    uint slot = atomicAdd(bucketOffsets[bucketFor(center)], 1u);
-    instanceIds[slot] = int(i);
+    int b = bucketFor(center);              // fine-block bucket -> the sort slot
+    uint slot = atomicAdd(bucketOffsets[b], 1u);
+    // Distance LOD: tag blocks past the split bucket so the brick VS draws them
+    // coarse. Classify by the coarse PARENT's distance (lodParams.y = N) so all N^3
+    // children of a coarse block agree near-vs-far - no straddle seam at the LOD
+    // boundary. The sort slot stays per-fine-block, so the list is still distance-
+    // sorted: fine (near) instances come before coarse (far) - front-to-back/early-Z.
+    int id = int(i);
+    int maxLevel = int(lodParams.z + 0.5);   // 0 off, 2 = fine->2, 4 = fine->2->4
+    if (maxLevel >= 2) {
+        int ii = int(i);
+        ivec3 bc = ivec3(ii % int(BLOCKS_PER_AXIS),
+                         (ii / int(BLOCKS_PER_AXIS)) % int(BLOCKS_PER_AXIS),
+                         ii / int(BLOCKS_PER_AXIS * BLOCKS_PER_AXIS));
+        // Concentric bands (each judged by its level's coarse-parent distance, so the
+        // boundary is seam-free at that level's granularity): fine -> 2 at split1,
+        // then 2 -> 4 at split2 (farther).
+        int level = 0;
+        if (parentBucket(bc, 2) >= int(lodParams.x + 0.5)) level = 2;
+        if (maxLevel >= 4 && parentBucket(bc, 4) >= int(lodParams.y + 0.5)) level = 4;
+        if (level >= 2) {
+            id |= COARSE_INSTANCE_FLAG;
+            if (level == 4) id |= LEVEL_INSTANCE_BIT;
+            // Claim this coarse block's anchor (shared concatenated anchor buffer):
+            // first child to flip the slot emits the cube; the rest degenerate.
+            int cbpa = int(BLOCKS_PER_AXIS) / level;
+            ivec3 cbc = bc / level;
+            int cIdx = coarseTableBaseFor(level) + cbc.x + cbc.y * cbpa + cbc.z * cbpa * cbpa;
+            if (atomicExchange(anchorClaim[cIdx], 1u) == 0u) {
+                id |= ANCHOR_INSTANCE_FLAG;
+            }
+        }
+    }
+    instanceIds[slot] = id;
 }

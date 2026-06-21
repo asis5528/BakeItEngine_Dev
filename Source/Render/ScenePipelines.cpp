@@ -66,17 +66,23 @@ ScenePipelines::ScenePipelines(VulkanBase *base,VkRenderPass renderPass) {
     input.fragmentShaderpath = "shaders/Sdf/SdfBrickFS.spv";
     input.useInstanceIdAttribute = true;
 
+    // Brick pipeline bindings (order = [UBOs][textures][SBOs]):
+    //  0 UBO, 1 BasicUbo (VS reads coarse-LOD toggle .z),
+    //  2 fine field sampler, 3 COARSE tile-pool sampler (NEW),
+    //  4 bricks, 5 blocks, 6 (counter), 7 blockColors, 8 blockSpatial,
+    //  9 coarse block table (VS+FS), 10 coarse dummy bricks (FS placeholder).
     input.descriptorTypes = { descriptorTypes{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_SHADER_STAGE_ALL_GRAPHICS},
          descriptorTypes{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_SHADER_STAGE_ALL_GRAPHICS}, // BasicUbo: VS now reads it too (coarse-LOD toggle in .z)
          descriptorTypes{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,VK_SHADER_STAGE_FRAGMENT_BIT,
+},descriptorTypes{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,VK_SHADER_STAGE_FRAGMENT_BIT, // binding 3: coarse tile pool
 },descriptorTypes{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,VK_SHADER_STAGE_FRAGMENT_BIT,
 } ,descriptorTypes{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,VK_SHADER_STAGE_ALL_GRAPHICS,
 },descriptorTypes{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,VK_SHADER_STAGE_FRAGMENT_BIT,
 },descriptorTypes{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,VK_SHADER_STAGE_ALL_GRAPHICS,
 },descriptorTypes{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,VK_SHADER_STAGE_VERTEX_BIT,
-// Coarse-LOD: binding 8 = coarse block table (VS reads the coarse brick base),
-// binding 9 = coarse downsampled brick atlas (FS marches it).
-},descriptorTypes{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,VK_SHADER_STAGE_VERTEX_BIT,
+// Coarse-LOD: binding 9 = coarse block table (VS reads the coarse tile index,
+// FS walks it for cross-tile coarse normals), binding 10 = coarse dummy bricks.
+},descriptorTypes{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,VK_SHADER_STAGE_ALL_GRAPHICS,
 },descriptorTypes{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,VK_SHADER_STAGE_FRAGMENT_BIT,
 } };
     pipelines[4]->bufferSize = { sizeof(UniformBufferObject),sizeof(BasicUbo) };

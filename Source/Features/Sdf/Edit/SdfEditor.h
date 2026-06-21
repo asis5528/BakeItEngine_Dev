@@ -38,17 +38,33 @@ public:
 	VulkanBase* base;
 	Scene* scene;
 
-	// Coarse LOD atlas - the brush stamps it DIRECTLY at coarse resolution (the
-	// same SdfBrushCS run on a coarser grid), so it is a clean native low-res
-	// SDF, not a downsampled (aliased) copy of the fine field. coarseSBO mirrors
-	// the fine atlas buffers (bricks, block table, counter, colors, dirty, free
-	// count, free stack) sized for the coarse grid. The render reads [0] bricks
-	// and [1] block table.
-	ComputePipeline* coarseBrushComp = nullptr;
-	std::vector<UBO> coarseUBO;
-	std::vector<SBO> coarseSBO;
-	int coarseN = 2;                 // coarse block = N^3 fine blocks (dense-tex test level)
-	int coarseBlocksPerAxis = 32;    // chunkBlocksPerAxis / coarseN
+	// Coarse LOD pyramid in a SINGLE shared pool. The brush stamps each level (N=2,4)
+	// directly at its coarse resolution (SdfBrushTexCS on a coarser grid) into ONE
+	// shared sparse tile pool + ONE concatenated block table/colors: level i occupies
+	// table region [tableBase_i, tableBase_i + (64/N_i)^3). A single allocation counter
+	// hands out absolute tile indices, so levels never collide and the 32-tiles/axis
+	// pool addressing is unchanged. The render always reads the shared pool (binding 3)
+	// + table (binding 9) - no per-level re-point; the per-instance level picks its
+	// tableBase in the VS/FS. Distance bands (Scene): fine -> 2 -> 4 with two thresholds.
+	struct CoarseLevel {
+		int N = 0;                   // coarse block = N^3 fine blocks
+		int blocksPerAxis = 0;       // chunkBlocksPerAxis / N
+		int tableBase = 0;           // start of this level's region in the shared table/colors
+		ComputePipeline* brushComp = nullptr; // bound to the shared pool + shared SBOs
+		std::vector<UBO> ubo;        // carries tableBase + coarse grid + field scale
+	};
+	static const int kCoarseLevels = 2; // N = 2, 4
+	CoarseLevel coarseLevels[kCoarseLevels];
+
+	// Shared coarse storage (one pool + one SBO set for ALL levels). table[1]/colors[3]
+	// span the concatenation of every level's region; counter[2] is the single tile
+	// allocator. Same 7-SBO layout as the fine compute.
+	VulkanTexture coarseSharedPool{};
+	int coarseSharedPoolIndex = -1;
+	int coarseSharedPoolDim = 0;
+	std::vector<SBO> coarseSharedSBO; // [0] dummy bricks, [1] table, [2] counter,
+	                                  // [3] colors, [4] dirty, [5] free count, [6] free stack
+	int coarseTableTotal = 0;         // total table entries across all level regions
 
 	// Dense coarse field as a 3D texture (TEST path): the coarse compute writes
 	// it via imageStore, the render samples it as binding-2 sampler3D (hardware
@@ -77,6 +93,7 @@ public:
 	VulkanTexture tilePoolTexture{};
 	int tilePoolTextureIndex = -1;
 	int tilePoolDim = 0;             // kTilesPerAxis * 9
+
 	// Accumulated dirty block region (union of brush stamps since the last
 	// convert), so the rebuild only touches the edited footprint, not the whole
 	// 64^3 grid. min > max means empty. Reset after each convert.
@@ -98,6 +115,12 @@ public:
 	// when this changes (or a stamp ran), so idle frames skip the build
 	// submit and the HUD readback entirely.
 	glm::mat4 lastDrawListBlockToClip = glm::mat4(0.0f);
+	// Distance-LOD split distance + level baked into the last draw-list build; a
+	// change in either (without the camera moving) must force a rebuild too, since
+	// the coarse flag depends on the coarse-parent grouping (which depends on N).
+	float lastCoarseSplitDist = -1.0f;
+	float lastCoarseSplitDist2 = -1.0f;
+	int lastCoarseLodLevelForList = -1;
 
 	// Stroke gesture state. A stroke lasts as long as the button is held;
 	// dispatches happen when the cursor has moved far enough since the last

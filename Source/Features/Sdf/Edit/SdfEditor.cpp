@@ -1,6 +1,7 @@
 #include "SdfEditor.h"
 #include "Features/Sdf/SdfBackend.h"
 #include "Core/Resources/ResourceManager.h"
+#include "Render/Renderer.h" // renderPassDirty: re-record after a coarse-level re-point
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -19,6 +20,7 @@
 	float _pad0 = 0.0f;
 	float _pad1 = 0.0f;
 	glm::ivec4 DispatchBaseBlock = glm::ivec4(0);
+	glm::ivec4 CoarseParams = glm::ivec4(0); // x: table-base offset into the shared coarse table/colors
 };
 
 namespace
@@ -209,12 +211,19 @@ SdfEditor::SdfEditor(EngineContext& ctx)
 
 #ifdef BAKEIT_SDF_TEXTURE_ATLAS
 	// Sparse tile pool: kTilesPerAxis^3 tiles, each 9^3 texels (8 cells + 1 pad).
-	// R16F, GENERAL layout - bound as a storage image to the brush (imageStore)
-	// and as a sampler3D to the render (binding 2). Allocated tiles are fully
-	// written by the brush before being read, so no clear is needed.
+	// GENERAL layout - bound as a storage image to the brush (imageStore) and as
+	// a sampler3D to the render (binding 2). Allocated tiles are fully written by
+	// the brush before being read, so no clear is needed. Texel format is R16F by
+	// default; R8_SNORM under BAKEIT_SDF_TILE_R8 (8-bit precision experiment, the
+	// shaders scale the field into [-1,1] - see SdfBackend.h).
 	tilePoolDim = kTilesPerAxis * 9;
+#ifdef BAKEIT_SDF_TILE_R8
+	const VkFormat tilePoolFormat = VK_FORMAT_R8_SNORM;
+#else
+	const VkFormat tilePoolFormat = VK_FORMAT_R16_SFLOAT;
+#endif
 	ResourceTypes::Texture3D tilePoolTex =
-		base->vbuffer->createTexture3DR16F(tilePoolDim, tilePoolDim, tilePoolDim);
+		base->vbuffer->createTexture3DR16F(tilePoolDim, tilePoolDim, tilePoolDim, tilePoolFormat);
 	tilePoolTexture = ResourceManager::getTexture(tilePoolTex.id);
 	scene->ptextures.push_back(tilePoolTex);
 	tilePoolTextureIndex = static_cast<int>(scene->ptextures.size()) - 1;
@@ -254,57 +263,79 @@ SdfEditor::SdfEditor(EngineContext& ctx)
 		}
 	}
 
-	// --- Coarse LOD atlas: stamped directly by the brush (desktop only) ----
-#ifndef BAKEIT_PLATFORM_ANDROID
-	coarseBlocksPerAxis = blocksPerAxis / coarseN;
-	const int numCoarseBlocks = coarseBlocksPerAxis * coarseBlocksPerAxis * coarseBlocksPerAxis;
-	coarseUBO = base->vbuffer->createUniformBuffers({ sizeof(sdfEditUBO) });
-	// Slot 0/6 (legacy SSBO brick atlas + its free stack) are UNUSED now - the
-	// dense 3D texture replaces them - so allocate them tiny. They only stay so
-	// the render's binding-9 descriptor (unread) has a valid buffer; at the N=2
-	// coarse grid a full brick atlas would otherwise be ~287 MB.
-	coarseSBO = base->vbuffer->createStorageBuffers({
-		sizeof(float) * 16,                                       // 0: (legacy brick atlas - UNUSED)
-		sizeof(int) * numCoarseBlocks,                            // 1: coarse block table
-		sizeof(int) * 2,                                          // 2: tail + alloc cursor
-		sizeof(glm::vec4) * numCoarseBlocks,                      // 3: coarse block colors
-		sizeof(int),                                              // 4: dirty counter
-		sizeof(int),                                              // 5: free brick count
-		sizeof(int) * 16                                          // 6: (legacy free stack - UNUSED)
+	// --- Coarse LOD pyramid in a SINGLE shared pool (desktop + Quest) ----
+	// Levels N=2,4 share one tile pool + one concatenated table/colors + one tile
+	// allocator. Each level owns a contiguous table region [tableBase, +(64/N)^3); the
+	// shared counter hands out absolute tile indices so levels never collide, and the
+	// pool keeps 32 tiles/axis (unchanged addressing). The render reads the shared
+	// pool/table always (no per-level re-point). The stamp REUSES SdfBrushTexCS, with
+	// the per-level UBO carrying that level's tableBase + coarse grid resolution.
+	const int kCoarseTilesPerAxis = BAKEIT_SDF_TILE_TILES_PER_AXIS;
+	const int coarseTileCapacity = kCoarseTilesPerAxis * kCoarseTilesPerAxis * kCoarseTilesPerAxis;
+	const int kCoarseLevelN[kCoarseLevels] = { 2, 4 };
+	coarseTableTotal = 0;
+	for (int li = 0; li < kCoarseLevels; ++li) {
+		CoarseLevel& lvl = coarseLevels[li];
+		lvl.N = kCoarseLevelN[li];
+		lvl.blocksPerAxis = blocksPerAxis / lvl.N;
+		lvl.tableBase = coarseTableTotal;
+		coarseTableTotal += lvl.blocksPerAxis * lvl.blocksPerAxis * lvl.blocksPerAxis;
+	}
+#ifdef BAKEIT_SDF_TILE_R8
+	const VkFormat coarseTileFormat = VK_FORMAT_R8_SNORM;
+#else
+	const VkFormat coarseTileFormat = VK_FORMAT_R16_SFLOAT;
+#endif
+	// Shared SBO set (same 7-slot layout as the fine compute), table[1]/colors[3] sized
+	// to the concatenation of all level regions; counter[2] is the single tile allocator.
+	coarseSharedSBO = base->vbuffer->createStorageBuffers({
+		sizeof(float) * 16,                          // 0: dummy bricks (FS binding 10 placeholder)
+		sizeof(int) * coarseTableTotal,              // 1: concatenated block table
+		sizeof(int) * 2,                             // 2: tail + alloc cursor (shared)
+		sizeof(glm::vec4) * coarseTableTotal,        // 3: concatenated block colors
+		sizeof(int),                                 // 4: dirty counter
+		sizeof(int),                                 // 5: free brick count
+		sizeof(int) * coarseTileCapacity             // 6: free stack
 	});
-	std::vector<int32_t> coarseBlocksInit(static_cast<size_t>(numCoarseBlocks), kBlockEmpty);
-	coarseSBO[1].map(base->device, sizeof(int32_t) * coarseBlocksInit.size(), coarseBlocksInit.data());
+	std::vector<int32_t> coarseBlocksInit(static_cast<size_t>(coarseTableTotal), kBlockEmpty);
+	coarseSharedSBO[1].map(base->device, sizeof(int32_t) * coarseBlocksInit.size(), coarseBlocksInit.data());
 	int coarseZeros2[2] = { 0, 0 };
-	coarseSBO[2].map(base->device, sizeof(coarseZeros2), coarseZeros2);
+	coarseSharedSBO[2].map(base->device, sizeof(coarseZeros2), coarseZeros2);
 	int coarseZero = 0;
-	coarseSBO[4].map(base->device, sizeof(int), &coarseZero);
-	coarseSBO[5].map(base->device, sizeof(int), &coarseZero);
+	coarseSharedSBO[4].map(base->device, sizeof(int), &coarseZero);
+	coarseSharedSBO[5].map(base->device, sizeof(int), &coarseZero);
 
-	// Dense coarse field as a 3D texture (TEST path). One R16F volume covers the
-	// whole coarse domain (coarseBlocksPerAxis*8 + 1 boundary sample), cleared to
-	// +FAR so the first stamp's smin/boolean starts clean. Wired to object 0's
-	// material so the brick FS samples it through binding-2 texSampler.
-	coarseAtlasDim = coarseBlocksPerAxis * 8 + 1;
-	ResourceTypes::Texture3D coarseTex =
-		base->vbuffer->createTexture3DR16F(coarseAtlasDim, coarseAtlasDim, coarseAtlasDim);
-	coarseAtlasTexture = ResourceManager::getTexture(coarseTex.id);
-	scene->ptextures.push_back(coarseTex);
-	coarseAtlasTextureIndex = static_cast<int>(scene->ptextures.size()) - 1;
-	clearCoarseAtlas();
+	// Shared tile pool (format follows the fine pool: R8_SNORM under BAKEIT_SDF_TILE_R8).
+	coarseSharedPoolDim = kCoarseTilesPerAxis * 9;
+	ResourceTypes::Texture3D coarseTileTex = base->vbuffer->createTexture3DR16F(
+		coarseSharedPoolDim, coarseSharedPoolDim, coarseSharedPoolDim, coarseTileFormat);
+	coarseSharedPool = ResourceManager::getTexture(coarseTileTex.id);
+	scene->ptextures.push_back(coarseTileTex);
+	coarseSharedPoolIndex = static_cast<int>(scene->ptextures.size()) - 1;
 
-	// Coarse stamp compute writes the dense texture (imageStore) + the coarse
-	// block table; no brick atlas / allocation / free list. Bindings: 0 UBO,
-	// 1 storage image (the dense field), 2 coarse block table.
-	ComputeInput coarseBrushInput;
-	coarseBrushInput.computeShaderPath = "shaders/Sdf/SdfCoarseBrushCS.spv";
-	coarseBrushInput.descriptorTypes = {
-		VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-		VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
-	};
-	coarseBrushComp = new ComputePipeline(base, coarseBrushInput);
-	coarseBrushComp->setupDescriptors(coarseUBO, { coarseAtlasTexture }, { coarseSBO[1] });
-	coarseBrushComp->dispatch(1, 1, 1); // create command buffer + signaled fence
+	// One stamp pipeline per level, all bound to the SHARED pool + SHARED SBOs; the
+	// per-level UBO carries tableBase so its table/colors writes land in its region.
+	// Bindings mirror SdfBrushTexCS: 0 UBO, 1 tile pool, 2-7 blocks/counter/colors/dirty/free.
+	for (int li = 0; li < kCoarseLevels; ++li) {
+		CoarseLevel& lvl = coarseLevels[li];
+		lvl.ubo = base->vbuffer->createUniformBuffers({ sizeof(sdfEditUBO) });
+		ComputeInput coarseBrushInput;
+		coarseBrushInput.computeShaderPath = "shaders/Sdf/SdfBrushTexCS.spv";
+		coarseBrushInput.descriptorTypes = {
+			VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+			VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+			VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+		};
+		lvl.brushComp = new ComputePipeline(base, coarseBrushInput);
+		lvl.brushComp->setupDescriptors(lvl.ubo, { coarseSharedPool },
+			{ coarseSharedSBO[1], coarseSharedSBO[2], coarseSharedSBO[3], coarseSharedSBO[4], coarseSharedSBO[5], coarseSharedSBO[6] });
+		lvl.brushComp->dispatch(1, 1, 1); // create command buffer + signaled fence
+	}
 
 #ifndef BAKEIT_SDF_TEXTURE_ATLAS
 	// --- Fine dense 3D texture (SSBO-vs-texture perf test) -----------------
@@ -340,7 +371,6 @@ SdfEditor::SdfEditor(EngineContext& ctx)
 	// real recording (with push constants) happens in dispatchFineToTex().
 	fineToTexComp->ensureCommandResources();
 #endif // !BAKEIT_SDF_TEXTURE_ATLAS
-#endif
 }
 
 void SdfEditor::uploadChunkSpatialData()
@@ -513,14 +543,17 @@ void SdfEditor::clearScene()
 	}
 	volume.stats.dirtyBlockCount = 0;
 
-	// Coarse path: empty the coarse block table and reset the dense field so a
-	// cleared scene shows no stale coarse geometry.
-#ifndef BAKEIT_PLATFORM_ANDROID
-	if (!coarseSBO.empty()) {
-		const int numCoarseBlocks = coarseBlocksPerAxis * coarseBlocksPerAxis * coarseBlocksPerAxis;
-		std::vector<int32_t> coarseEmpty(static_cast<size_t>(numCoarseBlocks), kBlockEmpty);
-		coarseSBO[1].map(base->device, sizeof(int32_t) * coarseEmpty.size(), coarseEmpty.data());
+	// Coarse path: empty the shared coarse table + reset the shared bump allocator so
+	// a cleared scene shows no stale coarse geometry (all levels, both platforms).
+	if (!coarseSharedSBO.empty()) {
+		std::vector<int32_t> coarseEmpty(static_cast<size_t>(coarseTableTotal), kBlockEmpty);
+		coarseSharedSBO[1].map(base->device, sizeof(int32_t) * coarseEmpty.size(), coarseEmpty.data());
+		int zc[2] = { 0, 0 };
+		coarseSharedSBO[2].map(base->device, sizeof(zc), zc);  // tail + cursor
+		int z = 0;
+		coarseSharedSBO[5].map(base->device, sizeof(int), &z); // free count
 	}
+#ifndef BAKEIT_PLATFORM_ANDROID
 	clearCoarseAtlas();
 	clearFineAtlas(); // also marks fineTexDirty so the next idle frame re-converts
 #endif
@@ -529,6 +562,10 @@ void SdfEditor::clearScene()
 void SdfEditor::update(float time)
 {
 	uploadChunkSpatialData();
+
+	// Coarse-LOD pyramid lives in ONE shared pool (binding 3) + concatenated table
+	// (binding 9), so the rendered level is selected per-instance in the VS/FS by the
+	// distance band - no descriptor re-point needed at all.
 
 	if (!brushInput) {
 		return;
@@ -723,27 +760,35 @@ void SdfEditor::update(float time)
 		strokeNeedsInitialDispatch = false;
 		previousBrushCursorPos = currentCursorPos;
 
-		// Coarse LOD: stamp the SAME brush op into the coarse atlas at coarse
-		// resolution (ubo._pad0 = coarse grid cells). A clean native low-res SDF
-		// instead of a downsampled (aliased) copy, and local/cheap - only the
-		// coarse blocks the brush touches. Bump-only allocation: reset the free
-		// count each stamp so the free stack can't overflow (erased coarse bricks
-		// leak until the free-list compaction lands). Own fence -> non-blocking.
-#ifndef BAKEIT_PLATFORM_ANDROID
-		if (coarseBrushComp && vkGetFenceStatus(base->device, coarseBrushComp->computeFence) == VK_SUCCESS) {
-			const glm::ivec3 coarseMin = dispatchBlockMin / coarseN;
-			const glm::ivec3 coarseMax = dispatchBlockMax / coarseN;
+		// Coarse LOD pyramid: stamp the SAME brush op into EVERY coarse level at its
+		// resolution (ubo._pad0 = that level's coarse grid cells = blocksPerAxis*8)
+		// into the SHARED pool, each writing its own table region (CoarseParams.x =
+		// tableBase). All levels stay populated so distance bands can switch freely.
+		// Cheap/local (only the coarse blocks the brush touches) and non-blocking (own
+		// fence). Bump-only alloc: w=0 free-stack threshold so SdfBrushTexCS always
+		// tail-allocates from the shared counter; reset the (shared) free count once.
+		int coarseFreeZero = 0;
+		coarseSharedSBO[5].map(base->device, sizeof(int), &coarseFreeZero);
+		for (CoarseLevel& lvl : coarseLevels) {
+			if (!lvl.brushComp || vkGetFenceStatus(base->device, lvl.brushComp->computeFence) != VK_SUCCESS) {
+				continue;
+			}
+			const glm::ivec3 coarseMin = dispatchBlockMin / lvl.N;
+			const glm::ivec3 coarseMax = dispatchBlockMax / lvl.N;
 			const glm::ivec3 coarseCount = coarseMax - coarseMin + glm::ivec3(1);
-			sdfEditUBO cubo = pubo;                              // same brush params
-			cubo._pad0 = static_cast<float>(coarseBlocksPerAxis * 8); // coarse grid (128)
-			cubo.DispatchBaseBlock = glm::ivec4(coarseMin, 0);   // w unused by the dense shader
-			coarseUBO[0].map(base->device, sizeof(sdfEditUBO), &cubo);
-			coarseBrushComp->submit(
+			sdfEditUBO cubo = pubo;                                 // same brush params
+			cubo._pad0 = static_cast<float>(lvl.blocksPerAxis * 8); // coarse grid (256/128)
+			// Widen the R8 field range to ~2 coarse blocks (scale 32/N) so the coarse
+			// march can skip an empty coarse cube in ~1 step (else it crawls ~N/2).
+			cubo._pad1 = 32.0f / static_cast<float>(lvl.N);
+			cubo.DispatchBaseBlock = glm::ivec4(coarseMin, 0);
+			cubo.CoarseParams = glm::ivec4(lvl.tableBase, 0, 0, 0); // this level's table region
+			lvl.ubo[0].map(base->device, sizeof(sdfEditUBO), &cubo);
+			lvl.brushComp->submit(
 				static_cast<uint32_t>(coarseCount.x),
 				static_cast<uint32_t>(coarseCount.y),
 				static_cast<uint32_t>(coarseCount.z));
 		}
-#endif
 	}
 
 	// Rebuild the draw list when its inputs changed: right behind each stamp
@@ -781,9 +826,20 @@ void SdfEditor::update(float time)
 		// space, the frustum in world space.
 		const glm::mat4 blockToClip = cullViewProj * model * blockToWorld;
 
-		if (stampedThisFrame || blockToClip != lastDrawListBlockToClip) {
-			drawList->build(camBlockUnits, blockToClip);
+		// Distance bands: fine -> 2 past coarseLodDistance, 2 -> 4 past coarseLodDistance2
+		// (block units). coarseLodLevel caps the coarsest band (0 off / 2 / 4). A huge
+		// distance disables a band (all fine / no 4).
+		const int maxLevel = scene->coarseLodLevel;
+		const float split1Dist = (maxLevel >= 2) ? scene->coarseLodDistance : 1e9f;
+		const float split2Dist = (maxLevel >= 4) ? scene->coarseLodDistance2 : 1e9f;
+		if (stampedThisFrame || blockToClip != lastDrawListBlockToClip
+			|| split1Dist != lastCoarseSplitDist || split2Dist != lastCoarseSplitDist2
+			|| maxLevel != lastCoarseLodLevelForList) {
+			drawList->build(camBlockUnits, blockToClip, split1Dist, split2Dist, maxLevel);
 			lastDrawListBlockToClip = blockToClip;
+			lastCoarseSplitDist = split1Dist;
+			lastCoarseSplitDist2 = split2Dist;
+			lastCoarseLodLevelForList = maxLevel;
 		}
 		if (stampedThisFrame) {
 			// HUD mirror: last completed list's count (host-visible).
@@ -821,7 +877,6 @@ void SdfEditor::update(float time)
 SdfEditor::~SdfEditor() {
 	delete drawList;
 	delete comp;
-	delete coarseBrushComp;
 	delete fineToTexComp;
 	for (UBO& ubo : computeUBO) {
 		vkDestroyBuffer(base->device, ubo.buffer, nullptr);
@@ -831,12 +886,16 @@ SdfEditor::~SdfEditor() {
 		vkDestroyBuffer(base->device, sbo.buffer, nullptr);
 		vkFreeMemory(base->device, sbo.bufferMemory, nullptr);
 	}
-	for (UBO& ubo : coarseUBO) {
-		vkDestroyBuffer(base->device, ubo.buffer, nullptr);
-		vkFreeMemory(base->device, ubo.bufferMemory, nullptr);
+	for (CoarseLevel& lvl : coarseLevels) {
+		delete lvl.brushComp;
+		for (UBO& ubo : lvl.ubo) {
+			vkDestroyBuffer(base->device, ubo.buffer, nullptr);
+			vkFreeMemory(base->device, ubo.bufferMemory, nullptr);
+		}
 	}
-	for (SBO& sbo : coarseSBO) {
+	for (SBO& sbo : coarseSharedSBO) {
 		vkDestroyBuffer(base->device, sbo.buffer, nullptr);
 		vkFreeMemory(base->device, sbo.bufferMemory, nullptr);
 	}
 }
+

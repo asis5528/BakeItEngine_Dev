@@ -158,6 +158,7 @@ void Renderer::createSceneDescriptor(Scene& scene)
 			VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
 			VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
 			VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+			VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, // 2nd sampler: SDF coarse tile pool (binding 3)
 			VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 			VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 			VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
@@ -196,6 +197,10 @@ void Renderer::createSceneDescriptor(Scene& scene)
 				if (mat.type == TexturedMaterial) {
 					MaterialTexturedData* dat = (struct MaterialTexturedData*)mat.materialData;
 					descriptorsTextures.push_back(ResourceManager::getTexture(scene.ptextures[dat->DiffuseTexture].id));
+					// Optional 2nd texture (SDF coarse tile pool) -> binding 3.
+					if (dat->SecondaryTexture >= 0) {
+						descriptorsTextures.push_back(ResourceManager::getTexture(scene.ptextures[dat->SecondaryTexture].id));
+					}
 				}
 				base->vulkandescriptor->updateDescriptorSets(object->shader[meshID].descriptorSet, { object->shader[meshID].ubos }, descriptorsTextures, object->shader[meshID].sbos);
 			}

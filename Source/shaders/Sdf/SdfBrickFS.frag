@@ -32,17 +32,23 @@ layout(binding = 0) uniform UniformBufferObject {
 layout(binding = 1) uniform BasicUbo {
     vec4 color; // x: block wireframe on/off
 } ubo2;
-layout(binding = 2) uniform sampler3D texSampler;
+layout(binding = 2) uniform sampler3D texSampler;       // fine field (tile pool / dense)
+layout(binding = 3) uniform sampler3D coarseTexSampler; // sparse COARSE tile pool
 
-layout(std430, binding = 3) readonly buffer BrickBuffer {
+// SBO bindings shifted +1 (binding 3 is now the coarse tile-pool sampler).
+layout(std430, binding = 4) readonly buffer BrickBuffer {
     float bricks[]; // brick atlas: 9*9*9 floats per brick
 };
-layout(std430, binding = 4) readonly buffer BlockBuffer {
+layout(std430, binding = 5) readonly buffer BlockBuffer {
     int blocks[];   // 64^3 block table: brick index | flags, negative = empty
 };
-// Coarse-LOD downsampled brick atlas (9^3 per brick, 1/N resolution). A coarse
-// cube marches one of these (8 cells) instead of the full N*8-cell region.
-layout(std430, binding = 9) readonly buffer CoarseBrickBuffer {
+// Coarse block table (cbpa^3): a coarse TILE INDEX for surface coarse blocks,
+// else a negative sentinel. Walked by the coarse tile path for cross-tile taps.
+layout(std430, binding = 9) readonly buffer CoarseBlockBuffer {
+    int coarseBlocks[];
+};
+// Legacy coarse brick atlas (dummy in the tile build; kept for descriptor parity).
+layout(std430, binding = 10) readonly buffer CoarseBrickBuffer {
     float coarseBricks[];
 };
 
@@ -277,6 +283,32 @@ vec3 fineTexNormal(vec3 globalGrid, vec3 fallback)
 const int   TEX_TILES_PER_AXIS = 32;
 const float TEX_TILE_POOL_DIM  = float(TEX_TILES_PER_AXIS * 9);
 
+// Field-storage precision: must match BAKEIT_SDF_TILE_R8 in SdfBackend.h and the
+// SDF_TILE_R8 block in SdfBrushTexCS.comp. The brush scales the normalized-chunk
+// distance into the texel's range on store; unscale it on every tile sample.
+#define SDF_TILE_R8 1
+#if SDF_TILE_R8
+const float TILE_FIELD_INV_SCALE = 1.0 / 32.0;
+#else
+const float TILE_FIELD_INV_SCALE = 1.0;
+#endif
+
+// Coarse samples unscale with N/32 (not the fine 1/32): the coarse stamp widened
+// the R8 range to 32/N to fit its N-block cube (SdfBrushTexCS / SdfEditor), so the
+// coarse march can skip an empty coarse cube in ~1 step. coarseLevel = N here.
+float coarseFieldInvScale()
+{
+#if SDF_TILE_R8
+    return coarseLevel / 32.0;
+#else
+    return 1.0;
+#endif
+}
+
+// Shared coarse table layout: level-2 region [0, (64/2)^3) then level-4. Must match
+// coarseTableBaseFor in SdfBrickVS and the tableBase math in SdfEditor.
+int coarseTableBaseFor(int N) { return (N <= 2) ? 0 : (32 * 32 * 32); }
+
 ivec3 tileOriginTexel(int tileIndex)
 {
     ivec3 tc = ivec3(
@@ -286,13 +318,39 @@ ivec3 tileOriginTexel(int tileIndex)
     return tc * 9;
 }
 
+// Smooth (non-linear) tile-cell coordinate for hardware sampling. Hardware
+// trilinear is piecewise-LINEAR in the per-texel fraction, so the field is only
+// C0 - its gradient jumps at every cell boundary, which faceted both the surface
+// and the finite-difference normals. Warping ONLY the fraction through a quintic
+// smootherstep (6f^5-15f^4+10f^3; slope AND curvature zero at f=0 and f=1) makes
+// the effective interpolation C2 across cell joints. Integer cells map to
+// themselves (smootherstep(0)=0), so the stored samples are still hit exactly
+// (and tile seams / the shared +pad stay continuous). A few ALU ops, no extra
+// taps. (Inigo Quilez's "smooth texture interpolation", applied in cell space.)
+// NOTE: warping the SAMPLE COORDINATE is iq's trick for COLOR textures, where
+// only the look matters. For a distance FIELD it is wrong: texture(warp(x))
+// resamples the field at shifted positions, so the smootherstep S-curve pulls
+// the isosurface toward the cell grid -> grid-aligned lumps + "spooky" wavy
+// silhouettes, and it adds zero-slope plateaus instead of removing bands. So
+// these are passthrough (plain trilinear); coarse smoothness is handled in the
+// NORMAL instead (coarseTexNormal), since the trilinear surface itself is fine.
+vec3 smoothCell(vec3 cell)
+{
+    return cell;
+}
+vec3 smoothCell2(vec3 cell)
+{
+    return cell;
+}
+
 // In-block sample of THIS block's tile (brickIndex2 = tile index). pos is local
 // cube space; returns the distance in LOCAL cube units (like sampleBrick).
 float sampleTile(vec3 pos)
 {
-    vec3 cell = clamp((pos + 0.5) * CELLS_PER_BLOCK, vec3(0.0), vec3(7.9999));
+   // vec3 cell = clamp((pos + 0.5) * CELLS_PER_BLOCK, vec3(0.0), vec3(7.9999));
+    vec3 cell = ((pos + 0.5) * CELLS_PER_BLOCK); // C2 hardware interp
     vec3 texel = vec3(tileOriginTexel(brickIndex2)) + cell;
-    return texture(texSampler, (texel + 0.5) / TEX_TILE_POOL_DIM).r * localDistanceScale();
+    return texture(texSampler, (texel + 0.5) / TEX_TILE_POOL_DIM).r* TILE_FIELD_INV_SCALE * localDistanceScale();
 }
 
 // Cross-tile sample at a global voxel-grid point (the tile-pool analog of
@@ -319,14 +377,14 @@ float sampleTileGlobal(vec3 globalGrid, out bool hasData)
         tileIdx = raw & BLOCK_INDEX_MASK;
         localCell = clamp(globalGrid - vec3(blockCoord) * CELLS_PER_BLOCK, vec3(0.0), vec3(7.9999));
     }
-    vec3 texel = vec3(tileOriginTexel(tileIdx)) + localCell;
-    return texture(texSampler, (texel + 0.5) / TEX_TILE_POOL_DIM).r + bias;
+    vec3 texel = vec3(tileOriginTexel(tileIdx)) + smoothCell2(localCell); // C2 hardware interp
+    return texture(texSampler, (texel + 0.5) / TEX_TILE_POOL_DIM).r * TILE_FIELD_INV_SCALE + bias;
 }
 
 // Cross-tile normal (mirrors calcNormalAtGlobal, but sampling the tile pool).
 vec3 calcNormalAtGlobalTile(vec3 baseGlobal, vec3 fallback)
 {
-    const float e = 0.5;
+    const float e = 2.;
     bool okPX, okMX, okPY, okMY, okPZ, okMZ;
     float px = sampleTileGlobal(baseGlobal + vec3(e, 0, 0), okPX);
     float mx = sampleTileGlobal(baseGlobal - vec3(e, 0, 0), okMX);
@@ -334,7 +392,7 @@ vec3 calcNormalAtGlobalTile(vec3 baseGlobal, vec3 fallback)
     float my = sampleTileGlobal(baseGlobal - vec3(0, e, 0), okMY);
     float pz = sampleTileGlobal(baseGlobal + vec3(0, 0, e), okPZ);
     float mz = sampleTileGlobal(baseGlobal - vec3(0, 0, e), okMZ);
-    float f0 = 0.0;
+    float f0 = 0.;
     if ((okPX != okMX) || (okPY != okMY) || (okPZ != okMZ)) {
         bool okC;
         f0 = sampleTileGlobal(baseGlobal, okC);
@@ -488,24 +546,49 @@ void coarseShadeBrick(int base, float wire)
     gl_FragDepth = clip.z / clip.w;
 }
 
-// --- Dense coarse 3D-texture path ------------------------------------------
-// The coarse field is stored as ONE dense 3D texture (cbpa coarse blocks x 8
-// cells + 1 shared boundary), bound here as texSampler (binding 2). One
-// sampler3D tap replaces the 8 manual brick taps and gives hardware trilinear.
-// The dense texture dim follows the coarse level N (cbpa*8 + 1 boundary), so
-// this stays correct whichever level SdfEditor builds (N=2 -> 257^3).
+// --- Sparse coarse tile-pool path ------------------------------------------
+// The coarse field is a SPARSE 3D-texture tile pool (coarseTexSampler, binding
+// 3), built exactly like the fine pool but one LOD down: each surface coarse
+// block owns one 9^3 tile, located by the coarse block table (coarseBlocks[],
+// reinterpreted as a TILE INDEX). Same 32 tiles/axis as fine, so tileOriginTexel
+// / TEX_TILE_POOL_DIM / TILE_FIELD_INV_SCALE all carry over. This mirrors the
+// fine sampleTile / sampleTileGlobal path (the known-correct one).
 
-// Sample the coarse field at a GLOBAL coarse-grid coordinate (coarse cells,
-// [0, cbpa*8]). Because the whole coarse field is a single continuous texture,
-// taps here cross coarse-cube boundaries naturally - this is the coarse analog
-// of sampleFieldGlobal, and it is what keeps the coarse normal smooth across
-// the seams between coarse cubes (the per-cube clamp faceted the borders).
-float sampleCoarseTexGlobal(vec3 g)
+// In-cube coarse sample: THIS cube's own tile (coarseBrickBase). pos is coarse
+// cube local [-0.5,0.5]; returns the distance in local cube units like sampleTile.
+float sampleCoarseTile(vec3 pos)
 {
-    int cbpa = BLOCKS_PER_AXIS / int(coarseLevel + 0.5); // coarse blocks/axis (64/N)
-    float dim = float(cbpa) * 8.0 + 1.0;                 // dense texture dim
-    vec3 uvw = (g + 0.5) / dim;                          // texel-center normalized coord
-    return texture(texSampler, uvw).r;
+    vec3 cell = smoothCell(clamp((pos + 0.5) * CELLS_PER_BLOCK, vec3(0.0), vec3(7.9999))); // C2 hardware interp
+    vec3 p = vec3(tileOriginTexel(coarseBrickBase)) + cell;
+    return texture(coarseTexSampler, (p + 0.5) / TEX_TILE_POOL_DIM).r * coarseFieldInvScale() * localDistanceScale();
+}
+
+// Cross-tile coarse sample at a global coarse-cell coordinate ([0, cbpa*8]):
+// walk coarseBlocks[] for the owning coarse tile, or extrapolate from this
+// cube's tile when the neighbour coarse block is tile-less. Returns the stored
+// (chunk-normalized == world) distance, like fine sampleTileGlobal.
+float sampleCoarseTileGlobal(vec3 g)
+{
+    int cbpa = BLOCKS_PER_AXIS / int(coarseLevel + 0.5);   // coarse blocks/axis (64/N)
+    ivec3 cbc = clamp(ivec3(floor(g * (1.0 / CELLS_PER_BLOCK))), ivec3(0), ivec3(cbpa - 1));
+    int raw = coarseBlocks[coarseTableBaseFor(int(coarseLevel + 0.5)) + cbc.x + cbc.y * cbpa + cbc.z * cbpa * cbpa];
+
+    int tileIdx;
+    vec3 localCell;
+    float bias = 0.0;
+    if (raw < 0) {
+        tileIdx = coarseBrickBase; // fall back to this cube's tile
+        ivec3 cin = blockCoordIn / int(coarseLevel + 0.5);
+        vec3 unclamped = g - vec3(cin) * CELLS_PER_BLOCK;
+        localCell = clamp(unclamped, vec3(0.0), vec3(7.9999));
+        float clampedOff = length(unclamped - localCell) * (blockSizeWSIn / CELLS_PER_BLOCK);
+        bias = (raw == BLOCK_INTERIOR) ? -clampedOff : clampedOff;
+    } else {
+        tileIdx = raw & BLOCK_INDEX_MASK;
+        localCell = clamp(g - vec3(cbc) * CELLS_PER_BLOCK, vec3(0.0), vec3(7.9999));
+    }
+    vec3 texel = vec3(tileOriginTexel(tileIdx)) + smoothCell(localCell); // C2 hardware interp
+    return texture(coarseTexSampler, (texel + 0.5) / TEX_TILE_POOL_DIM).r * coarseFieldInvScale() + bias;
 }
 
 // Map this coarse cube's local position [-0.5,0.5] to its global coarse-cell
@@ -514,30 +597,33 @@ float sampleCoarseTexGlobal(vec3 g)
 vec3 coarseGlobalFromLocal(vec3 pos)
 {
     ivec3 cb = blockCoordIn / int(coarseLevel + 0.5);
-    return vec3(cb) * 8.0 + (pos + 0.5) * 8.0;
+    return vec3(cb) * CELLS_PER_BLOCK + (pos + 0.5) * CELLS_PER_BLOCK;
 }
 
-// March sampler: pos is coarse cube local [-0.5,0.5]; returns the stored
-// world-space distance (raw, like sampleCoarseBrick) so coarseShadeTex's march
-// math is unchanged. The clamp keeps in-cube march taps inside this cube.
+// March sampler: pos is coarse cube local [-0.5,0.5]; returns the local-cube
+// distance (in-cube tile sample). The clamp keeps march taps inside this cube.
 float sampleCoarseTex(vec3 pos)
 {
-    return sampleCoarseTexGlobal(coarseGlobalFromLocal(clamp(pos, vec3(-0.5), vec3(0.5))));
+    return sampleCoarseTile(clamp(pos, vec3(-0.5), vec3(0.5)));
 }
 
 // Coarse normal in GLOBAL coarse-grid space: the finite-difference taps cross
-// coarse-cube boundaries inside the single dense texture, so the gradient is
-// continuous across seams (the old local-clamped version faceted the borders,
-// making the coarse-cube grid visible). e = half a coarse cell (matches the
-// previous offset magnitude: 0.5/8 local == 0.5 coarse cells global).
+// coarse-cube boundaries by walking coarseBlocks[] to the neighbour tile, so the
+// gradient stays continuous across coarse-cube seams (mirrors the fine tile
+// normal). e = half a coarse cell. Scale cancels under normalize().
 vec3 coarseTexNormal(vec3 pos, vec3 fallback)
 {
     vec3 g = coarseGlobalFromLocal(pos); // no clamp - let taps cross seams
-    const float e = 0.5;                 // half a coarse cell, global texel units
+    // Wide central difference: trilinear's gradient is piecewise-constant per
+    // cell, so a half-cell diff steps cell-to-cell and shows as concentric
+    // normal-terracing on curved coarse surfaces. Spanning ~3 cells low-passes
+    // the gradient (averages the per-cell steps) so the normal varies smoothly.
+    // Bigger e = smoother but rounds genuine edges/corners - this is the knob.
+    const float e = 2.;                 // coarse cells, global texel units
     vec3 grad = vec3(
-        sampleCoarseTexGlobal(g + vec3(e,0,0)) - sampleCoarseTexGlobal(g - vec3(e,0,0)),
-        sampleCoarseTexGlobal(g + vec3(0,e,0)) - sampleCoarseTexGlobal(g - vec3(0,e,0)),
-        sampleCoarseTexGlobal(g + vec3(0,0,e)) - sampleCoarseTexGlobal(g - vec3(0,0,e)));
+        sampleCoarseTileGlobal(g + vec3(e,0,0)) - sampleCoarseTileGlobal(g - vec3(e,0,0)),
+        sampleCoarseTileGlobal(g + vec3(0,e,0)) - sampleCoarseTileGlobal(g - vec3(0,e,0)),
+        sampleCoarseTileGlobal(g + vec3(0,0,e)) - sampleCoarseTileGlobal(g - vec3(0,0,e)));
     if (dot(grad, grad) <= 1e-12) return fallback;
     return normalize(grad);
 }
@@ -583,9 +669,10 @@ void coarseShadeTex(float wire)
     vec3 hitWorldPos = (ubo.model * vec4(hitObjectPos, 1.0)).xyz;
     vec3 viewDir = normalize(worldPosition - cameraPos);
     vec3 n = coarseTexNormal(hitLocalPos, -viewDir);
+  // n = vec3(0.,1.,0.);
     n = normalize(mat3(ubo.model) * n);
 
-    vec3 baseColor = vec3(1.8,0.8,0.8);
+    vec3 baseColor = vec3(0.76, 0.47, 0.34)*1.5;
     vec3 light = normalize(vec3(10.0, 10.0, 10.0));
     float dif = clamp(dot(light, n), 0.0, 1.0);
     vec3 reflectDir = reflect(light, n);
@@ -610,13 +697,23 @@ void coarseShade()
         wire = 1.0 - smoothstep(0.0, wireWidth, 1.0 - wm);
     }
 
-    // Cheap path: this coarse block has a downsampled brick - march that 8-cell
-    // brick instead of the full-res region. (-1 = not downsampled yet / level
-    // != 4: fall through to the full-res block-skip march below.)
+    // Cheap path: this coarse block owns a coarse TILE - march that 8-cell tile.
     if (coarseBrickBase >= 0) {
-        coarseShadeTex(wire); // dense 3D-texture coarse field (hardware trilinear)
+        coarseShadeTex(wire); // sparse coarse tile pool (hardware trilinear, binding 3)
         return;
     }
+    // No coarse tile for this block. In the texture-atlas build bricks[] is a DUMMY
+    // (the field lives in the tile pool), so the full-res fallback below would read
+    // garbage - that was the solid grey cubes at 4x/8x. A coarse block with active
+    // fine children but no coarse tile is a feature smaller than one coarse cell that
+    // legitimately vanishes at this LOD, so drop it (keep the cage if wireframe is on).
+    if (wire > 0.05) {
+        outColor = vec4(vec3(0.08, 0.08, 0.1), 1.0);
+        gl_FragDepth = gl_FragCoord.z;
+        return;
+    }
+    discard;
+    return; // the full-res fallback below is dead in the texture-atlas build (dummy bricks[])
 
     int   coarseN = int(coarseLevel + 0.5);                  // N: coarse block = N^3 blocks
     float invSize = 1.0 / max(blockSizeWSIn, 1e-6);          // world dist -> coarse-local
@@ -856,13 +953,14 @@ void main()
     } else if (texMode == 2) {
         vec3 baseGlobal = vec3(blockCoordIn) * CELLS_PER_BLOCK + (hitLocalPos + 0.5) * CELLS_PER_BLOCK;
         n = calcNormalAtGlobalTile(baseGlobal, -dir);
+       // n= vec3(0.,1.,0.);
     } else {
         n = calcNormalSmoothGlobal(hitLocalPos, -dir);
     }
     n = normalize(mat3(ubo.model) * n);
 
     // Surface albedo (user's debug experiment: flat green).
-    vec3 baseColor = vec3(1.8, 0.8, 0.8);
+    vec3 baseColor = vec3(0.76, 0.47, 0.34)*1.5;
 
     if (ubo2.color.y > 0.5) {
         // Deferred shading (desktop): compute the normal HERE (cache-coherent)
@@ -887,13 +985,16 @@ void main()
         if (matteFloorLike) {
             outColor.rgb = baseColor * (0.18 + 0.82 * dif);
         } else {
-            outColor.rgb = baseColor * dif * 0.7 + 0.1 + clamp(dot(dir, n) + 1.0, 0.0, 1.0) * 0.5 * vec3(1.0) + spec * 0.5;
+         //   outColor.rgb = baseColor * dif  +baseColor* 0.0*(1.-dif) + clamp(dot(dir, n) + 1.0, 0.0, 1.0) * 0.5 * vec3(1.0) + spec * 0.5;
+        outColor = vec4(baseColor * dif * 0.7 + 0.1 + clamp(dot(dir, n) + 1.0, 0.0, 1.0) * 0.5 * vec3(1.0) + spec * 0.5, 1.0);
         }
         if (blockEmissive > 0.5) {
             outColor.rgb = baseColor * (1.8 + 0.2 * dif);
         }
+
         // Wireframe debug overlay on the lit surface.
         outColor.rgb = mix(outColor.rgb, vec3(0.08, 0.08, 0.1), wire * 0.85);
+        // outColor.rgb = n;
         outColor.a = 1.0;
     }
   vec4 clip = ubo.proj[gl_ViewIndex] * ubo.view[gl_ViewIndex] * vec4(hitWorldPos, 1.0);

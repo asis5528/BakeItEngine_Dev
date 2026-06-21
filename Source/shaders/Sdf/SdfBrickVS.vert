@@ -23,18 +23,19 @@ layout(binding = 1) uniform BasicUbo {
     vec4 color;
 } ubo2;
 
-layout(std430, binding = 4) readonly buffer BlockBuffer {
+// SBO bindings shifted +1 (binding 3 is now the coarse tile-pool sampler).
+layout(std430, binding = 5) readonly buffer BlockBuffer {
     int blocks[];   // 64^3 block table: brick index | flags, negative = empty
 };
-layout(std430, binding = 6) readonly buffer BlockColorBuffer {
+layout(std430, binding = 7) readonly buffer BlockColorBuffer {
     vec4 blockColors[];
 };
-layout(std430, binding = 7) readonly buffer BlockSpatialBuffer {
+layout(std430, binding = 8) readonly buffer BlockSpatialBuffer {
     vec4 blockSpatial[]; // xyz: block center (object space), w: block size
 };
-// Coarse-LOD downsampled block table (16^3 for the N=4 level): brick base in the
-// coarse atlas, or -1 if that coarse block has no downsampled brick yet.
-layout(std430, binding = 8) readonly buffer CoarseBlockBuffer {
+// Coarse block table (cbpa^3, cbpa = 64/N): a coarse TILE INDEX into the sparse
+// coarse tile pool for surface coarse blocks, else a negative sentinel.
+layout(std430, binding = 9) readonly buffer CoarseBlockBuffer {
     int coarseBlocks[];
 };
 
@@ -57,6 +58,20 @@ layout(location = 13) flat out int coarseBrickBaseOut; // downsampled brick base
 const int BLOCK_EMISSIVE_FLAG = (1 << 30);
 const int BLOCK_INDEX_MASK = BLOCK_EMISSIVE_FLAG - 1;
 const int BLOCKS_PER_AXIS = 64;
+// Distance-LOD tags on the per-instance block ID (set by SdfDrawListScatterCS).
+// Block IDs are < 64^3 (2^18), so bits 29/30 are free. Must match the flags in
+// SdfDrawListScatterCS.comp. (These ride on inBlockID, distinct from the brick-raw
+// emissive flag above which rides on blocks[].)
+//  - COARSE: this far block renders as a coarse-LOD cube.
+//  - ANCHOR: this is the one child the scatter picked to emit its coarse block's
+//    cube (the others degenerate) - replaces an N^3 per-vertex sibling scan.
+const int COARSE_INSTANCE_FLAG = (1 << 30);
+const int ANCHOR_INSTANCE_FLAG = (1 << 29);
+const int LEVEL_INSTANCE_BIT   = (1 << 28); // coarse level: clear -> N=2, set -> N=4
+
+// Shared coarse table layout: level-2 region [0, (64/2)^3) then level-4. Must match
+// the tableBase math in SdfEditor (coarseTableTotal) and SdfBrickFS.
+int coarseTableBaseFor(int N) { return (N <= 2) ? 0 : (32 * 32 * 32); }
 
 void main()
 {
@@ -67,7 +82,12 @@ void main()
     // for exactly grid-parallel rays, a worse artifact).
     vec3 v = inPosition * 0.25;
 
-    int blockId = max(inBlockID, 0);
+    // The draw-list scatter tags far blocks COARSE (distance LOD) and one child per
+    // coarse block ANCHOR: strip both for the block-table lookup, keep them below.
+    bool coarseFlag = (inBlockID & COARSE_INSTANCE_FLAG) != 0;
+    bool anchorFlag = (inBlockID & ANCHOR_INSTANCE_FLAG) != 0;
+    bool levelIs4   = (inBlockID & LEVEL_INSTANCE_BIT) != 0;
+    int blockId = max(inBlockID & ~(COARSE_INSTANCE_FLAG | ANCHOR_INSTANCE_FLAG | LEVEL_INSTANCE_BIT), 0);
     int blockRaw = blocks[blockId];
     if (blockRaw < 0) {
         // Stale/empty block: emit a degenerate position so the triangle is
@@ -96,28 +116,22 @@ void main()
     // replaces - just far fewer triangles. Coarse blocks whose corner child is
     // empty leave holes; that's expected for this reuse-the-fine-list test (the
     // coarse draw list in the next step emits one cube per active coarse block).
-    // ubo2.color.z carries the coarse-LOD level: 0 = off (fine), else N, where a
-    // coarse block = N x N x N fine blocks (2 / 4 / 8). N divides 64.
-    int coarseN = int(ubo2.color.z + 0.5);
+    // Distance LOD: the draw-list scatter put each block in a band and tagged the
+    // instance (fine = no COARSE flag; coarse-2 = COARSE; coarse-4 = COARSE+LEVEL).
+    // So the level is just a per-instance read - no global uniform needed.
+    int coarseN = coarseFlag ? (levelIs4 ? 4 : 2) : 0;
     bool coarse = coarseN >= 2;
     coarseBrickBaseOut = -1;
     if (coarse) {
-        // Exactly one coarse cube per active N^3 coarse block: this instance
-        // emits only if it is the lowest-linear-id active child (the "anchor");
-        // the others degenerate. Anchor to the block's geometric CORNER (not the
-        // anchor child) so the cube sits right even when the corner child is
-        // empty - that corner-only assumption was leaving holes.
+        // Exactly one coarse cube per active N^3 coarse block: the draw-list scatter
+        // already claimed one active child as the ANCHOR via an atomic, so this is an
+        // O(1) flag read instead of an N^3 per-vertex sibling scan (that scan was the
+        // 8x8x8 bottleneck: 512 SSBO reads x 8 verts x every instance). Non-anchors
+        // degenerate. The cube anchors to the block's geometric CORNER regardless of
+        // which child won, so it sits right even if the corner child itself is empty.
         ivec3 childBase = (blockCoordOut / coarseN) * coarseN;
         int cornerId = childBase.x + childBase.y * BLOCKS_PER_AXIS + childBase.z * BLOCKS_PER_AXIS * BLOCKS_PER_AXIS;
-        int minActive = 0x7fffffff;
-        for (int dz = 0; dz < coarseN; ++dz)
-            for (int dy = 0; dy < coarseN; ++dy)
-                for (int dx = 0; dx < coarseN; ++dx) {
-                    ivec3 cc = childBase + ivec3(dx, dy, dz);
-                    int cid = cc.x + cc.y * BLOCKS_PER_AXIS + cc.z * BLOCKS_PER_AXIS * BLOCKS_PER_AXIS;
-                    if (blocks[cid] >= 0) { minActive = min(minActive, cid); }
-                }
-        if (blockId != minActive) {
+        if (!anchorFlag) {
             gl_Position = vec4(2e9, 2e9, 2e9, 1.0);
             return;
         }
@@ -126,13 +140,19 @@ void main()
         blockSizeWS = cornerSpatial.w * float(coarseN);                                      // N blocks across
         blockCoordOut = childBase; // FS derives the coarse corner (x8) from this
 
-        // Dense-coarse 3D-texture path is SHELVED: binding 2 (texSampler) is now
-        // wired to the FINE dense atlas for the SSBO-vs-texture fine test, so the
-        // coarse cube must NOT sample it. Leaving coarseBrickBaseOut = -1 makes
-        // the FS fall back to its SSBO full-res coarse march (block-skip DDA over
-        // the fine atlas). To re-enable the coarse-tex test, point binding 2 back
-        // at coarseAtlasTextureIndex and restore the `coarseN == 2` gate here.
+        // Sparse coarse TILE pool: the coarse field is analytically stamped at the
+        // selected level N (coarseBlocks is the cbpa = 64/N table, refilled by the
+        // CPU when the level changes), so the tile path now applies at ANY coarse N
+        // (2/4/8). Pass the coarse TILE INDEX so the FS samples binding 3 (the
+        // coarse tile pool); a negative entry means that coarse block has no tile.
         coarseBrickBaseOut = -1;
+        if (coarseN >= 2) {
+            ivec3 cbc = childBase / coarseN;            // coarse-block coord
+            int cbpa = BLOCKS_PER_AXIS / coarseN;       // coarse blocks per axis (64/N)
+            int cidx = coarseTableBaseFor(coarseN) + cbc.x + cbc.y * cbpa + cbc.z * cbpa * cbpa;
+            int craw = coarseBlocks[cidx];
+            coarseBrickBaseOut = (craw >= 0) ? (craw & BLOCK_INDEX_MASK) : -1;
+        }
     }
     coarseLevelOut = coarse ? float(coarseN) : 0.0; // carries N to the FS
 

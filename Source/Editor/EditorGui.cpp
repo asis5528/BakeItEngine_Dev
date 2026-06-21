@@ -300,12 +300,24 @@ void DrawSdfAtlasUsageBar(const char* label, float fraction, int usedBricks, int
      ImGui::Checkbox("Block Wireframe", &m_scene->showBlockWireframe);
      ImGui::Checkbox("Deferred Shading (test)", &m_scene->deferredLighting);
      {
-         static const char* coarseItems[] = { "Off", "2x2x2", "4x4x4", "8x8x8" };
-         const int coarseMap[4] = { 0, 2, 4, 8 };
+         // Max coarse level: Off / fine->2 / fine->2->4 (concentric distance bands).
+         static const char* coarseItems[] = { "Off", "2x2x2", "4x4x4" };
+         const int coarseMap[3] = { 0, 2, 4 };
          int curIdx = 0;
-         for (int i = 0; i < 4; ++i) { if (coarseMap[i] == m_scene->coarseLodLevel) { curIdx = i; } }
-         if (ImGui::Combo("Coarse LOD (test)", &curIdx, coarseItems, 4)) {
+         for (int i = 0; i < 3; ++i) { if (coarseMap[i] == m_scene->coarseLodLevel) { curIdx = i; } }
+         if (ImGui::Combo("Coarse LOD (test)", &curIdx, coarseItems, 3)) {
              m_scene->coarseLodLevel = coarseMap[curIdx];
+         }
+         // Band boundaries (camera distance, block units): fine -> 2 at the first, 2 -> 4
+         // at the second (kept >= the first). Nearer than the first stays fine.
+         if (m_scene->coarseLodLevel >= 2) {
+             ImGui::SliderFloat("LOD dist fine->2", &m_scene->coarseLodDistance, 0.0f, 120.0f);
+         }
+         if (m_scene->coarseLodLevel >= 4) {
+             ImGui::SliderFloat("LOD dist 2->4", &m_scene->coarseLodDistance2, 0.0f, 120.0f);
+             if (m_scene->coarseLodDistance2 < m_scene->coarseLodDistance) {
+                 m_scene->coarseLodDistance2 = m_scene->coarseLodDistance;
+             }
          }
      }
      // Fine field fetch source: SSBO brick atlas vs dense 3D texture (perf A/B).

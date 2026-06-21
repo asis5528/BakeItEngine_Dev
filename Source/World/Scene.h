@@ -49,6 +49,11 @@ public:
 	// N x N x N fine blocks (2/4/8). Renders one big cube per active coarse block
 	// marching the full-res field. Step 1 of the LOD system; chosen in the GUI.
 	int coarseLodLevel = 0;
+	// Distance-band LOD (BLOCK units; chunk diagonal ~111). coarseLodLevel caps the
+	// coarsest band (0 off / 2 / 4 = fine->2->4). Blocks past coarseLodDistance render
+	// 2x2x2; past coarseLodDistance2 (farther) render 4x4x4; nearer stay fine.
+	float coarseLodDistance = 32.0f;
+	float coarseLodDistance2 = 64.0f;
 	// Fine SSBO-vs-3D-texture fetch test (desktop): when on, SdfBrickFS samples
 	// the dense 513^3 fine texture (hardware trilinear) instead of the SSBO brick
 	// atlas. Same field, so flipping it isolates the fetch cost. ubo2.color.w.

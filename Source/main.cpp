@@ -248,6 +248,10 @@ private:
 #else
         matData->DiffuseTexture = clines->sdfEditor->fineAtlasTextureIndex;
 #endif
+        // 2nd texture (binding 3): the SHARED coarse tile pool (all LOD levels) sampled
+        // by the brick FS's coarse-LOD path. One pool for the whole pyramid - no
+        // per-level re-point; the per-instance level picks its table region in the shader.
+        matData->SecondaryTexture = clines->sdfEditor->coarseSharedPoolIndex;
         material.materialData = matData;
         scene->materials.push_back(material);
         scene->meshes[scene->objects[0].meshID[0]].matID = scene->materials.size() - 1;
@@ -258,8 +262,8 @@ private:
             scene->SBOs[0][2],
             scene->SBOs[0][3],
             scene->SBOs[0][5],
-            clines->sdfEditor->coarseSBO[1], // binding 8: coarse block table
-            clines->sdfEditor->coarseSBO[0]  // binding 9: coarse brick atlas
+            clines->sdfEditor->coarseSharedSBO[1], // binding 9: shared coarse block table
+            clines->sdfEditor->coarseSharedSBO[0]  // binding 10: coarse dummy bricks
         };
         base->vbuffer->updateIndirectInstanceList(scene->meshes[scene->objects[0].meshID[0]], {});
        

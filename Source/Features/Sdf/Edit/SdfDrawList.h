@@ -40,8 +40,11 @@ public:
 	// (so that distance(blockCoord + 0.5, camBlockUnits) is the camera
 	// distance in blocks). blockToClip: proj * view * blockUnits->world;
 	// the frustum-cull planes are extracted from it (Gribb-Hartmann).
-	// Waits for the previous build, then submits.
-	void build(const glm::vec3& camBlockUnits, const glm::mat4& blockToClip);
+	// Distance-band LOD thresholds in block units: split1 = fine->2 boundary, split2 =
+	// 2->4 boundary (farther). Pass a huge value to disable a band. maxLevel (0/2/4)
+	// caps the coarsest band. Waits for the previous build, then submits.
+	void build(const glm::vec3& camBlockUnits, const glm::mat4& blockToClip,
+		float split1DistBlocks, float split2DistBlocks, int maxLevel);
 
 private:
 	void record();
@@ -52,6 +55,7 @@ private:
 	ComputePipeline* scatterPipe;
 	std::vector<UBO> sortParams; // vec4: xyz camera (block units), w bucket scale
 	std::vector<SBO> bucketSbo;  // NUM_BUCKETS uints: counts -> offsets
+	std::vector<SBO> anchorSbo;  // one uint per coarse block (finest level): anchor claim
 	VkBuffer indirectBuffer;
 	VkCommandPool pool = VK_NULL_HANDLE;
 	VkCommandBuffer cmd = VK_NULL_HANDLE;

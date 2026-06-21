@@ -6,6 +6,11 @@ namespace
 constexpr uint32_t kBlocksPerAxis = 64u;
 constexpr uint32_t kTotalBlocks = kBlocksPerAxis * kBlocksPerAxis * kBlocksPerAxis;
 constexpr uint32_t kNumBuckets = 256u;
+// Anchor-claim slots: same concatenated layout as the shared coarse table - level-2
+// region (64/2)^3 then level-4 (64/4)^3.
+constexpr uint32_t kMaxCoarseBlocks =
+	(kBlocksPerAxis / 2u) * (kBlocksPerAxis / 2u) * (kBlocksPerAxis / 2u) +
+	(kBlocksPerAxis / 4u) * (kBlocksPerAxis / 4u) * (kBlocksPerAxis / 4u);
 constexpr uint32_t kGroupSize = 256u;
 constexpr uint32_t kBlockGroups = (kTotalBlocks + kGroupSize - 1u) / kGroupSize;
 // Buckets cover camera distances up to 192 block units (the chunk diagonal is
@@ -17,6 +22,7 @@ struct alignas(16) SortParamsData
 {
 	glm::vec4 camAndScale;      // xyz: camera (block units), w: bucket scale
 	glm::vec4 frustumPlanes[6]; // block units, normalized, inward-facing
+	glm::vec4 lodParams;        // x: coarse split bucket (scatter flags bucket >= x as coarse)
 };
 
 void MemoryBarrier(
@@ -44,6 +50,8 @@ SdfDrawList::SdfDrawList(
 
 	sortParams = base->vbuffer->createUniformBuffers({ sizeof(SortParamsData) });
 	bucketSbo = base->vbuffer->createStorageBuffers({ sizeof(uint32_t) * kNumBuckets });
+	// One anchor-claim slot per coarse block (kMaxCoarseBlocks); reset to 0 each build.
+	anchorSbo = base->vbuffer->createStorageBuffers({ sizeof(uint32_t) * kMaxCoarseBlocks });
 
 	SBO instanceSbo{};
 	instanceSbo.buffer = instanceIdBuffer;
@@ -77,10 +85,11 @@ SdfDrawList::SdfDrawList(
 		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, // blocks
 		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, // bucket offsets
 		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, // instance IDs
-		VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER  // sort params
+		VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, // sort params
+		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER  // coarse anchor claim
 	};
 	scatterPipe = new ComputePipeline(base, scatterInput);
-	scatterPipe->setupDescriptors(sortParams, {}, { blocksSbo, bucketSbo[0], instanceSbo });
+	scatterPipe->setupDescriptors(sortParams, {}, { blocksSbo, bucketSbo[0], instanceSbo, anchorSbo[0] });
 
 	VkCommandPoolCreateInfo poolInfo{};
 	poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -127,6 +136,7 @@ void SdfDrawList::record()
 		VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT);
 
 	vkCmdFillBuffer(cmd, bucketSbo[0].buffer, 0, sizeof(uint32_t) * kNumBuckets, 0);
+	vkCmdFillBuffer(cmd, anchorSbo[0].buffer, 0, sizeof(uint32_t) * kMaxCoarseBlocks, 0); // reset anchor claims
 
 	MemoryBarrier(cmd,
 		VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
@@ -164,13 +174,19 @@ void SdfDrawList::record()
 	}
 }
 
-void SdfDrawList::build(const glm::vec3& camBlockUnits, const glm::mat4& blockToClip)
+void SdfDrawList::build(const glm::vec3& camBlockUnits, const glm::mat4& blockToClip,
+	float split1DistBlocks, float split2DistBlocks, int maxLevel)
 {
 	vkWaitForFences(base->device, 1, &fence, VK_TRUE, UINT64_MAX);
 	vkResetFences(base->device, 1, &fence);
 
 	SortParamsData params{};
 	params.camAndScale = glm::vec4(camBlockUnits, kBucketScale);
+	// Distance bands: fine -> 2 past split1, 2 -> 4 past split2 (farther). A huge split
+	// distance clamps to NUM_BUCKETS (band disabled); maxLevel 0 = all fine.
+	const float split1Bucket = glm::min(split1DistBlocks * kBucketScale, float(kNumBuckets));
+	const float split2Bucket = glm::min(split2DistBlocks * kBucketScale, float(kNumBuckets));
+	params.lodParams = glm::vec4(split1Bucket, split2Bucket, float(maxLevel), 0.0f);
 
 	// Gribb-Hartmann frustum planes from the block-units -> clip matrix.
 	// GLM_FORCE_DEPTH_ZERO_TO_ONE: the near plane is row2 alone (z >= 0),
@@ -208,6 +224,10 @@ SdfDrawList::~SdfDrawList()
 		vkFreeMemory(base->device, ubo.bufferMemory, nullptr);
 	}
 	for (SBO& sbo : bucketSbo) {
+		vkDestroyBuffer(base->device, sbo.buffer, nullptr);
+		vkFreeMemory(base->device, sbo.bufferMemory, nullptr);
+	}
+	for (SBO& sbo : anchorSbo) {
 		vkDestroyBuffer(base->device, sbo.buffer, nullptr);
 		vkFreeMemory(base->device, sbo.bufferMemory, nullptr);
 	}

@@ -28,10 +28,12 @@ struct VBuffer {
 //	std::vector 
 	ResourceTypes::Texture createTexturefromBuffer(VulkanTexture& texture, void* pixels);
 	ResourceTypes::Texture3D createTexture3DGeneral(int w,int h,int d);
-	// Single-channel FP16 3D texture in GENERAL layout, usable as both a storage
-	// image (compute write) and a linear-filtered sampler3D (render read). Used
-	// for the dense coarse-LOD SDF field. TRANSFER_DST so it can be cleared.
-	ResourceTypes::Texture3D createTexture3DR16F(int w,int h,int d);
+	// Single-channel scalar 3D texture in GENERAL layout, usable as both a
+	// storage image (compute write) and a linear-filtered sampler3D (render
+	// read). Default R16_SFLOAT (dense coarse/fine SDF fields, tile pool);
+	// pass R8_SNORM for the 8-bit tile-pool precision experiment. TRANSFER_DST
+	// so it can be cleared.
+	ResourceTypes::Texture3D createTexture3DR16F(int w,int h,int d, VkFormat format = VK_FORMAT_R16_SFLOAT);
 	ResourceTypes::Texture3D createTexture3DfromBuffer(VulkanTexture3D& texture, void* pixels);
 	void transitionImageLayout(VkImage image, VkImageAspectFlags aspectMask, VkImageLayout oldLayout, VkImageLayout newLayout, uint32_t mipLevels, uint32_t layerCount = 1);
 	void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height,uint32_t depth);

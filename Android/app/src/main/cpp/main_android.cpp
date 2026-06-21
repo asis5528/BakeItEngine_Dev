@@ -854,6 +854,10 @@ void initEngineScene(App& app, Engine& eng)
     eng.scene->ptextures.push_back(base->vbuffer->createTexture3DGeneral(1, 1, 1));
     matData->DiffuseTexture = static_cast<int>(eng.scene->ptextures.size()) - 1;
 #endif
+    // Binding 3 (coarse tile pool sampler): the SHARED coarse tile pool (all LOD
+    // levels), sampled by the brick FS's coarse-LOD path. One pool for the whole
+    // pyramid - the per-instance level picks its table region in the shader.
+    matData->SecondaryTexture = eng.sdfEditor->coarseSharedPoolIndex;
     material.materialData = matData;
     eng.scene->materials.push_back(material);
     eng.scene->meshes[0].matID = 0;
@@ -864,11 +868,18 @@ void initEngineScene(App& app, Engine& eng)
         eng.scene->SBOs[0][2],
         eng.scene->SBOs[0][3],
         eng.scene->SBOs[0][5],
-        // Coarse-LOD bindings 8/9 are desktop-only; bind valid placeholders so
-        // the shared pipeline layout is satisfied (never read - coarse LOD off).
-        eng.scene->SBOs[0][1],
-        eng.scene->SBOs[0][0]
+        // Coarse-LOD bindings 9/10: shared coarse block table + dummy bricks
+        // (mirror of the desktop wiring in main.cpp).
+        eng.sdfEditor->coarseSharedSBO[1],
+        eng.sdfEditor->coarseSharedSBO[0]
     };
+
+    // No editor GUI on Quest: force the coarse-LOD level on so the coarse tile
+    // pool actually renders (the direct analog of the desktop "Coarse LOD -> 2x2x2"
+    // combo, EditorGui.cpp). 0 = off/fine, 2 = 2x2x2 coarse. Scene::update feeds
+    // this to ubo2.color.z, which SdfBrickVS/FS read. TODO: drive from distance LOD.
+    eng.scene->coarseLodLevel = 2;
+
     base->vbuffer->updateIndirectInstanceList(eng.scene->meshes[0], {});
     // Brush indicator: same as desktop - the post-process pass overlays the
     // shape outline + surface footprint, depth-tested against the scene.

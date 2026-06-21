@@ -27,6 +27,7 @@ layout(binding = 0) uniform computeUbo {
     float _pad0;
     float _pad1;
     ivec4 DispatchBaseBlock;
+    ivec4 CoarseParams; // x: table-base offset into the shared coarse table/colors (0 for fine)
 } ubo;
 
 layout(binding = 1, r16f) uniform image3D tilePool; // sparse tile atlas (field)
@@ -61,6 +62,20 @@ const float FAR_VALUE = 100.01;
 // and the render constants in SdfBrickFS.frag.
 const int TILES_PER_AXIS = 32;
 const int TILE_DIM = 9; // 8 cells + 1 pad
+
+// Field-storage precision: must match BAKEIT_SDF_TILE_R8 in SdfBackend.h and the
+// same block in SdfBrickFS.frag. R8_SNORM holds [-1,1], so the normalized-chunk
+// distance is scaled into that band on store and unscaled on sample. The scale
+// comes from the UBO (_pad1) so the COARSE stamp can WIDEN the range to 32/N (fit
+// its N-block cube) - that lets the coarse march skip an empty coarse cube in ~1
+// step instead of crawling ~N/2. 0 (the fine stamp's default) means 32 (fine).
+#define SDF_TILE_R8 1
+#if SDF_TILE_R8
+float tileFieldScale() { return (ubo._pad1 > 0.5) ? ubo._pad1 : 32.0; }
+#else
+float tileFieldScale() { return 1.0; }
+#endif
+float tileFieldInvScale() { return 1.0 / tileFieldScale(); }
 
 shared uint  sTouched;
 shared uint  sHasNegative;
@@ -215,6 +230,10 @@ void main()
         blockId.x +
         blockId.y * blocksPerAxis.x +
         blockId.z * blocksPerAxis.x * blocksPerAxis.y;
+    // Shared coarse table/colors: this level's region starts at CoarseParams.x (0 for
+    // fine). The tile pool itself is shared via the single allocation counter, so only
+    // the per-block table/color writes need the per-level offset.
+    index += ubo.CoarseParams.x;
 
     ivec3 localOffset = ivec3(gl_LocalInvocationID); // 0..8
     ivec3 pos = blockId * blockDim + localOffset;
@@ -237,8 +256,9 @@ void main()
     float h = FAR_VALUE;
     if (valid) {
         // Previous stored value: this block's tile sample, or the sentinel.
+        // Unscale the texel back to normalized-chunk distance (see TILE_FIELD_*).
         if (blkRaw >= 0) {
-            h = imageLoad(tilePool, tileOriginTexel(blkBase) + localOffset).r;
+            h = imageLoad(tilePool, tileOriginTexel(blkBase) + localOffset).r * tileFieldInvScale();
         } else if (blkRaw == BLOCK_INTERIOR) {
             h = -FAR_VALUE;
         } else {
@@ -312,8 +332,14 @@ void main()
     }
     barrier();
 
-    // Write the tile samples for surface blocks.
+    // Write the tile samples for surface blocks. Scale into the texel's range;
+    // R8_SNORM clamps to [-1,1] in hardware, but clamp explicitly so the loaded-
+    // back value matches what sampling sees (keeps accumulation consistent).
     if (sBrickBase >= 0 && ubo.BrushRecolor < 0.5) {
-        imageStore(tilePool, tileOriginTexel(sBrickBase) + localOffset, vec4(hShared[lid], 0.0, 0.0, 0.0));
+        float sv = hShared[lid] * tileFieldScale();
+#if SDF_TILE_R8
+        sv = clamp(sv, -1.0, 1.0);
+#endif
+        imageStore(tilePool, tileOriginTexel(sBrickBase) + localOffset, vec4(sv, 0.0, 0.0, 0.0));
     }
 }
