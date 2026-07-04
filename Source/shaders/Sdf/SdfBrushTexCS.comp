@@ -71,8 +71,14 @@ const int TILE_DIM = 9; // 8 cells + 1 pad
 // step instead of crawling ~N/2. 0 (the fine stamp's default) means 32 (fine).
 #define SDF_TILE_R8 1
 #if SDF_TILE_R8
-float tileFieldScale() { return (ubo._pad1 > 0.5) ? ubo._pad1 : 32.0; }
+// Asymmetric encoding: surface biased to stored -0.6 (20% of [-1,1] inside / 80%
+// outside) so the codes concentrate where the march + normal actually sample.
+// Base scale 82 -> ~2.5 cells inside / ~10 outside; coarse levels widen it to 82/N
+// via ubo._pad1. encode: sv = clamp(BIAS + d*scale,-1,1); decode: d = (sv-BIAS)/scale.
+const float TILE_FIELD_BIAS = -0.6;
+float tileFieldScale() { return (ubo._pad1 > 0.5) ? ubo._pad1 : 82.0; }
 #else
+const float TILE_FIELD_BIAS = 0.0;
 float tileFieldScale() { return 1.0; }
 #endif
 float tileFieldInvScale() { return 1.0 / tileFieldScale(); }
@@ -115,6 +121,12 @@ void FreeBrickBase(int base)
 float smin(float a, float b, float k) {
     float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
     return mix(b, a, h) - k * h * (1.0 - h);
+}
+
+// Smooth max, the erase-side mirror of smin (same polynomial, same blend band):
+// a cut gets the same rounded fillet a draw gets, driven by the same knob.
+float smax(float a, float b, float k) {
+    return -smin(-a, -b, k);
 }
 
 // --- Brush shape SDFs (p relative to the brush center, r = brush radius) -----
@@ -258,7 +270,8 @@ void main()
         // Previous stored value: this block's tile sample, or the sentinel.
         // Unscale the texel back to normalized-chunk distance (see TILE_FIELD_*).
         if (blkRaw >= 0) {
-            h = imageLoad(tilePool, tileOriginTexel(blkBase) + localOffset).r * tileFieldInvScale();
+            // Un-bias then un-scale, the exact inverse of the biased store below.
+            h = (imageLoad(tilePool, tileOriginTexel(blkBase) + localOffset).r - TILE_FIELD_BIAS) * tileFieldInvScale();
         } else if (blkRaw == BLOCK_INTERIOR) {
             h = -FAR_VALUE;
         } else {
@@ -282,7 +295,7 @@ void main()
 
         if (ubo.BrushRecolor < 0.5) {
             if (ubo.BrushAction < 0.5) {
-                h = max(-brush, h);
+                h = smax(-brush, h, max(ubo.BrushSmoothness, 0.0001));
             } else {
                 h = smin(brush, h, max(ubo.BrushSmoothness, 0.0001));
             }
@@ -332,13 +345,14 @@ void main()
     }
     barrier();
 
-    // Write the tile samples for surface blocks. Scale into the texel's range;
-    // R8_SNORM clamps to [-1,1] in hardware, but clamp explicitly so the loaded-
-    // back value matches what sampling sees (keeps accumulation consistent).
+    // Write the tile samples for surface blocks. Scale into the texel's range and
+    // offset by the surface bias (asymmetric encoding). R8_SNORM clamps to [-1,1]
+    // in hardware, but clamp explicitly so the loaded-back value matches what
+    // sampling sees (keeps accumulation consistent).
     if (sBrickBase >= 0 && ubo.BrushRecolor < 0.5) {
         float sv = hShared[lid] * tileFieldScale();
 #if SDF_TILE_R8
-        sv = clamp(sv, -1.0, 1.0);
+        sv = clamp(TILE_FIELD_BIAS + sv, -1.0, 1.0);
 #endif
         imageStore(tilePool, tileOriginTexel(sBrickBase) + localOffset, vec4(sv, 0.0, 0.0, 0.0));
     }

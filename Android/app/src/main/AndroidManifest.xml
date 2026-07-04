@@ -7,6 +7,11 @@
     <!-- Mixed reality: camera passthrough as the background (XR_FB_passthrough). -->
     <uses-feature android:name="com.oculus.feature.PASSTHROUGH" android:required="false" />
 
+    <!-- Environment Depth API (XR_META_environment_depth): real-world depth map.
+         Runtime (spatial-data) permission - grant for testing via:
+         adb shell pm grant com.bakeit.questdemo com.oculus.permission.USE_SCENE -->
+    <uses-permission android:name="com.oculus.permission.USE_SCENE" />
+
     <application
         android:label="BakeIt Quest"
         android:hasCode="false"

@@ -5,6 +5,7 @@
 #include "Imgui/imgui_impl_vulkan.h"
 #include "Imgui/imgui_internal.h"
 #include "Render/Renderer.h"
+#include "Features/Sdf/Edit/SdfEditor.h"
 #include <cstdio>
 
 namespace
@@ -329,6 +330,35 @@ void DrawSdfAtlasUsageBar(const char* label, float fraction, int usedBricks, int
      ImGui::Checkbox("Show Bounds", &m_scene->showChunkBounds);
      ImGui::End();
     
+     // Chunk volumes: move a chunk (its proxy object's ModelMatrix
+     // translation) and weld it into the primary chunk's field - the desktop
+     // stand-in for the future VR grab/place mechanic.
+     if (sdfEditor) {
+         ImGui::Begin("Chunks");
+         for (size_t ci = 0; ci < sdfEditor->chunks.size(); ++ci) {
+             SdfChunk& c = sdfEditor->chunks[ci];
+             ImGui::PushID(static_cast<int>(ci));
+             ImGui::Text("Chunk %d%s%s", static_cast<int>(ci),
+                 (static_cast<int>(ci) == sdfEditor->editableChunkIndex) ? " [target]" : "",
+                 c.active ? "" : " (absorbed)");
+             if (c.active && c.objectIndex >= 0) {
+                 glm::mat4& m = m_scene->objects[c.objectIndex].ModelMatrix;
+                 float pos[3] = { m[3].x, m[3].y, m[3].z };
+                 if (ImGui::DragFloat3("pos", pos, 0.005f)) {
+                     m[3] = glm::vec4(pos[0], pos[1], pos[2], 1.0f);
+                 }
+                 if (ci != 0) {
+                     if (ImGui::Button("Weld into chunk 0")) {
+                         sdfEditor->weldChunkInto(static_cast<int>(ci), 0);
+                     }
+                 }
+             }
+             ImGui::PopID();
+             ImGui::Separator();
+         }
+         ImGui::End();
+     }
+
      // One-click Quest build + deploy (runs on a worker thread; the log
      // streams in while the editor stays interactive).
      ImGui::Begin("Quest");

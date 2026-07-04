@@ -153,7 +153,9 @@ void Renderer::createSceneDescriptor(Scene& scene)
 			objectWithMeshSize += object.meshID.size() - 1;
 		}
 	}
-	base->vulkandescriptor->createDescriptorPool(objectWithMeshSize,
+	// Sized with kSpawnDescriptorHeadroom so live-spawned objects (SDF chunk
+	// proxies) can allocate their sets later without rebuilding this pool.
+	base->vulkandescriptor->createDescriptorPool(objectWithMeshSize + kSpawnDescriptorHeadroom,
 		{
 			VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
 			VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
@@ -165,7 +167,7 @@ void Renderer::createSceneDescriptor(Scene& scene)
 			VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 			VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
 		},
-		objectWithMeshSize + 10, &descriptorPool);
+		objectWithMeshSize + kSpawnDescriptorHeadroom + 10, &descriptorPool);
 
 	std::vector<VkDescriptorSetLayout> layouts;
 	for (int i = 0; i < scene.objects.size(); i++) {
@@ -211,6 +213,35 @@ void Renderer::createSceneDescriptor(Scene& scene)
 	}
 
 	scene.rootNode.updateTransoformation(glm::mat4(1.0), scene.objects);
+}
+
+void Renderer::createObjectDescriptor(Scene& scene, int objectIndex)
+{
+	// One object's set(s) from the EXISTING pool (headroom reserved above):
+	// the live-spawn path - nothing is destroyed, so no device-idle wait and
+	// no disturbance to the other objects' sets. Mirrors the per-object body
+	// of createSceneDescriptor.
+	Object& object = scene.objects[objectIndex];
+	if (!object.hasMesh) {
+		return;
+	}
+	for (int meshID = 0; meshID < object.meshID.size(); meshID++) {
+		std::vector<VkDescriptorSet> sets = base->vulkandescriptor->createDescriptorSets(
+			1, { object.shader[meshID].graphicsPipeline->descriptorSetLayout }, descriptorPool);
+		object.shader[meshID].descriptorSet = sets[0];
+
+		std::vector<VulkanTexture> descriptorsTextures{};
+		Material mat = scene.materials[scene.meshes[object.meshID[meshID]].matID];
+		if (mat.type == TexturedMaterial) {
+			MaterialTexturedData* dat = (struct MaterialTexturedData*)mat.materialData;
+			descriptorsTextures.push_back(ResourceManager::getTexture(scene.ptextures[dat->DiffuseTexture].id));
+			if (dat->SecondaryTexture >= 0) {
+				descriptorsTextures.push_back(ResourceManager::getTexture(scene.ptextures[dat->SecondaryTexture].id));
+			}
+		}
+		base->vulkandescriptor->updateDescriptorSets(object.shader[meshID].descriptorSet,
+			{ object.shader[meshID].ubos }, descriptorsTextures, object.shader[meshID].sbos);
+	}
 }
 
 void Renderer::cleanDescriptors()

@@ -1,0 +1,247 @@
+#version 450
+
+// SdfWeldCS - welds chunk B's field into chunk A (smooth union), the "attach
+// a decoration" op. Structurally SdfBrushTexCS with the analytic brush shape
+// replaced by "sample chunk B's stored field": per A-voxel, transform the
+// voxel into B's grid (one affine matrix, precomputed on the CPU from both
+// chunks' model matrices + translations), trilinearly sample B's tiles, and
+// smin the result into A with the same storage-class / tile-alloc / free-list
+// flow the brush uses. Both chunks live in the ONE shared tile pool, so B is
+// read and A is written through the same image binding (disjoint tiles).
+//
+// One workgroup per A block, 9x9x9 threads (one per tile sample).
+
+layout(local_size_x = 9, local_size_y = 9, local_size_z = 9) in;
+
+layout(binding = 0) uniform WeldUbo {
+    mat4  aNormToBGrid;      // A voxel (chunk-normalized, [-0.5,0.5]) -> B fine-grid coords [0, bCells]
+    vec4  params;            // x: smin k (A-normalized units), y: A grid cells, z: B grid cells, w: unused
+    ivec4 DispatchBaseBlock; // xyz: A block base, w: free-stack stable count (alloc threshold)
+} ubo;
+
+layout(binding = 1, r16f) uniform image3D tilePool; // shared pool: B tiles read, A tiles written
+layout(binding = 2) buffer BlockBufferA {
+    int aBlocks[];
+};
+layout(binding = 3) buffer Counter {
+    int counter;     // next free tile index (shared allocator)
+    int allocCursor;
+};
+layout(binding = 4) buffer BlockColorBufferA {
+    vec4 aBlockColors[];
+};
+layout(binding = 5) buffer DirtyCounter {
+    int dirtyBlockCount;
+};
+layout(binding = 6) buffer FreeBrickCounter {
+    int freeBrickCount;
+};
+layout(binding = 7) buffer FreeBrickStack {
+    int freeBrickStack[];
+};
+layout(std430, binding = 8) readonly buffer BlockBufferB {
+    int bBlocks[];
+};
+
+const int BLOCK_EMISSIVE_FLAG = (1 << 30);
+const int BLOCK_INDEX_MASK = BLOCK_EMISSIVE_FLAG - 1;
+
+const int BLOCK_EMPTY = -999999;
+const int BLOCK_INTERIOR = -999998;
+const float FAR_VALUE = 100.01;
+
+// Tile pool geometry / R8 encoding - must match SdfBrushTexCS.comp.
+const int TILES_PER_AXIS = 32;
+const int TILE_DIM = 9;
+#define SDF_TILE_R8 1
+#if SDF_TILE_R8
+const float TILE_FIELD_BIAS = -0.6;
+const float TILE_FIELD_SCALE = 82.0; // fine-level scale (weld is fine-grid only)
+#else
+const float TILE_FIELD_BIAS = 0.0;
+const float TILE_FIELD_SCALE = 1.0;
+#endif
+const float TILE_FIELD_INV_SCALE = 1.0 / TILE_FIELD_SCALE;
+// Decoded R8 range ends: what an empty / interior sentinel block "stores".
+const float B_EMPTY_VAL    = ( 1.0 - TILE_FIELD_BIAS) * TILE_FIELD_INV_SCALE; // most-positive code
+const float B_INTERIOR_VAL = (-1.0 - TILE_FIELD_BIAS) * TILE_FIELD_INV_SCALE; // most-negative code
+
+shared uint  sHasNegative;
+shared uint  sHasPositive;
+shared uint  sNearSurfaceCount;
+shared int   sBrickBase;
+shared float hShared[TILE_DIM * TILE_DIM * TILE_DIM];
+
+ivec3 tileOriginTexel(int tileIndex)
+{
+    ivec3 tc = ivec3(
+        tileIndex % TILES_PER_AXIS,
+        (tileIndex / TILES_PER_AXIS) % TILES_PER_AXIS,
+        tileIndex / (TILES_PER_AXIS * TILES_PER_AXIS));
+    return tc * TILE_DIM;
+}
+
+int AllocateBrickBase()
+{
+    int idx = atomicAdd(allocCursor, 1);
+    if (idx < ubo.DispatchBaseBlock.w) {
+        return freeBrickStack[idx];
+    }
+    return atomicAdd(counter, 1);
+}
+
+void FreeBrickBase(int base)
+{
+    if (base < 0) {
+        return;
+    }
+    int slot = atomicAdd(freeBrickCount, 1);
+    freeBrickStack[slot] = base;
+}
+
+float smin(float a, float b, float k) {
+    float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+    return mix(b, a, h) - k * h * (1.0 - h);
+}
+
+// One integer-grid tap of B's field (B fine-grid sample coord). Walks B's
+// block table; sentinel blocks decode to the R8 range ends, matching what a
+// stored tile would clamp to.
+float fetchBTap(ivec3 cell, int bBlocksPerAxis)
+{
+    ivec3 bc = clamp(cell / 8, ivec3(0), ivec3(bBlocksPerAxis - 1));
+    int raw = bBlocks[bc.x + bc.y * bBlocksPerAxis + bc.z * bBlocksPerAxis * bBlocksPerAxis];
+    if (raw == BLOCK_INTERIOR) {
+        return B_INTERIOR_VAL;
+    }
+    if (raw < 0) {
+        return B_EMPTY_VAL;
+    }
+    int tile = raw & BLOCK_INDEX_MASK;
+    ivec3 local = cell - bc * 8; // 0..8 (8 = the +pad row of the owning tile)
+    return (imageLoad(tilePool, tileOriginTexel(tile) + local).r - TILE_FIELD_BIAS) * TILE_FIELD_INV_SCALE;
+}
+
+// Trilinear sample of B's field at a continuous B-grid position. Outside B's
+// domain the field does not exist: FAR keeps smin() a no-op there.
+float sampleB(vec3 g, float bCells)
+{
+    if (any(lessThan(g, vec3(-1.0))) || any(greaterThan(g, vec3(bCells + 1.0)))) {
+        return FAR_VALUE;
+    }
+    vec3 gc = clamp(g, vec3(0.0), vec3(bCells - 0.0001));
+    ivec3 c0 = ivec3(floor(gc));
+    vec3 f = fract(gc);
+    int bpa = int(bCells + 0.5) / 8;
+
+    float v000 = fetchBTap(c0 + ivec3(0,0,0), bpa);
+    float v100 = fetchBTap(c0 + ivec3(1,0,0), bpa);
+    float v010 = fetchBTap(c0 + ivec3(0,1,0), bpa);
+    float v110 = fetchBTap(c0 + ivec3(1,1,0), bpa);
+    float v001 = fetchBTap(c0 + ivec3(0,0,1), bpa);
+    float v101 = fetchBTap(c0 + ivec3(1,0,1), bpa);
+    float v011 = fetchBTap(c0 + ivec3(0,1,1), bpa);
+    float v111 = fetchBTap(c0 + ivec3(1,1,1), bpa);
+    float s0 = mix(mix(v000, v100, f.x), mix(v010, v110, f.x), f.y);
+    float s1 = mix(mix(v001, v101, f.x), mix(v011, v111, f.x), f.y);
+    return mix(s0, s1, f.z);
+}
+
+void main()
+{
+    const ivec3 dims = ivec3(int(ubo.params.y + 0.5));
+    const ivec3 blockDim = ivec3(8);
+    const ivec3 blocksPerAxis = dims / blockDim;
+    const float bCells = ubo.params.z;
+
+    ivec3 blockId = ivec3(gl_WorkGroupID) + ubo.DispatchBaseBlock.xyz;
+    if (any(greaterThanEqual(blockId, blocksPerAxis)))
+        return;
+
+    int index =
+        blockId.x +
+        blockId.y * blocksPerAxis.x +
+        blockId.z * blocksPerAxis.x * blocksPerAxis.y;
+
+    ivec3 localOffset = ivec3(gl_LocalInvocationID);
+    ivec3 pos = blockId * blockDim + localOffset;
+    uint lid = gl_LocalInvocationIndex;
+
+    if (lid == 0u) {
+        sHasNegative = 0u;
+        sHasPositive = 0u;
+        sNearSurfaceCount = 0u;
+        sBrickBase = -1;
+    }
+    barrier();
+
+    bool valid = all(lessThan(pos, dims));
+
+    int blkRaw = aBlocks[index];
+    int blkBase = (blkRaw & BLOCK_INDEX_MASK);
+
+    float h = FAR_VALUE;
+    if (valid) {
+        // Previous stored A value (tile sample or sentinel), like the brush.
+        if (blkRaw >= 0) {
+            h = (imageLoad(tilePool, tileOriginTexel(blkBase) + localOffset).r - TILE_FIELD_BIAS) * TILE_FIELD_INV_SCALE;
+        } else if (blkRaw == BLOCK_INTERIOR) {
+            h = -FAR_VALUE;
+        } else {
+            h = FAR_VALUE;
+        }
+
+        // "Brush" = chunk B's field at this A voxel.
+        vec3 pA = (vec3(pos) - vec3(dims) * 0.5) / vec3(dims);
+        vec3 bGrid = (ubo.aNormToBGrid * vec4(pA, 1.0)).xyz;
+        float b = sampleB(bGrid, bCells);
+
+        h = smin(b, h, max(ubo.params.x, 0.0001));
+
+        float keepBand = max(2.0 / float(dims.x), 2.0 * ubo.params.x);
+        if (abs(h) <= keepBand) {
+            atomicAdd(sNearSurfaceCount, 1u);
+        }
+        if (h < 0.0) {
+            atomicOr(sHasNegative, 1u);
+        }
+        if (h > 0.0) {
+            atomicOr(sHasPositive, 1u);
+        }
+    }
+
+    hShared[lid] = h;
+    barrier();
+
+    bool hasCrossing = (sHasNegative != 0u) && (sHasPositive != 0u);
+    bool bandKeep = (sNearSurfaceCount > 0u); // weld only ADDS material (add-stroke band rule)
+    bool hasSurface = hasCrossing || bandKeep;
+
+    if (lid == 0u) {
+        if (hasSurface) {
+            int flags = (blkRaw >= 0) ? (blkRaw & BLOCK_EMISSIVE_FLAG) : 0;
+            if (blkRaw < 0) {
+                blkBase = AllocateBrickBase();
+                flags = 0;
+                aBlockColors[index] = vec4(0.9, 0.75, 0.5, 1.0); // welded-in material color
+            }
+            aBlocks[index] = blkBase | flags;
+            sBrickBase = blkBase;
+            atomicAdd(dirtyBlockCount, 1);
+        } else {
+            if (blkRaw >= 0) {
+                FreeBrickBase(blkBase);
+            }
+            aBlocks[index] = (sHasNegative != 0u) ? BLOCK_INTERIOR : BLOCK_EMPTY;
+        }
+    }
+    barrier();
+
+    if (sBrickBase >= 0) {
+        float sv = hShared[lid] * TILE_FIELD_SCALE;
+#if SDF_TILE_R8
+        sv = clamp(TILE_FIELD_BIAS + sv, -1.0, 1.0);
+#endif
+        imageStore(tilePool, tileOriginTexel(sBrickBase) + localOffset, vec4(sv, 0.0, 0.0, 0.0));
+    }
+}

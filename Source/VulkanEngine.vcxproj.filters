@@ -225,6 +225,7 @@
     <ClInclude Include="Core\Resources\ResourceTypes.h" />
     <ClInclude Include="Features\Sdf\Edit\SdfEditor.h" />
     <ClInclude Include="Features\Sdf\SdfBackend.h" />
+    <ClInclude Include="Features\Sdf\SdfChunk.h" />
     <ClInclude Include="Features\Sdf\SdfVolume.h" />
     <ClInclude Include="Features\Sdf\Edit\BrushState.h" />
     <ClInclude Include="Features\Sdf\Edit\SdfDrawList.h" />

@@ -28,6 +28,11 @@ struct alignas(16) BrushIndicatorUbo
 	// Sculptable chunk bounds, world space (the boundary cage).
 	glm::vec4 chunkMin;
 	glm::vec4 chunkMax;
+	// Quest depth-camera FOV tangents (tanL, tanR, tanD, tanU) per eye, for the
+	// fullscreen depth reprojection in PostPassFS. Unused on desktop.
+	glm::vec4 depthFovTan[2];
+	// x: real-world occlusion on (depth bound), y: fullscreen debug viz on.
+	glm::vec4 depthCtrl;
 };
 }
 
@@ -47,6 +52,10 @@ PostProcessPass::PostProcessPass(VulkanBase* base, Scene *scene, Framebuffer* pr
         descriptorTypes{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
         descriptorTypes{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
         // Deferred-shading G-buffer: the brick shader's world normal (aux slot).
+        descriptorTypes{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+        // Quest environment-depth debug view (binding 4): the linearized real-world
+        // depth from XR_META_environment_depth. Placeholder until setDepthDisplay()
+        // binds the real texture on device; gated off (brushParams.w) on desktop.
         descriptorTypes{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT }
     };
     quad->createGraphicsPipeline("shaders/Render/PostPassVS.spv", "shaders/Render/PostPassFS.spv", passDescTypes);
@@ -82,7 +91,28 @@ PostProcessPass::PostProcessPass(VulkanBase* base, Scene *scene, Framebuffer* pr
     gNormalTex.imageSampler = base->vbuffer->createTextureSampler(1);
     gNormalTex.imageViewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
     quad->textures.push_back(gNormalTex);
+
+    // Binding 4 placeholder (scene color) - the real Quest depth texture is bound by
+    // setDepthDisplay() once the depth provider is up. Off-device it stays this, and
+    // the FS only samples it when brushParams.w (depth-viz flag) is set.
+    VulkanTexture depthDisplayTex = sceneColorTex;
+    quad->textures.push_back(depthDisplayTex);
     quads.push_back(quad);
+}
+
+// Bind the Quest environment-depth texture (linear metric depth) to binding 4 and
+// rebuild the quad descriptor in place; the caller must trigger a command-buffer
+// re-record (renderPassDirty) afterwards so the new binding takes effect.
+void PostProcessPass::setDepthDisplay(VkImageView view, VkSampler sampler)
+{
+    if (quads.empty() || quads[0]->textures.size() < 4) return;
+    quads[0]->textures[3].imageView = view;
+    quads[0]->textures[3].imageSampler = sampler;
+    quads[0]->textures[3].imageViewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+    quads[0]->textures[3].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    quads[0]->cleandescriptors();
+    quads[0]->createdescriptors();
+    depthVizActive = true;
 }
 
 void PostProcessPass::createDescriptors() {
@@ -165,6 +195,13 @@ void PostProcessPass::update() {
         u.chunkMax = glm::vec4(scene->sdfVolume->boundsMaxWS, 0.0f);
     }
 #endif
+    // Depth control: x = real-world occlusion (active once depth is bound on
+    // Quest), y = fullscreen debug viz (Y cycles depthVizMode; 0 = off). Both off
+    // on desktop, where depth is never bound.
+    u.depthCtrl.x = depthVizActive ? 1.0f : 0.0f;
+    u.depthCtrl.y = (depthVizActive && depthVizMode != 0) ? 1.0f : 0.0f;
+    u.depthFovTan[0] = depthFovTan[0];
+    u.depthFovTan[1] = depthFovTan[1];
     indicatorUbo[0].map(base->device, sizeof(u), &u);
 }
 
@@ -194,6 +231,9 @@ void PostProcessPass::recreate(VkExtent2D ex)
         quads[0]->textures[2].imageView = previousFB->auxAttachments
             ? previousFB->MultisampledAuxColorImage->imageView
             : previousFB->MultisampledColorImage->imageView;
+        // Binding 4 placeholder follows the scene color on resize (desktop); Quest's
+        // external depth texture is stable and never hits recreate().
+        quads[0]->textures[3].imageView = previousFB->MultisampledColorImage->imageView;
     }
 }
 

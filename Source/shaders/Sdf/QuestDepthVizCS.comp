@@ -1,0 +1,92 @@
+#version 450
+
+// QuestDepthVizCS - turns one acquired XR_META_environment_depth frame (2-layer
+// depth array, one per eye) into a stable RGBA16F array the post pass samples.
+// Decouples the per-frame rotating depth swapchain image from the record-once
+// render: main_android keeps one compute instance per depth image and submits the
+// one for that frame's swapchainIndex, so no descriptor is ever updated in place.
+//
+// Besides linearizing the depth, it reconstructs the world-space position of each
+// texel (from the depth camera's per-eye FOV + pose) and a surface normal from the
+// world positions of neighboring depth texels (central differences) - NOT screen-
+// space derivatives. vizMode selects which of the three to write:
+//   0 depth grayscale, 1 world position, 2 normal.
+//
+// Depth uses the standard GL convention; Quest 3 reports farZ = +inf, so use the
+// infinite-projection form linear = near/(1-d).
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(binding = 0) uniform Params {
+    float nearZ;
+    float farZ;   // may be +inf
+    int   width;
+    int   height;
+    int   vizMode;            // 0 depth, 1 world position, 2 normal
+    int   _pad0; int _pad1; int _pad2;
+    vec4  fovTan[2];          // per eye/layer: tanL, tanR, tanD, tanU
+    mat4  camToWorld[2];      // per eye/layer: depth-cam -> world (XR LOCAL)
+} pc;
+layout(binding = 1) uniform sampler2DArray xrDepth;                // depth-aspect array view
+layout(binding = 2, rgba16f) uniform writeonly image2DArray outViz; // selected viz, rgb
+
+float linearize(float d)
+{
+    return (pc.farZ > 1e30)
+        ? pc.nearZ / max(1.0 - d, 1e-5)
+        : (pc.farZ * pc.nearZ) / max(pc.farZ - (pc.farZ - pc.nearZ) * d, 1e-5);
+}
+
+// World-space point for depth texel q in the given layer (eye). OpenXR camera
+// space is -z forward, +y up, +x right; the linear depth is the perpendicular
+// distance along the optical axis, so the view-space point is dir * lin with
+// dir.z = -1.
+vec3 worldAt(ivec2 q, int layer)
+{
+    q = clamp(q, ivec2(0), ivec2(pc.width - 1, pc.height - 1));
+    float lin = linearize(texelFetch(xrDepth, ivec3(q, layer), 0).r);
+    vec2 uv = (vec2(q) + 0.5) / vec2(pc.width, pc.height);
+    vec4 ft = pc.fovTan[layer];
+    float tanX = mix(ft.x, ft.y, uv.x);
+    float tanY = mix(ft.z, ft.w, uv.y);
+    vec3 viewPos = vec3(tanX, tanY, -1.0) * lin;
+    return (pc.camToWorld[layer] * vec4(viewPos, 1.0)).xyz;
+}
+
+void main()
+{
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    if (p.x >= pc.width || p.y >= pc.height) {
+        return;
+    }
+
+    for (int layer = 0; layer < 2; ++layer) {
+        float lin = linearize(texelFetch(xrDepth, ivec3(p, layer), 0).r);
+        vec3 wp = worldAt(p, layer);
+
+        // Normal from real depth neighbors (cross of world-pos central differences).
+        vec3 dx = worldAt(p + ivec2(1, 0), layer) - worldAt(p - ivec2(1, 0), layer);
+        vec3 dy = worldAt(p + ivec2(0, 1), layer) - worldAt(p - ivec2(0, 1), layer);
+        vec3 n = normalize(cross(dx, dy));
+        // Make it face the camera (the depth-cam forward is -z of its world basis).
+        vec3 camFwd = -normalize(vec3(pc.camToWorld[layer][2]));
+        if (dot(n, camFwd) > 0.0) {
+            n = -n;
+        }
+
+        vec3 col;
+        if (pc.vizMode == 1) {
+            col = fract(wp);                          // world position (1 m bands)
+        } else if (pc.vizMode == 2) {
+           // col = n * 0.5 + 0.5;                      // normal
+        //  vec3 light = normalize(vec3(10.0, 10.0, 10.0));
+          //  float dif = clamp(dot(light, n), 0.0, 1.0);
+            col = vec3(n);       // normal with simple diffuse lighting
+        } else {
+            col = vec3(clamp(lin / 3.0, 0.0, 1.0));   // depth grayscale (~0-3 m)
+        }
+        // .rgb = the selected viz; .a = metric depth in meters, always written so
+        // the post pass can do real-world occlusion regardless of the viz mode.
+        imageStore(outViz, ivec3(p, layer), vec4(col, lin));
+    }
+}

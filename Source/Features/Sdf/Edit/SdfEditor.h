@@ -2,6 +2,7 @@
 #include "World/Scene.h"
 #include "Core/Pipelines/ComputePipeline.h"
 #include "Features/Sdf/SdfBackend.h"
+#include "Features/Sdf/SdfChunk.h"
 #include "Features/Sdf/SdfVolume.h"
 #include "Features/Sdf/Edit/BrushState.h"
 #include "Features/Sdf/Edit/BrushInputSource.h"
@@ -31,12 +32,30 @@ public:
 	// no-op for brushing while unset.
 	BrushInputSource* brushInput = nullptr;
 
-	std::vector<UBO> computeUBO;
-	std::vector<SBO> computeSBO;
-	ComputePipeline* comp;
-	SdfDrawList* drawList = nullptr;
 	VulkanBase* base;
 	Scene* scene;
+
+	// Chunks: each a self-contained block grid + field tables + draw list
+	// (SdfChunk.h), all sharing the one tile pool. chunks[0] is the primary
+	// editable chunk today; stroke targeting / spawn-anywhere arrive with the
+	// multi-chunk stages. Reserved to kMaxChunks so growth never reallocates
+	// (references to a chunk stay valid across a stroke).
+	static const int kMaxChunks = 32;
+	std::vector<SdfChunk> chunks;
+
+	// Shared fine-tile allocator - ONE for all chunks, like the coarse pyramid's
+	// shared counter. A block's allocated base indexes the one tile pool, so a
+	// block can migrate between chunks by table surgery alone (split/weld).
+	// [0] tail counter + free-stack pop cursor, [1] free stack count,
+	// [2] free stack. The brush compute binds these; the per-chunk sbo[2]/[6]/[7]
+	// slots are retained only as descriptor filler (sbo[2] = graphics binding 6).
+	std::vector<SBO> tileAllocSBO;
+
+	// Allocatable (stable) free-stack entries for the next stamp: the kernel
+	// may only pop entries that existed before its dispatch (same-dispatch
+	// reuse races); update() compacts the stack and refreshes this snapshot.
+	// Allocator-wide (shared), not per-chunk.
+	int freeStackStableCount = 0;
 
 	// Coarse LOD pyramid in a SINGLE shared pool. The brush stamps each level (N=2,4)
 	// directly at its coarse resolution (SdfBrushTexCS on a coarser grid) into ONE
@@ -100,27 +119,36 @@ public:
 	glm::ivec3 fineTexDirtyMin = glm::ivec3(1000000);
 	glm::ivec3 fineTexDirtyMax = glm::ivec3(-1000000);
 
-	glm::vec3 chunkTranslationWS = glm::vec3(0.0f);
-	glm::vec3 uploadedChunkTranslationWS = glm::vec3(1e9f);
-	uint32_t chunkBlocksPerAxis = 64u;
-	uint32_t chunkBlockDim = 8u;
-	float chunkBlockSizeWS = 1.0f / 64.0f;
+	// PARKED: draw-anywhere. Strokes into empty air spawn + chain chunks when
+	// this is on. Off by default - free-floating chunks can't blend across
+	// their bounds (cut/seam artifacts), and the proper fix (world-aligned
+	// grid canvas with a chunkGrid resolve in the shaders) is deferred until
+	// gameplay actually needs free-air drawing. Targeting existing chunks and
+	// deliberate spawnChunk() calls remain active regardless.
+	bool airDrawSpawnEnabled = false;
 
-	// Allocatable (stable) free-stack entries for the next stamp: the kernel
-	// may only pop entries that existed before its dispatch (same-dispatch
-	// reuse races); update() compacts the stack and refreshes this snapshot.
-	int freeStackStableCount = 0;
-
-	// Camera matrix of the last draw-list build: the list is rebuilt only
-	// when this changes (or a stamp ran), so idle frames skip the build
-	// submit and the HUD readback entirely.
-	glm::mat4 lastDrawListBlockToClip = glm::mat4(0.0f);
-	// Distance-LOD split distance + level baked into the last draw-list build; a
-	// change in either (without the camera moving) must force a rebuild too, since
-	// the coarse flag depends on the coarse-parent grouping (which depends on N).
-	float lastCoarseSplitDist = -1.0f;
-	float lastCoarseSplitDist2 = -1.0f;
-	int lastCoarseLodLevelForList = -1;
+	// Stroke targeting: which chunk the current/last stroke edits (picked by
+	// ray at stroke start), and which chunk submitted the last stamp (its
+	// fence must be signaled before the shared free-stack is compacted -
+	// same-dispatch reuse race, now across chunks).
+	int editableChunkIndex = 0;
+	int lastStampChunkIndex = -1;
+	// Brush depth mode for the CURRENT stroke. Normal strokes measure
+	// BrushDistanceFromCamera from the chunk's entry face (feels right when
+	// pointing at a big chunk from outside). The stroke that SPAWNED its
+	// chunk measures it from the camera instead: the chunk is centered at
+	// camera + D, so entry-relative depth would overshoot past the far
+	// boundary whenever D > half a chunk - the "spheres cut in half at the
+	// bounds" artifact.
+	bool strokeAbsoluteBrushDepth = false;
+	// Spawn-stroke chunk chaining: previous frame's brush point (world), for
+	// the stroke direction that places the next chained chunk ahead.
+	glm::vec3 lastSpawnStrokeBrushWS = glm::vec3(0.0f);
+	// Does pWS (world) lie inside the chunk's bounds, shrunk by margin?
+	bool chunkContainsPoint(const SdfChunk& c, const glm::vec3& pWS, float margin);
+	// Nearest chunk whose bounds the world-space ray hits (each tested in its
+	// own object space); -1 when the ray misses everything (spawn cue).
+	int pickChunkIndexByRay(const glm::vec3& rayOriginWS, const glm::vec3& rayDirWS);
 
 	// Stroke gesture state. A stroke lasts as long as the button is held;
 	// dispatches happen when the cursor has moved far enough since the last
@@ -132,6 +160,24 @@ public:
 	SdfEditor(EngineContext& ctx);
 	~SdfEditor();
 	void update(float time);
+	// Spawn a new chunk at the given translation (object space): per-chunk
+	// tables + brush pipeline, a cloned proxy-cube mesh/object on the brick
+	// pipeline, and a draw list. debugStamp adds a centered sphere so the
+	// chunk is visible without a stroke. rebuildScene = true re-enters the
+	// new object into the live scene (descriptor rebuild + command-buffer
+	// re-record, the model-drop sequence) - pass false only during init,
+	// before Scene::createSceneDescriptor runs. Needs the tile-pool material
+	// wired first (the cloned proxy inherits its matID).
+	SdfChunk& spawnChunk(const glm::vec3& translationWS, bool debugStamp, bool rebuildScene);
+	// Per-chunk GPU state: the 8-slot field-table SBO set (empty tables) and
+	// the chunk's brush ComputePipeline/UBO bound to the shared pool+allocator.
+	void createChunkResources(SdfChunk& chunk);
+	// Weld (smooth-union) chunk src's field into chunk dst, then absorb src:
+	// its tiles return to the shared pool and its tables empty. Synchronous
+	// (a discrete user action on the release path, never the drag path).
+	// The blend width is the current brush smoothness. Parts of src outside
+	// dst's domain are lost - v1 assumes src was moved inside/onto dst.
+	void weldChunkInto(int srcIndex, int dstIndex);
 	void uploadChunkSpatialData();
 	void clearScene();
 	// Reset the dense coarse 3D-texture field to +FAR (init and on clear-scene).

@@ -5,6 +5,7 @@
 #include "Platform/Desktop/QuestDeploy.h"
 #include "EngineContext.h"
 class Renderer;
+class SdfEditor;
 class EditorGui
 {
 public:
@@ -14,6 +15,7 @@ public:
 	Renderer* renderer = nullptr;         // wired in main.cpp
 	const SdfVolume* sdfVolume = nullptr; // wired in main.cpp once SdfEditor exists
 	BrushState* brush = nullptr;          // wired in main.cpp once SdfEditor exists
+	SdfEditor* sdfEditor = nullptr;       // wired in main.cpp: chunks panel (move/weld)
 	int frameID = 0;
 	std::vector<VkDescriptorSet> ds;
 	VkSampler texturesamp;

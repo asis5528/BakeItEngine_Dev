@@ -69,15 +69,16 @@ layout(location = 0) out vec4 outColor;
 layout(location = 1) out vec4 outWorldPos;        // G-buffer slot (future deferred)
 layout(location = 2) out vec4 outMotion;          // G-buffer slot (future deferred)
 
-// The raymarch hit always lies inside the cube, i.e. at or behind the
-// rasterized front-face depth - promising depth_greater lets the GPU keep
-// early-Z enabled despite the gl_FragDepth write: fragments of bricks whose
-// front face is already occluded are killed before this shader runs.
-// (Draw order is roughly front-to-back via SdfDrawList's counting sort, so
-// occluded bricks die early; pixels where a front brick missed/discarded
-// still march the bricks behind, keeping hollow regions correct.)
-//out float gl_FragDepth;
-layout(depth_greater) out float gl_FragDepth;
+// We render the proxy's FAR faces (front-face culling) so a cube never vanishes
+// when the camera nears/enters it. The raymarch hit then lies IN FRONT of the
+// rasterized (back-face) depth - and the cross-brick MARGIN can land a hit slightly
+// PAST it - so neither depth_greater nor depth_less holds; a false promise here is
+// undefined behaviour (depth bugs), not just lost perf. So write plain depth
+// (depth_any). The cost is no early-Z occlusion rejection while writing gl_FragDepth:
+// occluded back-shell bricks still run their march and lose the late depth test
+// (front-to-back sort keeps results correct). Recover via a depth-prepass if the
+// brick pass ever turns fragment-bound.
+out float gl_FragDepth;
 
 const int BLOCK_EMISSIVE_FLAG = (1 << 30);
 const int BLOCK_INDEX_MASK = BLOCK_EMISSIVE_FLAG - 1;
@@ -286,11 +287,17 @@ const float TEX_TILE_POOL_DIM  = float(TEX_TILES_PER_AXIS * 9);
 // Field-storage precision: must match BAKEIT_SDF_TILE_R8 in SdfBackend.h and the
 // SDF_TILE_R8 block in SdfBrushTexCS.comp. The brush scales the normalized-chunk
 // distance into the texel's range on store; unscale it on every tile sample.
+// Asymmetric encoding (see SdfBackend.h): decode d = (sample - BIAS) * INV_SCALE.
+// BIAS = -0.6 puts the surface 20%/80% inside/outside; INV_SCALE = 1/82 matches the
+// brush's base scale. The bias cancels in the finite-difference normal, so only the
+// scale sets normal smoothness. (FP16 path: bias 0, scale 1 -> identity decode.)
 #define SDF_TILE_R8 1
 #if SDF_TILE_R8
-const float TILE_FIELD_INV_SCALE = 1.0 / 32.0;
+const float TILE_FIELD_INV_SCALE = 1.0 / 82.0;
+const float TILE_FIELD_BIAS = -0.6;
 #else
 const float TILE_FIELD_INV_SCALE = 1.0;
+const float TILE_FIELD_BIAS = 0.0;
 #endif
 
 // Coarse samples unscale with N/32 (not the fine 1/32): the coarse stamp widened
@@ -299,7 +306,7 @@ const float TILE_FIELD_INV_SCALE = 1.0;
 float coarseFieldInvScale()
 {
 #if SDF_TILE_R8
-    return coarseLevel / 32.0;
+    return coarseLevel / 82.0;
 #else
     return 1.0;
 #endif
@@ -350,7 +357,7 @@ float sampleTile(vec3 pos)
    // vec3 cell = clamp((pos + 0.5) * CELLS_PER_BLOCK, vec3(0.0), vec3(7.9999));
     vec3 cell = ((pos + 0.5) * CELLS_PER_BLOCK); // C2 hardware interp
     vec3 texel = vec3(tileOriginTexel(brickIndex2)) + cell;
-    return texture(texSampler, (texel + 0.5) / TEX_TILE_POOL_DIM).r* TILE_FIELD_INV_SCALE * localDistanceScale();
+    return (texture(texSampler, (texel + 0.5) / TEX_TILE_POOL_DIM).r - TILE_FIELD_BIAS) * TILE_FIELD_INV_SCALE * localDistanceScale();
 }
 
 // Cross-tile sample at a global voxel-grid point (the tile-pool analog of
@@ -378,13 +385,13 @@ float sampleTileGlobal(vec3 globalGrid, out bool hasData)
         localCell = clamp(globalGrid - vec3(blockCoord) * CELLS_PER_BLOCK, vec3(0.0), vec3(7.9999));
     }
     vec3 texel = vec3(tileOriginTexel(tileIdx)) + smoothCell2(localCell); // C2 hardware interp
-    return texture(texSampler, (texel + 0.5) / TEX_TILE_POOL_DIM).r * TILE_FIELD_INV_SCALE + bias;
+    return (texture(texSampler, (texel + 0.5) / TEX_TILE_POOL_DIM).r - TILE_FIELD_BIAS) * TILE_FIELD_INV_SCALE + bias;
 }
 
 // Cross-tile normal (mirrors calcNormalAtGlobal, but sampling the tile pool).
 vec3 calcNormalAtGlobalTile(vec3 baseGlobal, vec3 fallback)
 {
-    const float e = 2.;
+    const float e = 0.5;
     bool okPX, okMX, okPY, okMY, okPZ, okMZ;
     float px = sampleTileGlobal(baseGlobal + vec3(e, 0, 0), okPX);
     float mx = sampleTileGlobal(baseGlobal - vec3(e, 0, 0), okMX);
@@ -496,7 +503,7 @@ void coarseShadeBrick(int base, float wire)
     float minStep = 0.5 / CELLS_PER_BLOCK;
 
     vec3 dirLocal = normalize(localCoord - camLocal);
-    vec3 ro = clamp(localCoord, vec3(-0.5), vec3(0.5));
+    vec3 ro = camLocal; // march from the camera; slab test finds the cube entry
     float tEnter, tExit;
     rayCubeSpan(ro, dirLocal, tEnter, tExit);
     tExit += 1e-4;
@@ -560,7 +567,7 @@ float sampleCoarseTile(vec3 pos)
 {
     vec3 cell = smoothCell(clamp((pos + 0.5) * CELLS_PER_BLOCK, vec3(0.0), vec3(7.9999))); // C2 hardware interp
     vec3 p = vec3(tileOriginTexel(coarseBrickBase)) + cell;
-    return texture(coarseTexSampler, (p + 0.5) / TEX_TILE_POOL_DIM).r * coarseFieldInvScale() * localDistanceScale();
+    return (texture(coarseTexSampler, (p + 0.5) / TEX_TILE_POOL_DIM).r - TILE_FIELD_BIAS) * coarseFieldInvScale() * localDistanceScale();
 }
 
 // Cross-tile coarse sample at a global coarse-cell coordinate ([0, cbpa*8]):
@@ -588,7 +595,7 @@ float sampleCoarseTileGlobal(vec3 g)
         localCell = clamp(g - vec3(cbc) * CELLS_PER_BLOCK, vec3(0.0), vec3(7.9999));
     }
     vec3 texel = vec3(tileOriginTexel(tileIdx)) + smoothCell(localCell); // C2 hardware interp
-    return texture(coarseTexSampler, (texel + 0.5) / TEX_TILE_POOL_DIM).r * coarseFieldInvScale() + bias;
+    return (texture(coarseTexSampler, (texel + 0.5) / TEX_TILE_POOL_DIM).r - TILE_FIELD_BIAS) * coarseFieldInvScale() + bias;
 }
 
 // Map this coarse cube's local position [-0.5,0.5] to its global coarse-cell
@@ -619,7 +626,7 @@ vec3 coarseTexNormal(vec3 pos, vec3 fallback)
     // normal-terracing on curved coarse surfaces. Spanning ~3 cells low-passes
     // the gradient (averages the per-cell steps) so the normal varies smoothly.
     // Bigger e = smoother but rounds genuine edges/corners - this is the knob.
-    const float e = 2.;                 // coarse cells, global texel units
+    const float e = 0.5;                 // coarse cells, global texel units
     vec3 grad = vec3(
         sampleCoarseTileGlobal(g + vec3(e,0,0)) - sampleCoarseTileGlobal(g - vec3(e,0,0)),
         sampleCoarseTileGlobal(g + vec3(0,e,0)) - sampleCoarseTileGlobal(g - vec3(0,e,0)),
@@ -633,7 +640,7 @@ void coarseShadeTex(float wire)
     float minStep = 0.5 / CELLS_PER_BLOCK;
 
     vec3 dirLocal = normalize(localCoord - camLocal);
-    vec3 ro = clamp(localCoord, vec3(-0.5), vec3(0.5));
+    vec3 ro = camLocal; // march from the camera; slab test finds the cube entry
     float tEnter, tExit;
     rayCubeSpan(ro, dirLocal, tEnter, tExit);
     tExit += 1e-4;
@@ -722,7 +729,7 @@ void coarseShade()
     float minStep = 0.5 / cells;
 
     vec3 dirLocal = normalize(localCoord - camLocal);
-    vec3 ro = clamp(localCoord, vec3(-0.5), vec3(0.5));
+    vec3 ro = camLocal; // march from the camera; slab test finds the cube entry
     float tEnter, tExit;
     rayCubeSpan(ro, dirLocal, tEnter, tExit);
     tExit += 1e-4;
@@ -818,11 +825,13 @@ void main()
     // with the global cross-brick sampler. Whichever brick the pixel landed
     // on finds crossings near its boundary itself; deeper crossings belong
     // to fragments of the bricks that contain them.
-    // Direction from the *unclamped* attributes: the true pixel ray. The
-    // origin is snapped onto the cube separately - edge-on sliver triangles
-    // evaluate attributes at pixel centers that can sit slightly outside the
-    // face (sub-pixel), and an off-cube origin makes the slab test reject
-    // the fragment. Snapping only the origin keeps the ray unbent.
+    // Direction from the *unclamped* attributes: the true pixel ray. The origin
+    // is the CAMERA (camLocal), not the rasterized face: the slab test then finds
+    // the real cube entry along the ray, which works whether the rasterized face is
+    // near or FAR and clamps to the camera when it sits INSIDE the cube (tEnter < 0).
+    // camLocal is a robust per-fragment ray origin (no sliver/sub-pixel face issues),
+    // and the marched span (entry -> exit + margin) is identical to the old near-face
+    // start for cameras outside the cube.
     // Block-wireframe debug factor (BasicUbo.color.x toggles it): the median
     // of |localCoord| reaches 0.5 exactly on the rasterized face's edges.
     // ubo2.color.x is a uniform, so this branch is uniform control flow and the
@@ -843,7 +852,7 @@ void main()
     int texMode = int(ubo2.color.w + 0.5);
 
     vec3 dirLocal = normalize(localCoord - camLocal);
-    vec3 ro = clamp(localCoord, vec3(-0.5), vec3(0.5));
+    vec3 ro = camLocal; // march from the camera; slab test finds the cube entry
     float tEnter;
     float tExit;
     rayCubeSpan(ro, dirLocal, tEnter, tExit);

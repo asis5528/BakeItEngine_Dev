@@ -1,5 +1,6 @@
 #pragma once
 #include <vector>
+#include <glm/glm.hpp>
 #include "Core/Vulkan/Framebuffer.h"
 #include "Quad.h"
 
@@ -19,10 +20,18 @@ class PostProcessPass
 		VulkanBase *base;
 		Scene* scene;
 		Framebuffer* previousFB;
+		bool depthVizActive = false; // Quest depth bound to binding 4 (enables occlusion)
+		int  depthVizMode = 0;       // fullscreen debug overlay: 0 off, 1 depth, 2 world pos, 3 normal
+		// Depth-camera FOV tangents (tanL, tanR, tanD, tanU) per eye, set each frame
+		// from the acquired XR depth views. The FS remaps each eye-ray through these
+		// to fullscreen-reproject the depth so it lines up with the camera view.
+		glm::vec4 depthFovTan[2] = { glm::vec4(0.0f), glm::vec4(0.0f) };
 		PostProcessPass(VulkanBase* base, Scene *scene, Framebuffer* previousFB);
 		void createDescriptors();
 		void update();
 		void renderPass(VkCommandBuffer commandBuffer);
 		void recreate(VkExtent2D ex);
+		// Bind the Quest environment-depth texture (linear metric depth) to binding 4.
+		void setDepthDisplay(VkImageView view, VkSampler sampler);
 		~PostProcessPass();
 };

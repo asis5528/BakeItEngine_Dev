@@ -28,6 +28,8 @@ layout(binding = 0) uniform IndicatorUbo {
     vec4 hudB;              // x: radius*1000, y: smoothness*10000, z: cage, w: deferred
     vec4 chunkMin;          // sculptable bounds, world space
     vec4 chunkMax;
+    vec4 depthFovTan[2];    // Quest depth-cam FOV tangents (tanL,tanR,tanD,tanU) per eye
+    vec4 depthCtrl;         // x: occlusion on (depth bound), y: fullscreen viz on
 } ubo;
 
 layout(binding = 1) uniform sampler2DArray srcColor;
@@ -36,6 +38,10 @@ layout(binding = 2) uniform sampler2DArray sceneDepth;
 // xyz, coverage in w (1 surface, 0 cleared background). On Quest this binds the
 // color image as a placeholder and is never sampled (hudB.w = 0).
 layout(binding = 3) uniform sampler2DArray gNormal;
+// Quest environment depth (XR_META_environment_depth), linearized to meters by
+// QuestDepthVizCS. Drawn as a debug corner only when brushParams.w is set (Quest);
+// a placeholder on desktop, never sampled there.
+layout(binding = 4) uniform sampler2DArray depthDisplay;
 
 // Wireframe factor of an axis-aligned box: 1 on the edges of the hit face.
 // No early-outs: fwidth needs uniform control flow, misses are masked.
@@ -352,6 +358,25 @@ void main()
     vec3 scenePos = (ubo.invView[vi] * vec4(viewPos.xyz, 1.0)).xyz;
     float sceneT = dot(scenePos - ro, rd);
 
+    // Real-world depth occlusion (Quest): if the environment depth at this pixel is
+    // nearer than the SDF surface, the real world is in front - drop the SDF pixel
+    // (alpha 0 shows passthrough). -viewPos.z is the SDF's metric eye-space depth;
+    // depthDisplay.a is the Quest metric depth, reprojected through the depth FOV.
+    // depthCtrl.x gates it (depth bound on Quest); desktop never sets it.
+    if (ubo.depthCtrl.x > 0.5 && depth < 1.0) {
+        vec4 rvD = ubo.invProj[vi] * vec4(ndc, -1.0, 1.0); // rvD.xy = eye-ray tangents
+        vec4 dft = ubo.depthFovTan[vi];
+        float du = (rvD.x - dft.x) / (dft.y - dft.x);
+        float dv = (rvD.y - dft.z) / (dft.w - dft.z);
+        if (du >= 0.0 && du <= 1.0 && dv >= 0.0 && dv <= 1.0) {
+            float qd = texture(depthDisplay, vec3(du, dv, float(vi))).a; // meters
+            // 3 cm bias so coincident surfaces don't z-fight into passthrough.
+            if (qd > 0.05 && qd < -viewPos.z - 0.03) {
+                scene.a = 0.0;
+            }
+        }
+    }
+
     // In front of the surface: bright. Behind it: faded ghost.
     float occlusionFade = (tHit > sceneT + 1e-4) ? 0.18 : 1.0;
 
@@ -384,4 +409,24 @@ void main()
     // wipe it (that exact bug hid the digits on Quest, where the indicator
     // is always visible).
     drawHud();
+
+    // DEBUG (Quest): the real-world environment depth viz (grayscale depth, world
+    // position, or normal - chosen in QuestDepthVizCS), FULLSCREEN and reprojected
+    // to line up with the camera view. The depth map was captured with the depth
+    // camera's own FOV, so for each pixel we take its eye-ray tangents (rvD.xy in
+    // GL view space, -z forward) and remap them through the depth FOV to find the
+    // matching texel. The compute already mapped the value to a color, so just
+    // display it. Outside the depth FOV the scene shows through.
+    // depthCtrl.y: fullscreen debug viz on/off (Y cycles it). Desktop never sets it.
+    if (ubo.depthCtrl.y > 0.5) {
+        vec2 ndcD = vec2(texcoord.x * 2.0 - 1.0, 1.0 - texcoord.y * 2.0);
+        vec4 rvD = ubo.invProj[vi] * vec4(ndcD, -1.0, 1.0); // rvD.xy = eye-ray x/y tangents
+        vec4 dft = ubo.depthFovTan[vi];                     // tanL, tanR, tanD, tanU
+        float du = (rvD.x - dft.x) / (dft.y - dft.x);
+        float dv = (rvD.y - dft.z) / (dft.w - dft.z);
+        if (du >= 0.0 && du <= 1.0 && dv >= 0.0 && dv <= 1.0) {
+            vec3 col = texture(depthDisplay, vec3(du, dv, float(vi))).rgb;
+            outColor = vec4(col, 1.0);
+        }
+    }
 }

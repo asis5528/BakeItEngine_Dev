@@ -24,8 +24,11 @@
 #include <android_native_app_glue.h>
 #include <android/log.h>
 #include <android/asset_manager.h>
+#include <jni.h> // runtime permission request (USE_SCENE) via the NativeActivity
 #include <sys/stat.h>
 #include <unistd.h>
+#include "Core/Resources/VulkanImage.h"   // depth-viz target image
+#include "Core/Pipelines/ComputePipeline.h" // depth linearize compute
 
 // Engine headers first: Platform/Platform.h keys off __ANDROID__, VulkanBase
 // pulls <vulkan/vulkan.h> (no GLFW on this platform).
@@ -102,6 +105,7 @@ struct XrInput
     XrAction recolorTrigger = XR_NULL_HANDLE;// left trigger (float)
     XrAction wireframeSqueeze = XR_NULL_HANDLE; // left grip (float) - hold for block wireframe
     XrAction clearButton = XR_NULL_HANDLE;   // X (bool)
+    XrAction depthModeButton = XR_NULL_HANDLE; // Y (bool) - cycle depth viz mode
     XrSpace aimSpace = XR_NULL_HANDLE;
 
     // Per-frame snapshot (stage/LOCAL space pose).
@@ -115,6 +119,7 @@ struct XrInput
     bool shapePressed = false;    // this-frame edges
     bool emissivePressed = false;
     bool clearPressed = false;
+    bool depthModePressed = false; // Y edge - cycle depth viz
     glm::vec2 stickR = glm::vec2(0.0f);
     glm::vec2 stickL = glm::vec2(0.0f);
 };
@@ -165,6 +170,48 @@ struct App
     // XR_FB_foveation: fixed foveated rendering (shade the lens periphery at a
     // lower rate). Applied to the swapchain after creation; no render changes.
     bool foveationSupported = false;
+
+    // XR_META_environment_depth (Quest 3): real-world depth map. The provider
+    // generates a 2-layer depth texture array (one per eye); we acquire the latest
+    // each frame. Step 1 just acquires + logs to verify the pipeline; the GPU
+    // image hand-off to the post-process is step 2.
+    bool depthSupported = false;
+    bool depthPendingPermission = false; // requested USE_SCENE, waiting for the grant
+    XrEnvironmentDepthProviderMETA depthProvider = XR_NULL_HANDLE;
+    XrEnvironmentDepthSwapchainMETA depthSwapchain = XR_NULL_HANDLE;
+    std::vector<XrSwapchainImageVulkan2KHR> depthImages;
+    uint32_t depthWidth = 0;
+    uint32_t depthHeight = 0;
+    // Extension entry points (loaded via xrGetInstanceProcAddr).
+    PFN_xrCreateEnvironmentDepthProviderMETA pfnCreateDepthProvider = nullptr;
+    PFN_xrStartEnvironmentDepthProviderMETA pfnStartDepthProvider = nullptr;
+    PFN_xrCreateEnvironmentDepthSwapchainMETA pfnCreateDepthSwapchain = nullptr;
+    PFN_xrGetEnvironmentDepthSwapchainStateMETA pfnGetDepthSwapchainState = nullptr;
+    PFN_xrEnumerateEnvironmentDepthSwapchainImagesMETA pfnEnumDepthSwapchainImages = nullptr;
+    PFN_xrAcquireEnvironmentDepthImageMETA pfnAcquireDepthImage = nullptr;
+
+    // Depth visualization (step 2): a per-frame compute linearizes the acquired depth
+    // into a stable R16F 2-layer array the post pass samples. One compute instance per
+    // depth image (submit the one for that frame's swapchainIndex) -> no descriptor churn.
+    bool depthVizReady = false;
+    bool depthBoundToPost = false;
+    int  depthDisplayMode = 0;                  // overlay: 0 off, 1 depth, 2 world pos, 3 normal (Y cycles)
+    VulkanImage* depthDisplayImage = nullptr;   // RGBA16F 2-layer storage+sampled viz target
+    VulkanTexture depthDisplayTex{};
+    std::vector<VkImageView> depthSrcViews;     // depth-aspect array view per XR image
+    std::vector<VkSampler> depthSrcSamplers;
+    std::vector<ComputePipeline*> depthVizComp; // one per XR image
+    std::vector<UBO> depthParamsUbo;            // depth-viz params (see DepthVizParams)
+};
+
+// Per-frame uniforms for QuestDepthVizCS: depth linearization + per-eye world-space
+// reconstruction (for world-position and normal viz). std140-matched to the shader.
+struct DepthVizParams
+{
+    float nearZ; float farZ; int width; int height;
+    int vizMode; int _pad0; int _pad1; int _pad2;   // 0 depth, 1 world pos, 2 normal
+    glm::vec4 fovTan[2];                             // tanL, tanR, tanD, tanU per eye/layer
+    glm::mat4 camToWorld[2];                         // depth-cam -> world (XR LOCAL) per eye
 };
 
 // The engine, wired the same way main.cpp wires it on desktop (minus
@@ -305,6 +352,9 @@ void createXrInstance(App& app)
         if (std::strcmp(p.extensionName, XR_FB_FOVEATION_EXTENSION_NAME) == 0) fovBase = true;
         if (std::strcmp(p.extensionName, XR_FB_FOVEATION_CONFIGURATION_EXTENSION_NAME) == 0) fovConfig = true;
         if (std::strcmp(p.extensionName, XR_FB_SWAPCHAIN_UPDATE_STATE_EXTENSION_NAME) == 0) fovUpdate = true;
+        if (std::strcmp(p.extensionName, XR_META_ENVIRONMENT_DEPTH_EXTENSION_NAME) == 0) {
+            app.depthSupported = true;
+        }
     }
     // Foveation needs all three FB extensions (the profile + the swapchain-state update).
     app.foveationSupported = fovBase && fovConfig && fovUpdate;
@@ -320,6 +370,9 @@ void createXrInstance(App& app)
         extensions.push_back(XR_FB_FOVEATION_EXTENSION_NAME);
         extensions.push_back(XR_FB_FOVEATION_CONFIGURATION_EXTENSION_NAME);
         extensions.push_back(XR_FB_SWAPCHAIN_UPDATE_STATE_EXTENSION_NAME);
+    }
+    if (app.depthSupported) {
+        extensions.push_back(XR_META_ENVIRONMENT_DEPTH_EXTENSION_NAME);
     }
 
     XrInstanceCreateInfoAndroidKHR androidInfo{XR_TYPE_INSTANCE_CREATE_INFO_ANDROID_KHR};
@@ -342,8 +395,15 @@ void createXrInstance(App& app)
     XR_CHECK(xrGetSystem(app.xrInstance, &systemInfo, &app.systemId));
 
     XrSystemProperties props{XR_TYPE_SYSTEM_PROPERTIES};
+    XrSystemEnvironmentDepthPropertiesMETA depthProps{XR_TYPE_SYSTEM_ENVIRONMENT_DEPTH_PROPERTIES_META};
+    if (app.depthSupported) props.next = &depthProps;
     XR_CHECK(xrGetSystemProperties(app.xrInstance, app.systemId, &props));
     LOGI("OpenXR system: %s", props.systemName);
+    if (app.depthSupported) {
+        app.depthSupported = depthProps.supportsEnvironmentDepth == XR_TRUE;
+        LOGI("Environment depth: supported=%d handRemoval=%d",
+             (int)depthProps.supportsEnvironmentDepth, (int)depthProps.supportsHandRemoval);
+    }
 }
 
 // -------------------------------------------------- Vulkan via VulkanBase ---
@@ -580,6 +640,172 @@ void createPassthrough(App& app)
     LOGI("Passthrough background active");
 }
 
+// ------------------------------------------ environment depth (XR_META) -----
+// Stand up the depth provider: load the extension entry points, create the
+// provider + its readable depth swapchain (a 2-layer depth texture array), query
+// its size, enumerate the Vulkan images, and start generation. Provider creation
+// fails without the USE_SCENE permission - logged, non-fatal (depth stays off).
+void setupEnvironmentDepth(App& app, Engine& eng)
+{
+    if (!app.depthSupported) {
+        LOGI("Environment depth not available on this device/runtime");
+        return;
+    }
+    auto load = [&](const char* name, PFN_xrVoidFunction* fn) {
+        XR_CHECK(xrGetInstanceProcAddr(app.xrInstance, name, fn));
+    };
+    load("xrCreateEnvironmentDepthProviderMETA", reinterpret_cast<PFN_xrVoidFunction*>(&app.pfnCreateDepthProvider));
+    load("xrStartEnvironmentDepthProviderMETA", reinterpret_cast<PFN_xrVoidFunction*>(&app.pfnStartDepthProvider));
+    load("xrCreateEnvironmentDepthSwapchainMETA", reinterpret_cast<PFN_xrVoidFunction*>(&app.pfnCreateDepthSwapchain));
+    load("xrGetEnvironmentDepthSwapchainStateMETA", reinterpret_cast<PFN_xrVoidFunction*>(&app.pfnGetDepthSwapchainState));
+    load("xrEnumerateEnvironmentDepthSwapchainImagesMETA", reinterpret_cast<PFN_xrVoidFunction*>(&app.pfnEnumDepthSwapchainImages));
+    load("xrAcquireEnvironmentDepthImageMETA", reinterpret_cast<PFN_xrVoidFunction*>(&app.pfnAcquireDepthImage));
+
+    XrEnvironmentDepthProviderCreateInfoMETA pci{XR_TYPE_ENVIRONMENT_DEPTH_PROVIDER_CREATE_INFO_META};
+    XrResult r = app.pfnCreateDepthProvider(app.session, &pci, &app.depthProvider);
+    if (r != XR_SUCCESS) {
+        LOGE("xrCreateEnvironmentDepthProviderMETA failed: %d - is com.oculus.permission.USE_SCENE granted?", r);
+        app.depthSupported = false;
+        return;
+    }
+
+    XrEnvironmentDepthSwapchainCreateInfoMETA sci{XR_TYPE_ENVIRONMENT_DEPTH_SWAPCHAIN_CREATE_INFO_META};
+    XR_CHECK(app.pfnCreateDepthSwapchain(app.depthProvider, &sci, &app.depthSwapchain));
+
+    XrEnvironmentDepthSwapchainStateMETA state{XR_TYPE_ENVIRONMENT_DEPTH_SWAPCHAIN_STATE_META};
+    XR_CHECK(app.pfnGetDepthSwapchainState(app.depthSwapchain, &state));
+    app.depthWidth = state.width;
+    app.depthHeight = state.height;
+
+    uint32_t imageCount = 0;
+    XR_CHECK(app.pfnEnumDepthSwapchainImages(app.depthSwapchain, 0, &imageCount, nullptr));
+    app.depthImages.resize(imageCount, {XR_TYPE_SWAPCHAIN_IMAGE_VULKAN2_KHR});
+    XR_CHECK(app.pfnEnumDepthSwapchainImages(app.depthSwapchain, imageCount, &imageCount,
+        reinterpret_cast<XrSwapchainImageBaseHeader*>(app.depthImages.data())));
+
+    XR_CHECK(app.pfnStartDepthProvider(app.depthProvider));
+    LOGI("Environment depth started: %ux%u, %u swapchain images", app.depthWidth, app.depthHeight, imageCount);
+
+    // --- Depth visualization data path (step 2) ---------------------------------
+    // Persistent RGBA16F 2-layer array (one eye per layer) the post pass samples;
+    // the compute writes the selected viz (depth gray / world position / normal)
+    // into it, so it stays in GENERAL the whole time.
+    const uint32_t dw = app.depthWidth, dh = app.depthHeight;
+    app.depthDisplayImage = new VulkanImage(app.device, app.physicalDevice);
+    app.depthDisplayImage->createImage(dw, dh, 1, VK_IMAGE_TYPE_2D, 1, VK_SAMPLE_COUNT_1_BIT,
+        VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_TILING_OPTIMAL,
+        VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 2 /* arrayCount */);
+    app.depthDisplayImage->createImageView(VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, 1,
+        VK_IMAGE_VIEW_TYPE_2D_ARRAY, 2);
+    eng.base->vbuffer->transitionImageLayout(app.depthDisplayImage->image, VK_IMAGE_ASPECT_COLOR_BIT,
+        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL, 1, 2);
+    app.depthDisplayTex.image = app.depthDisplayImage->image;
+    app.depthDisplayTex.imageView = app.depthDisplayImage->imageView;
+    app.depthDisplayTex.imageSampler = eng.base->vbuffer->createTextureSampler(1);
+    app.depthDisplayTex.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    app.depthDisplayTex.imageViewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+
+    app.depthParamsUbo = eng.base->vbuffer->createUniformBuffers({ sizeof(DepthVizParams) });
+
+    // One compute instance per depth image: each reads that image (depth-aspect array
+    // view) and writes the shared display target. Per frame we submit the instance for
+    // the acquired swapchainIndex - so no descriptor is ever updated in place.
+    for (XrSwapchainImageVulkan2KHR& img : app.depthImages) {
+        VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+        vi.image = img.image;
+        vi.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+        vi.format = VK_FORMAT_D16_UNORM; // GUESS - if the view fails, try D32_SFLOAT
+        vi.subresourceRange = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 2 };
+        VkImageView v = VK_NULL_HANDLE;
+        VkResult vr = vkCreateImageView(app.device, &vi, nullptr, &v);
+        if (vr != VK_SUCCESS) {
+            LOGE("depth-src image view failed: %d (wrong depth format guess?)", vr);
+            app.depthVizReady = false;
+            return;
+        }
+        app.depthSrcViews.push_back(v);
+        VkSampler s = eng.base->vbuffer->createTextureSampler(1);
+        app.depthSrcSamplers.push_back(s);
+
+        VulkanTexture srcTex{};
+        srcTex.image = img.image;
+        srcTex.imageView = v;
+        srcTex.imageSampler = s;
+        srcTex.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; // GUESS - try DEPTH_STENCIL_READ_ONLY / GENERAL
+        srcTex.imageViewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+
+        ComputeInput ci;
+        ci.computeShaderPath = "shaders/Sdf/QuestDepthVizCS.spv";
+        ci.descriptorTypes = {
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+        };
+        ComputePipeline* cp = new ComputePipeline(eng.base, ci);
+        cp->setupDescriptors(app.depthParamsUbo, { srcTex, app.depthDisplayTex }, {});
+        cp->dispatch(1, 1, 1); // create command buffer + signaled fence
+        app.depthVizComp.push_back(cp);
+    }
+    app.depthVizReady = true;
+    LOGI("Depth viz ready: %u compute instances, R16F %ux%ux2",
+         (uint32_t)app.depthVizComp.size(), dw, dh);
+}
+
+// USE_SCENE is a runtime permission, so manifest declaration alone never prompts -
+// the app must call Activity.requestPermissions itself. These JNI helpers drive the
+// standard Android flow against the NativeActivity (checkSelfPermission /
+// requestPermissions are inherited from Context/Activity, API 23+; minSdk is 29).
+static const char* kScenePermission = "com.oculus.permission.USE_SCENE";
+
+bool androidHasPermission(android_app* androidApp, const char* permission)
+{
+    JavaVM* vm = androidApp->activity->vm;
+    JNIEnv* env = nullptr;
+    vm->AttachCurrentThread(&env, nullptr); // idempotent if already attached
+    jobject activity = androidApp->activity->clazz;
+    jclass activityClass = env->GetObjectClass(activity);
+    jmethodID check = env->GetMethodID(activityClass, "checkSelfPermission", "(Ljava/lang/String;)I");
+    jstring jperm = env->NewStringUTF(permission);
+    jint result = env->CallIntMethod(activity, check, jperm); // PERMISSION_GRANTED == 0
+    env->DeleteLocalRef(jperm);
+    env->DeleteLocalRef(activityClass);
+    return result == 0;
+}
+
+void androidRequestPermission(android_app* androidApp, const char* permission)
+{
+    JavaVM* vm = androidApp->activity->vm;
+    JNIEnv* env = nullptr;
+    vm->AttachCurrentThread(&env, nullptr);
+    jobject activity = androidApp->activity->clazz;
+    jclass activityClass = env->GetObjectClass(activity);
+    jmethodID request = env->GetMethodID(activityClass, "requestPermissions", "([Ljava/lang/String;I)V");
+    jclass stringClass = env->FindClass("java/lang/String");
+    jobjectArray perms = env->NewObjectArray(1, stringClass, env->NewStringUTF(permission));
+    env->CallVoidMethod(activity, request, perms, 0 /* requestCode */);
+    env->DeleteLocalRef(perms);
+    env->DeleteLocalRef(stringClass);
+    env->DeleteLocalRef(activityClass);
+}
+
+// Depth entry point: if supported and permission already granted, set up now;
+// otherwise prompt and defer (renderFrame polls for the grant and finishes setup).
+void requestDepthPermissionOrSetup(App& app, Engine& eng)
+{
+    if (!app.depthSupported) {
+        LOGI("Environment depth not available on this device/runtime");
+        return;
+    }
+    if (androidHasPermission(app.androidApp, kScenePermission)) {
+        setupEnvironmentDepth(app, eng);
+    } else {
+        LOGI("Requesting %s (depth setup deferred until granted)", kScenePermission);
+        androidRequestPermission(app.androidApp, kScenePermission);
+        app.depthPendingPermission = true;
+    }
+}
+
 // ------------------------------------------------------------ XR input -----
 
 XrAction makeAction(XrActionSet set, XrActionType type, const char* name, const char* localized)
@@ -612,6 +838,7 @@ void createXrInput(App& app)
     in.recolorTrigger = makeAction(in.actionSet, XR_ACTION_TYPE_FLOAT_INPUT, "recolor", "Recolor Modifier");
     in.wireframeSqueeze = makeAction(in.actionSet, XR_ACTION_TYPE_FLOAT_INPUT, "wireframe", "Block Wireframe");
     in.clearButton = makeAction(in.actionSet, XR_ACTION_TYPE_BOOLEAN_INPUT, "clear_scene", "Clear Scene");
+    in.depthModeButton = makeAction(in.actionSet, XR_ACTION_TYPE_BOOLEAN_INPUT, "depth_mode", "Depth Viz Mode");
 
     auto path = [&](const char* p) {
         XrPath out = XR_NULL_PATH;
@@ -630,6 +857,7 @@ void createXrInput(App& app)
         { in.recolorTrigger, path("/user/hand/left/input/trigger/value") },
         { in.wireframeSqueeze, path("/user/hand/left/input/squeeze/value") },
         { in.clearButton, path("/user/hand/left/input/x/click") },
+        { in.depthModeButton, path("/user/hand/left/input/y/click") },
     };
     XrInteractionProfileSuggestedBinding suggested{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
     suggested.interactionProfile = path("/interaction_profiles/oculus/touch_controller");
@@ -698,6 +926,7 @@ void syncXrInput(App& app, XrTime displayTime)
     in.shapePressed = getPressedEdge(in.shapeButton);
     in.emissivePressed = getPressedEdge(in.emissiveButton);
     in.clearPressed = getPressedEdge(in.clearButton);
+    in.depthModePressed = getPressedEdge(in.depthModeButton);
     in.stickR = getVec2(in.stickRight);
     in.stickL = getVec2(in.stickLeft);
 
@@ -835,7 +1064,7 @@ void initEngineScene(App& app, Engine& eng)
     // SdfEditor locates the editable mesh by the volumetric pipeline and
     // builds the brick atlas + GPU draw list (same as desktop).
     eng.sdfEditor = new SdfEditor(eng.ctx);
-    eng.scene->SBOs.push_back(eng.sdfEditor->computeSBO);
+    eng.scene->SBOs.push_back(eng.sdfEditor->chunks[0].sbo);
     eng.scene->brush = &eng.sdfEditor->brush;
     eng.scene->sdfVolume = &eng.sdfEditor->volume; // HUD stats + boundary cage
     eng.sdfEditor->brushInput = new QuestBrushInput(&app.input, &kWorldToStage);
@@ -955,6 +1184,26 @@ void updateCameraFromXr(Engine& eng, const XrView views[2])
 
 void renderFrame(App& app, Engine& eng)
 {
+    // USE_SCENE grant may land a few frames after launch (user taps Allow); finish
+    // the deferred depth setup once it's granted.
+    if (app.depthPendingPermission && app.depthProvider == XR_NULL_HANDLE
+        && androidHasPermission(app.androidApp, kScenePermission)) {
+        app.depthPendingPermission = false;
+        setupEnvironmentDepth(app, eng);
+    }
+
+    // Bind the depth display texture to the post pass once both exist (the post pass
+    // is created in initEngineScene, the depth target in setupEnvironmentDepth - either
+    // can come first). Rebuilds one descriptor, so force a re-record afterward.
+    if (app.depthVizReady && !app.depthBoundToPost && eng.renderer
+        && eng.renderer->postprocessingManager && eng.renderer->postprocessingManager->postPass) {
+        eng.renderer->postprocessingManager->postPass->setDepthDisplay(
+            app.depthDisplayTex.imageView, app.depthDisplayTex.imageSampler);
+        eng.renderer->renderPassDirty = true;
+        app.depthBoundToPost = true;
+        LOGI("Depth display bound to post pass");
+    }
+
     XrFrameWaitInfo waitInfo{XR_TYPE_FRAME_WAIT_INFO};
     XrFrameState frameState{XR_TYPE_FRAME_STATE};
     XR_CHECK(xrWaitFrame(app.session, &waitInfo, &frameState));
@@ -999,6 +1248,70 @@ void renderFrame(App& app, Engine& eng)
         uint32_t viewCount = 0;
         XR_CHECK(xrLocateViews(app.session, &locateInfo, &viewState, 2, &viewCount, views));
 
+        // Environment depth (step 1): acquire the latest real-world depth map. The
+        // returned swapchainIndex selects which depthImages[] VkImage holds this
+        // frame's 2-layer depth array; nearZ/farZ + views[].fov/pose decode + reproject
+        // it. For now just log to confirm the pipeline; step 2 samples it in the post pass.
+        if (app.depthSupported && app.depthProvider != XR_NULL_HANDLE) {
+            XrEnvironmentDepthImageAcquireInfoMETA dai{XR_TYPE_ENVIRONMENT_DEPTH_IMAGE_ACQUIRE_INFO_META};
+            dai.space = app.localSpace;
+            dai.displayTime = frameState.predictedDisplayTime;
+            XrEnvironmentDepthImageMETA depthImage{XR_TYPE_ENVIRONMENT_DEPTH_IMAGE_META};
+            // The runtime fills views[] but validates their type first - must be set by
+            // the app (like XrView for xrLocateViews), else acquire -> VALIDATION_FAILURE.
+            depthImage.views[0].type = XR_TYPE_ENVIRONMENT_DEPTH_IMAGE_VIEW_META;
+            depthImage.views[1].type = XR_TYPE_ENVIRONMENT_DEPTH_IMAGE_VIEW_META;
+            XrResult dr = app.pfnAcquireDepthImage(app.depthProvider, &dai, &depthImage);
+            static int depthDbg = 0;
+            if (dr == XR_SUCCESS) {
+                if ((depthDbg++ % 72) == 0) {
+                    LOGI("Depth acquired: idx=%u %ux%u nearZ=%.3f farZ=%.3f",
+                         depthImage.swapchainIndex, app.depthWidth, app.depthHeight,
+                         depthImage.nearZ, depthImage.farZ);
+                }
+                // Linearize this frame's depth into the display target: submit the
+                // compute instance bound to this swapchainIndex, then wait it out so the
+                // post pass reads completed data.
+                // The post pass reprojects the depth into the eye view using the depth
+                // camera's per-eye FOV - upload its tangents (tanL,tanR,tanD,tanU) so the
+                // fullscreen depth lines up with what the cameras see. Done before
+                // scene->update (which maps the post UBO) further down this frame.
+                if (app.depthVizReady && eng.renderer && eng.renderer->postprocessingManager
+                    && eng.renderer->postprocessingManager->postPass) {
+                    for (int e = 0; e < 2; ++e) {
+                        const XrFovf& f = depthImage.views[e].fov;
+                        eng.renderer->postprocessingManager->postPass->depthFovTan[e] =
+                            glm::vec4(tanf(f.angleLeft), tanf(f.angleRight),
+                                      tanf(f.angleDown), tanf(f.angleUp));
+                    }
+                }
+                if (app.depthVizReady && depthImage.swapchainIndex < app.depthVizComp.size()) {
+                    DepthVizParams pu{};
+                    pu.nearZ = depthImage.nearZ;
+                    pu.farZ = depthImage.farZ;
+                    pu.width = (int)app.depthWidth;
+                    pu.height = (int)app.depthHeight;
+                    // depthDisplayMode: 1 depth, 2 world pos, 3 normal -> shader 0/1/2.
+                    pu.vizMode = (app.depthDisplayMode <= 1) ? 0 : (app.depthDisplayMode - 1);
+                    for (int e = 0; e < 2; ++e) {
+                        const XrFovf& f = depthImage.views[e].fov;
+                        pu.fovTan[e] = glm::vec4(tanf(f.angleLeft), tanf(f.angleRight),
+                                                 tanf(f.angleDown), tanf(f.angleUp));
+                        const XrPosef& ps = depthImage.views[e].pose;
+                        glm::quat q(ps.orientation.w, ps.orientation.x, ps.orientation.y, ps.orientation.z);
+                        glm::vec3 t(ps.position.x, ps.position.y, ps.position.z);
+                        pu.camToWorld[e] = glm::translate(glm::mat4(1.0f), t) * glm::mat4_cast(q);
+                    }
+                    app.depthParamsUbo[0].map(app.device, sizeof(pu), &pu);
+                    ComputePipeline* cp = app.depthVizComp[depthImage.swapchainIndex];
+                    cp->submit((app.depthWidth + 7) / 8, (app.depthHeight + 7) / 8, 1);
+                    vkWaitForFences(app.device, 1, &cp->computeFence, VK_TRUE, UINT64_MAX);
+                }
+            } else if (dr != XR_ENVIRONMENT_DEPTH_NOT_AVAILABLE_META && (depthDbg++ % 72) == 0) {
+                LOGE("xrAcquireEnvironmentDepthImageMETA failed: %d", dr);
+            }
+        }
+
         // The per-object UBOs are single-buffered: Scene::update overwrites
         // the matrices the in-flight command buffer is still reading, and on
         // a tiled GPU that splits a frame between old and new head poses
@@ -1014,6 +1327,19 @@ void renderFrame(App& app, Engine& eng)
         if (app.input.clearPressed) {
             eng.sdfEditor->clearScene();
             LOGI("Scene cleared");
+        }
+
+        // Y cycles the fullscreen debug overlay: off -> depth -> world pos -> normal.
+        // Real-world occlusion stays on independently (depthVizActive = bound); this
+        // only changes the debug overlay the compute writes / the post pass draws.
+        if (app.input.depthModePressed && app.depthVizReady) {
+            app.depthDisplayMode = (app.depthDisplayMode + 1) % 4;
+            if (eng.renderer && eng.renderer->postprocessingManager
+                && eng.renderer->postprocessingManager->postPass) {
+                eng.renderer->postprocessingManager->postPass->depthVizMode = app.depthDisplayMode;
+            }
+            const char* names[4] = { "off", "depth", "world pos", "normal" };
+            LOGI("Depth overlay: %s (occlusion always on)", names[app.depthDisplayMode]);
         }
 
         updateCameraFromXr(eng, views);
@@ -1167,6 +1493,7 @@ void android_main(android_app* androidApp)
         initEngineVulkan(app, eng);
         createSessionAndSwapchain(app);
         createPassthrough(app);
+        requestDepthPermissionOrSetup(app, eng);
         createXrInput(app);
         initEngineScene(app, eng);
     } catch (const std::exception& e) {

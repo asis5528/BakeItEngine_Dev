@@ -111,18 +111,20 @@ void GraphicsPipeline::setupPipeline(PipelineInput  pipelineInput) {
     infoLocal.rasterizer.rasterizerDiscardEnable = VK_FALSE;
     infoLocal.rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
     infoLocal.rasterizer.lineWidth = 1.0f;
-    // frontFaceCull (volumetric brick pipeline): the brick raymarch is only
-    // correct when marching starts at the NEAR face of the proxy cube, and
-    // which side a cull keeps depends on the mesh winding x the projection's
-    // Y handedness. Per platform, the single-face cull that keeps the near
-    // faces (verified empirically; the wrong side shows hollow bricks / flat
-    // cut faces): desktop's glb cube wants BACK, the Quest procedural cube
-    // wants FRONT. Single-face culling halves the brick pass's fragment
-    // work versus CULL_NONE - significant on the Quest's tiled GPU.
+    // frontFaceCull (volumetric brick pipeline): render the FAR faces of the proxy
+    // cube. The brick FS now marches from the CAMERA through the slab (ro = camLocal),
+    // so the rasterized face is just coverage, not the march origin - and keeping the
+    // FAR faces means the proxy never vanishes when the camera nears or ENTERS the
+    // cube (the near faces near-clip or turn back-facing; that was the disappearing-
+    // SDF bug). Which single-face cull keeps the far faces depends on mesh winding x
+    // the projection's Y handedness; it is the exact complement of the near-face cull,
+    // so swap the platform values: desktop's glb cube wants FRONT, the Quest
+    // procedural cube wants BACK. Single-face culling still halves the brick pass's
+    // fragment work versus CULL_NONE - significant on the Quest's tiled GPU.
 #ifdef BAKEIT_PLATFORM_ANDROID
-    const VkCullModeFlags volumetricCull = VK_CULL_MODE_FRONT_BIT;
-#else
     const VkCullModeFlags volumetricCull = VK_CULL_MODE_BACK_BIT;
+#else
+    const VkCullModeFlags volumetricCull = VK_CULL_MODE_FRONT_BIT;
 #endif
     infoLocal.rasterizer.cullMode = frontFaceCull ? volumetricCull : VK_CULL_MODE_BACK_BIT;
     infoLocal.rasterizer.depthBiasEnable = VK_FALSE;

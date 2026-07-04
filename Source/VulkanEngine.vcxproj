@@ -227,6 +227,7 @@ if exist "$(SolutionDir)ThirdParty\Libs\glfw3.dll" copy /Y "$(SolutionDir)ThirdP
     <ClInclude Include="Features\Fluid\GaussianFluidSim.h" />
     <ClInclude Include="Features\Sdf\Edit\SdfEditor.h" />
     <ClInclude Include="Features\Sdf\SdfBackend.h" />
+    <ClInclude Include="Features\Sdf\SdfChunk.h" />
     <ClInclude Include="Features\Sdf\SdfVolume.h" />
     <ClInclude Include="Features\Sdf\Edit\BrushState.h" />
     <ClInclude Include="Features\Sdf\Edit\SdfDrawList.h" />

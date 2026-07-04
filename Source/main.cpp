@@ -229,6 +229,7 @@ private:
         clines = new ComputeShaderPipelines(ctx);
         editorGui->sdfVolume = &clines->sdfEditor->volume;
         editorGui->brush = &clines->sdfEditor->brush;
+        editorGui->sdfEditor = clines->sdfEditor; // chunks panel (move/weld)
         scene->brush = &clines->sdfEditor->brush; // brush indicator overlay (post pass)
         scene->sdfVolume = &clines->sdfEditor->volume; // post pass reads blockSizeWS for deferred normals
         // Platform brush source: desktop = cursor ray + mouse/keyboard; the
@@ -266,7 +267,14 @@ private:
             clines->sdfEditor->coarseSharedSBO[0]  // binding 10: coarse dummy bricks
         };
         base->vbuffer->updateIndirectInstanceList(scene->meshes[scene->objects[0].meshID[0]], {});
-       
+
+        // Second SDF chunk (multi-chunk stage 3): spawned beside the primary
+        // chunk with a debug sphere stamp. Must run after the tile-pool
+        // material is wired (the cloned proxy inherits its matID) and before
+        // the scene descriptor / command buffers are built.
+        clines->sdfEditor->spawnChunk(glm::vec3(1.2f, 0.0f, 0.0f),
+            /*debugStamp=*/true, /*rebuildScene=*/false); // init-time: descriptors are built below
+
         scene->createSceneDescriptor();
 
         

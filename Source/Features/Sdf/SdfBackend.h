@@ -48,6 +48,19 @@
 // shaders can't see this header) - search SDF_TILE_R8 there.
 //
 // Needs shaderStorageImageExtendedFormats (R8_SNORM is a non-mandatory storage
-// format) - already requested in VulkanDevice. Desktop-only experiment for now;
-// flip the shader SDF_TILE_R8 to 1 to match.
+// format) - already requested in VulkanDevice.
+//
+// 8-bit IS enough with an ASYMMETRIC encoding. The first cut mapped the field
+// symmetrically (surface at 0, [-1,1] = +/-1-block-diagonal) and wasted half its
+// 256 codes on deep-interior distances the march never samples (it stops at the
+// surface; only the normal's inside tap + the zero-crossing cell read <~2 cells
+// inside). That left only ~8 codes spanning the one cell the finite-difference
+// normal straddles -> visibly bumpy/mottled shading. Fix (Option A): bias the
+// surface to stored value -0.6 (20% of the range inside, 80% outside) and tighten
+// the scale to ~82, giving ~2.5 cells inside / ~10 outside, ~20 codes/cell
+// (~2.5x finer normals) - still R8 / 48 MB. The bias cancels in the gradient, so
+// only the scale drives smoothness; the outside reach is a pure march-speed knob
+// (a clamped-short distance only shortens the sphere-trace step, never overshoots).
+// Constants live in the SDF_TILE_R8 blocks of SdfBrushTexCS.comp + SdfBrickFS.frag
+// (TILE_FIELD_BIAS / scale 82) and the coarse scale 82/N in SdfEditor.cpp.
 #define BAKEIT_SDF_TILE_R8

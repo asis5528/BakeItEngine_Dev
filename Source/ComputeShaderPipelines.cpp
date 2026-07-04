@@ -18,7 +18,7 @@ ComputeShaderPipelines::ComputeShaderPipelines(EngineContext& ctx) {
     fluidSim = new GaussianFluidSim(ctx, meshtosdf->computeTexture);
 	sdfEditor = new SdfEditor(ctx);
   //  ct3D = fluidSim->computeTexture;
-	scene->SBOs.push_back(sdfEditor->computeSBO);
+	scene->SBOs.push_back(sdfEditor->chunks[0].sbo);
    // scene->ptextures.push_back(fluidSim->computeTexture);
 }
 ComputeShaderPipelines::~ComputeShaderPipelines() {
