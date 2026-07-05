@@ -6,8 +6,11 @@
 // voxel into B's grid (one affine matrix, precomputed on the CPU from both
 // chunks' model matrices + translations), trilinearly sample B's tiles, and
 // smin the result into A with the same storage-class / tile-alloc / free-list
-// flow the brush uses. Both chunks live in the ONE shared tile pool, so B is
-// read and A is written through the same image binding (disjoint tiles).
+// flow the brush uses. A's pool is written through binding 1, B's (always the
+// FINE pool) is read through binding 9 - for the fine weld both bind the same
+// image (disjoint tiles); the coarse re-stamp binds the coarse pool as A with
+// its per-level table region (CoarseParams.x) and widened scale (params.w),
+// exactly like the coarse brush stamps.
 //
 // One workgroup per A block, 9x9x9 threads (one per tile sample).
 
@@ -15,11 +18,13 @@ layout(local_size_x = 9, local_size_y = 9, local_size_z = 9) in;
 
 layout(binding = 0) uniform WeldUbo {
     mat4  aNormToBGrid;      // A voxel (chunk-normalized, [-0.5,0.5]) -> B fine-grid coords [0, bCells]
-    vec4  params;            // x: smin k (A-normalized units), y: A grid cells, z: B grid cells, w: unused
+    vec4  params;            // x: smin k (A-normalized units), y: A grid cells, z: B grid cells,
+                             // w: A field scale (82 fine, 82/N coarse; 0 -> default)
     ivec4 DispatchBaseBlock; // xyz: A block base, w: free-stack stable count (alloc threshold)
+    ivec4 CoarseParams;      // x: table-base offset into A's table/colors (0 for fine)
 } ubo;
 
-layout(binding = 1, r16f) uniform image3D tilePool; // shared pool: B tiles read, A tiles written
+layout(binding = 1, r16f) uniform image3D tilePool;  // A's pool: written (fine pool, or the coarse pool for coarse re-stamps)
 layout(binding = 2) buffer BlockBufferA {
     int aBlocks[];
 };
@@ -42,6 +47,7 @@ layout(binding = 7) buffer FreeBrickStack {
 layout(std430, binding = 8) readonly buffer BlockBufferB {
     int bBlocks[];
 };
+layout(binding = 9, r16f) uniform image3D bTilePool; // B's pool: read only (always the FINE pool)
 
 const int BLOCK_EMISSIVE_FLAG = (1 << 30);
 const int BLOCK_INDEX_MASK = BLOCK_EMISSIVE_FLAG - 1;
@@ -56,15 +62,19 @@ const int TILE_DIM = 9;
 #define SDF_TILE_R8 1
 #if SDF_TILE_R8
 const float TILE_FIELD_BIAS = -0.6;
-const float TILE_FIELD_SCALE = 82.0; // fine-level scale (weld is fine-grid only)
+const float B_FIELD_SCALE = 82.0; // B is always the fine field
+// A-side scale from the UBO so the coarse re-stamp can use its widened
+// per-level range (82/N), exactly like the coarse brush (ubo._pad1 there).
+float aFieldScale() { return (ubo.params.w > 0.5) ? ubo.params.w : 82.0; }
 #else
 const float TILE_FIELD_BIAS = 0.0;
-const float TILE_FIELD_SCALE = 1.0;
+const float B_FIELD_SCALE = 1.0;
+float aFieldScale() { return 1.0; }
 #endif
-const float TILE_FIELD_INV_SCALE = 1.0 / TILE_FIELD_SCALE;
+const float B_FIELD_INV_SCALE = 1.0 / B_FIELD_SCALE;
 // Decoded R8 range ends: what an empty / interior sentinel block "stores".
-const float B_EMPTY_VAL    = ( 1.0 - TILE_FIELD_BIAS) * TILE_FIELD_INV_SCALE; // most-positive code
-const float B_INTERIOR_VAL = (-1.0 - TILE_FIELD_BIAS) * TILE_FIELD_INV_SCALE; // most-negative code
+const float B_EMPTY_VAL    = ( 1.0 - TILE_FIELD_BIAS) * B_FIELD_INV_SCALE; // most-positive code
+const float B_INTERIOR_VAL = (-1.0 - TILE_FIELD_BIAS) * B_FIELD_INV_SCALE; // most-negative code
 
 shared uint  sHasNegative;
 shared uint  sHasPositive;
@@ -119,7 +129,7 @@ float fetchBTap(ivec3 cell, int bBlocksPerAxis)
     }
     int tile = raw & BLOCK_INDEX_MASK;
     ivec3 local = cell - bc * 8; // 0..8 (8 = the +pad row of the owning tile)
-    return (imageLoad(tilePool, tileOriginTexel(tile) + local).r - TILE_FIELD_BIAS) * TILE_FIELD_INV_SCALE;
+    return (imageLoad(bTilePool, tileOriginTexel(tile) + local).r - TILE_FIELD_BIAS) * B_FIELD_INV_SCALE;
 }
 
 // Trilinear sample of B's field at a continuous B-grid position. Outside B's
@@ -162,6 +172,9 @@ void main()
         blockId.x +
         blockId.y * blocksPerAxis.x +
         blockId.z * blocksPerAxis.x * blocksPerAxis.y;
+    // Shared coarse table layout: this level's region starts at CoarseParams.x
+    // (0 for the fine weld), like SdfBrushTexCS.
+    index += ubo.CoarseParams.x;
 
     ivec3 localOffset = ivec3(gl_LocalInvocationID);
     ivec3 pos = blockId * blockDim + localOffset;
@@ -184,7 +197,7 @@ void main()
     if (valid) {
         // Previous stored A value (tile sample or sentinel), like the brush.
         if (blkRaw >= 0) {
-            h = (imageLoad(tilePool, tileOriginTexel(blkBase) + localOffset).r - TILE_FIELD_BIAS) * TILE_FIELD_INV_SCALE;
+            h = (imageLoad(tilePool, tileOriginTexel(blkBase) + localOffset).r - TILE_FIELD_BIAS) / aFieldScale();
         } else if (blkRaw == BLOCK_INTERIOR) {
             h = -FAR_VALUE;
         } else {
@@ -238,7 +251,7 @@ void main()
     barrier();
 
     if (sBrickBase >= 0) {
-        float sv = hShared[lid] * TILE_FIELD_SCALE;
+        float sv = hShared[lid] * aFieldScale();
 #if SDF_TILE_R8
         sv = clamp(TILE_FIELD_BIAS + sv, -1.0, 1.0);
 #endif

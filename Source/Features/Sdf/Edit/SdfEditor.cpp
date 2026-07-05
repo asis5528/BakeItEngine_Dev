@@ -26,8 +26,9 @@
 // Mirrors WeldUbo in shaders/Sdf/SdfWeldCS.comp.
 struct alignas(16) sdfWeldUBO {
 	glm::mat4 aNormToBGrid;      // A voxel (chunk-normalized) -> B fine-grid coords
-	glm::vec4 params;            // x: smin k, y: A grid cells, z: B grid cells
+	glm::vec4 params;            // x: smin k, y: A grid cells, z: B grid cells, w: A field scale
 	glm::ivec4 DispatchBaseBlock; // xyz: A block base, w: free-stack stable count
+	glm::ivec4 CoarseParams = glm::ivec4(0); // x: A table-base offset (0 fine)
 };
 
 namespace
@@ -631,38 +632,88 @@ void SdfEditor::weldChunkInto(int srcIndex, int dstIndex)
 		glm::max(BrushSmoothness, 0.001f),               // blend width = brush smoothness knob
 		static_cast<float>(dst.blocksPerAxis * 8u),
 		bCells,
-		0.0f);
+		0.0f);                                           // A field scale: 0 -> fine default
 	wubo.DispatchBaseBlock = glm::ivec4(blockMin, freeStackStableCount);
 
-	// One-shot weld pipeline: fresh descriptors for this src/dst pair, torn
-	// down right after the (synchronous) dispatch.
+	// One-shot weld pipelines (fresh descriptors per src/dst pair): the fine
+	// weld, plus - when the destination owns the coarse pyramid (chunk 0) -
+	// one re-stamp per coarse level so the welded material survives the
+	// distance-band LOD (mirrors the coarse brush stamps).
 	ComputeInput weldInput;
 	weldInput.computeShaderPath = "shaders/Sdf/SdfWeldCS.spv";
 	weldInput.descriptorTypes = {
 		VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-		VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  // shared tile pool (B read, A written)
+		VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  // 1: A pool (written)
 		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, // 2: A block table
-		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, // 3: shared tail counter
+		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, // 3: A tail counter
 		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, // 4: A block colors
 		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, // 5: A dirty counter
-		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, // 6: shared free count
-		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, // 7: shared free stack
-		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER  // 8: B block table
+		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, // 6: A free count
+		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, // 7: A free stack
+		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, // 8: B block table
+		VK_DESCRIPTOR_TYPE_STORAGE_IMAGE   // 9: B pool (read, always fine)
 	};
-	ComputePipeline* weld = new ComputePipeline(base, weldInput);
-	std::vector<UBO> weldUbo = base->vbuffer->createUniformBuffers({ sizeof(sdfWeldUBO) });
-	weldUbo[0].map(base->device, sizeof(sdfWeldUBO), &wubo);
-	weld->setupDescriptors(weldUbo, { tilePoolTexture },
-		{ dst.sbo[1], tileAllocSBO[0], dst.sbo[3], dst.sbo[4],
-		  tileAllocSBO[1], tileAllocSBO[2], src.sbo[1] });
-	int zero = 0;
-	dst.sbo[4].map(base->device, sizeof(int), &zero);
-	weld->ensureCommandResources(); // command buffer + SIGNALED fence: submit() waits on it first
-	weld->submit(
-		static_cast<uint32_t>(blockCount.x),
-		static_cast<uint32_t>(blockCount.y),
-		static_cast<uint32_t>(blockCount.z));
-	vkWaitForFences(base->device, 1, &weld->computeFence, VK_TRUE, UINT64_MAX);
+	std::vector<ComputePipeline*> passes;
+	std::vector<std::vector<UBO>> passUbos;
+
+	{
+		ComputePipeline* weld = new ComputePipeline(base, weldInput);
+		std::vector<UBO> weldUbo = base->vbuffer->createUniformBuffers({ sizeof(sdfWeldUBO) });
+		weldUbo[0].map(base->device, sizeof(sdfWeldUBO), &wubo);
+		weld->setupDescriptors(weldUbo, { tilePoolTexture, tilePoolTexture },
+			{ dst.sbo[1], tileAllocSBO[0], dst.sbo[3], dst.sbo[4],
+			  tileAllocSBO[1], tileAllocSBO[2], src.sbo[1] });
+		int zero = 0;
+		dst.sbo[4].map(base->device, sizeof(int), &zero);
+		weld->ensureCommandResources(); // command buffer + SIGNALED fence: submit() waits on it first
+		weld->submit(
+			static_cast<uint32_t>(blockCount.x),
+			static_cast<uint32_t>(blockCount.y),
+			static_cast<uint32_t>(blockCount.z));
+		passes.push_back(weld);
+		passUbos.push_back(std::move(weldUbo));
+	}
+
+	if (dstIndex == 0 && !coarseSharedSBO.empty()) {
+		// Coarse re-stamp: same weld (the normalized A voxel space is
+		// resolution-independent, so the matrix carries over), at each
+		// level's grid with its table region + widened R8 scale, into the
+		// coarse pool. Bump-only alloc like the coarse brush (w = 0).
+		int coarseFreeZero = 0;
+		coarseSharedSBO[5].map(base->device, sizeof(int), &coarseFreeZero);
+		for (CoarseLevel& lvl : coarseLevels) {
+			if (!lvl.brushComp) {
+				continue;
+			}
+			vkWaitForFences(base->device, 1, &lvl.brushComp->computeFence, VK_TRUE, UINT64_MAX);
+			const glm::ivec3 cMin = blockMin / lvl.N;
+			const glm::ivec3 cMax = blockMax / lvl.N;
+			const glm::ivec3 cCount = cMax - cMin + glm::ivec3(1);
+			sdfWeldUBO cubo = wubo;
+			cubo.params.y = static_cast<float>(lvl.blocksPerAxis * 8);
+			cubo.params.w = 82.0f / static_cast<float>(lvl.N);
+			cubo.DispatchBaseBlock = glm::ivec4(cMin, 0);
+			cubo.CoarseParams = glm::ivec4(lvl.tableBase, 0, 0, 0);
+
+			ComputePipeline* cweld = new ComputePipeline(base, weldInput);
+			std::vector<UBO> cUbo = base->vbuffer->createUniformBuffers({ sizeof(sdfWeldUBO) });
+			cUbo[0].map(base->device, sizeof(sdfWeldUBO), &cubo);
+			cweld->setupDescriptors(cUbo, { coarseSharedPool, tilePoolTexture },
+				{ coarseSharedSBO[1], coarseSharedSBO[2], coarseSharedSBO[3], coarseSharedSBO[4],
+				  coarseSharedSBO[5], coarseSharedSBO[6], src.sbo[1] });
+			cweld->ensureCommandResources();
+			cweld->submit(
+				static_cast<uint32_t>(cCount.x),
+				static_cast<uint32_t>(cCount.y),
+				static_cast<uint32_t>(cCount.z));
+			passes.push_back(cweld);
+			passUbos.push_back(std::move(cUbo));
+		}
+	}
+
+	for (ComputePipeline* p : passes) {
+		vkWaitForFences(base->device, 1, &p->computeFence, VK_TRUE, UINT64_MAX);
+	}
 
 	// Absorb B: collect every tile it owned back into the shared free stack.
 	// First compact the stack exactly like update() does - the weld may have
@@ -707,7 +758,8 @@ void SdfEditor::weldChunkInto(int srcIndex, int dstIndex)
 	// Empty B's table (its draw list compacts to 0 instances next build).
 	std::fill(bTable.begin(), bTable.end(), kBlockEmpty);
 	src.sbo[1].map(base->device, sizeof(int32_t) * bTable.size(), bTable.data());
-	src.sbo[4].map(base->device, sizeof(int), &zero);
+	int srcDirtyZero = 0;
+	src.sbo[4].map(base->device, sizeof(int), &srcDirtyZero);
 	src.active = false;
 	if (editableChunkIndex == srcIndex) {
 		editableChunkIndex = dstIndex;
@@ -717,10 +769,14 @@ void SdfEditor::weldChunkInto(int srcIndex, int dstIndex)
 	dst.lastDrawListBlockToClip = glm::mat4(0.0f);
 	src.lastDrawListBlockToClip = glm::mat4(0.0f);
 
-	delete weld;
-	for (UBO& u : weldUbo) {
-		vkDestroyBuffer(base->device, u.buffer, nullptr);
-		vkFreeMemory(base->device, u.bufferMemory, nullptr);
+	for (ComputePipeline* p : passes) {
+		delete p;
+	}
+	for (std::vector<UBO>& ubos : passUbos) {
+		for (UBO& u : ubos) {
+			vkDestroyBuffer(base->device, u.buffer, nullptr);
+			vkFreeMemory(base->device, u.bufferMemory, nullptr);
+		}
 	}
 	std::printf("Welded chunk %d into chunk %d (%d tiles freed)\n",
 		srcIndex, dstIndex, static_cast<int>(freed.size()));
