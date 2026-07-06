@@ -24,7 +24,8 @@ layout(std430, binding = 4) buffer CoarseBlockBuffer { int   coarseBlocks[]; };
 layout(std430, binding = 5) buffer CoarseCounter      { int   coarseTail; };
 
 const int BLOCK_EMISSIVE_FLAG = (1 << 30);
-const int BLOCK_INDEX_MASK = BLOCK_EMISSIVE_FLAG - 1;
+const int BLOCK_MATERIAL_FLAG = (1 << 29); // real material (negative voxels), not band padding
+const int BLOCK_INDEX_MASK = BLOCK_MATERIAL_FLAG - 1;
 const int BLOCK_INTERIOR = -999998;
 const int BRICK_DIM = 9;
 const int BRICK_STRIDE = 9 * 9 * 9;

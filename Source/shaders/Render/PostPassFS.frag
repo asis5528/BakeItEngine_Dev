@@ -22,7 +22,7 @@ layout(binding = 0) uniform IndicatorUbo {
     mat4 invView[2];
     vec4 camPos[2];         // xyz: eye position WS
     vec4 brushCenterRadius; // xyz: brush center WS, w: effective radius
-    vec4 brushParams;       // x: shape (0 cube, 1 sphere, 2 plane), y: visible, z: action (1 add, 0 remove)
+    vec4 brushParams;       // x: shape (low 4 bits) + orientation*16, y: visible, z: action (1 add, 0 remove)
     vec4 brushColor;        // rgb: brush color
     vec4 hudA;              // x: show HUD, y: fps, z: used bricks, w: atlas usage %
     vec4 hudB;              // x: radius*1000, y: smoothness*10000, z: cage, w: deferred
@@ -30,6 +30,7 @@ layout(binding = 0) uniform IndicatorUbo {
     vec4 chunkMax;
     vec4 depthFovTan[2];    // Quest depth-cam FOV tangents (tanL,tanR,tanD,tanU) per eye
     vec4 depthCtrl;         // x: occlusion on (depth bound), y: fullscreen viz on
+    mat4 brushRot;          // world -> shape-local sample rotation (matches SdfBrushTexCS)
 } ubo;
 
 layout(binding = 1) uniform sampler2DArray srcColor;
@@ -122,9 +123,17 @@ float sdfPyramid(vec3 p, float r) {
     return sqrt((d2 + w.z * w.z) / m2) * sign(max(w.z, -q.y)) * r;
 }
 
+// Brush orientation: world -> shape-local rotation matrix (the R-rotate
+// operator, CPU-composed - matches SdfBrushTexCS exactly so the indicator
+// shows exactly what the stamp will do).
+vec3 orientBrush(vec3 d)
+{
+    return mat3(ubo.brushRot) * d;
+}
+
 float brushSdf(vec3 p, vec3 c, float r, int mode)
 {
-    vec3 q = p - c;
+    vec3 q = orientBrush(p - c);
     if (mode == 1)  return sdfSphere(q, r);
     if (mode == 2)  return sdfPlanePatch(q, r);
     if (mode == 3)  return sdfRoundBox(q, r);
@@ -336,18 +345,26 @@ void main()
 
     vec3 c = ubo.brushCenterRadius.xyz;
     float r = ubo.brushCenterRadius.w;
-    int shape = int(floor(ubo.brushParams.x + 0.5));
+    // brushParams.x carries the shape (rotation travels as the brushRot matrix).
+    int packed = int(floor(ubo.brushParams.x + 0.5));
+    int shape = packed & 15;
 
     float tHit;
     float outline;
+    // Box-edge outlines (cube, plane slab) run in SHAPE-LOCAL space: rotate
+    // the ray with the same brushRot the SDF uses and keep the box axis-
+    // aligned - the wireframe then tracks the R-rotate exactly. Rotations
+    // preserve length, so tHit stays a valid world ray distance.
+    vec3 roL = mat3(ubo.brushRot) * (ro - c);
+    vec3 rdL = mat3(ubo.brushRot) * rd;
     if (shape == 0) {
-        outline = boxOutline(ro, rd, c, vec3(r), tHit);          // cube: edge wireframe
+        outline = boxOutline(roL, rdL, vec3(0.0), vec3(r), tHit);          // cube: edge wireframe
     } else if (shape == 1) {
-        outline = sphereOutline(ro, rd, c, r, tHit);             // sphere: silhouette ring
+        outline = sphereOutline(ro, rd, c, r, tHit);                       // sphere: silhouette ring
     } else if (shape == 2) {
-        outline = boxOutline(ro, rd, c, vec3(r, 0.001, r), tHit);// plane: flat slab edges
+        outline = boxOutline(roL, rdL, vec3(0.0), vec3(r, 0.001, r), tHit); // plane: canonical thin-Y slab
     } else {
-        outline = shapeOutline(ro, rd, c, r, shape, tHit);       // 3..11: generic silhouette
+        outline = shapeOutline(ro, rd, c, r, shape, tHit);                 // 3..11: generic silhouette
     }
 
     // Scene distance along this pixel's ray, reconstructed from the resolved

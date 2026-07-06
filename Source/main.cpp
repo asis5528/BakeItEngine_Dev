@@ -789,7 +789,8 @@ private:
     scene->fps = frames / fpsTimer;
     fpsTimer += deltaTime;
     if (fpsTimer >= 1.0f) {
-        std::cout << "FPS: " << frames / fpsTimer << std::endl;
+        // Console stays quiet: fps lives in the editor panel (FPS2) and the
+        // Quest HUD - printing it every second drowns the edit/split logs.
         frames = 0;
         fpsTimer = 0.0f;
     }
@@ -841,7 +842,7 @@ private:
         if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebufferResized) {
             framebufferResized = false;
             recreateSwapChain();
-            editorGui->ds[0] = ImGui_ImplVulkan_AddTexture(renderer->standardSampler, renderer->postprocessingManager->framebuffers[renderer->postprocessingManager->bufferSize - 1]->displayImageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            editorGui->refreshViewportTexture(); // reuses ds[0] - AddTexture here leaked a set per resize
         }
         else if (result != VK_SUCCESS) {
             throw std::runtime_error("failed to present swap chain image!");

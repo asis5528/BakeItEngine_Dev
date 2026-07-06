@@ -29,11 +29,11 @@ void Camera::update(const Input& in, float dt, float windowWidth, float windowHe
 	float moveF = m_forwardKey - m_backwardKey; // W/S
 	float moveR = m_rightKey - m_leftKey;       // D/A
 	float moveU = 0.0f;
-	float rollInput = 0.0f;
-	rollInput += in.leftArrowDown ? 1.0f : 0.0f;
-	rollInput -= in.rightArrowDown ? 1.0f : 0.0f;
+	// Camera roll on the arrow keys is gone: the arrows now step the brush
+	// rotation in the R-rotate modal (SdfEditor).
+	const float rollInput = 0.0f;
 
-	if (!(in.cameraMoveMode || in.leftArrowDown || in.rightArrowDown)) {
+	if (!in.cameraMoveMode) {
 		return;
 	}
 

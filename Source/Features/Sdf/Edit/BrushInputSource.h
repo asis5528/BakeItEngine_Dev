@@ -1,5 +1,6 @@
 #pragma once
 #include <glm/glm.hpp>
+#include <string>
 
 // Platform-free brush input contract (see Platform/Platform.h).
 //
@@ -22,10 +23,30 @@ struct BrushInput
 	bool drawDown = false;
 	bool eraseDown = false;
 	bool recolorModifier = false;
+	// Hold to snap the brush center to the voxel-block grid (desktop: Ctrl,
+	// Blender-style) - aligned cuts and stamps land on exact block lines.
+	bool snapModifier = false;
 
 	// Edge-triggered toggles.
 	bool shapeTogglePressed = false;
 	bool emissiveTogglePressed = false;
+	// "R": enter the Blender-style rotate operator (R -> X/Y/Z axis ->
+	// typed degrees -> Enter applies, Esc cancels).
+	bool rotateTogglePressed = false;
+	// Modal numeric entry for the rotate operator: characters typed this
+	// frame (digits, '.', '-', axis letters x/y/z) + confirm/cancel edges.
+	// Ignored outside a modal. Desktop: keyboard; Quest: none yet.
+	std::string typedChars;
+	bool confirmPressed = false;
+	bool cancelPressed = false;
+	// Left/right arrow steps this frame (right = +1, includes key repeat):
+	// the rotate modal's angle stepper.
+	int rotateSteps = 0;
+	// Fine-adjust modifier held (desktop: Alt) - smaller rotate steps.
+	bool fineModifier = false;
+	// "P" commit: promote every sketch chunk to physical
+	// (BAKEIT_PHYSICS_RULES.md §2). Quest wiring pending - defaults false.
+	bool physicsCommitPressed = false;
 
 	// Parameter intents in [-1, 1] per frame (platform applies its own
 	// fine-adjust modifier); SdfEditor owns the step sizes and clamps.

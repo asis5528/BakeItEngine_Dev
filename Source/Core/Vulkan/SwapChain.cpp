@@ -133,14 +133,12 @@ VkPresentModeKHR SwapChain::chooseSwapPresentMode(const std::vector<VkPresentMod
     for (auto m : availablePresentModes) std::cout << " " << modeName(m);
     std::cout << std::endl;
 
-    auto has = [&](VkPresentModeKHR want) {
-        for (auto m : availablePresentModes) if (m == want) return true;
-        return false;
-    };
-
-    VkPresentModeKHR chosen = VK_PRESENT_MODE_FIFO_KHR;
-    if (has(VK_PRESENT_MODE_MAILBOX_KHR))         chosen = VK_PRESENT_MODE_MAILBOX_KHR;
-    else if (has(VK_PRESENT_MODE_IMMEDIATE_KHR))  chosen = VK_PRESENT_MODE_IMMEDIATE_KHR;
+    // FIFO (vsync) by default: MAILBOX runs the editor loop UNCAPPED - GPU
+    // and one CPU core pegged at 100% for as long as the engine sits open
+    // (thousands of frames/s on an idle scene), which is a system-stability /
+    // thermal hazard, not a feature, for a desktop editor. FIFO is always
+    // available per spec and caps the loop at the monitor's refresh.
+    const VkPresentModeKHR chosen = VK_PRESENT_MODE_FIFO_KHR;
 
     std::cout << "[present] chosen: " << modeName(chosen) << std::endl;
     return chosen;

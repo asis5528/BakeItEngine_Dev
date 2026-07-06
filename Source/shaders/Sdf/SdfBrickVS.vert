@@ -56,7 +56,8 @@ layout(location = 12) flat out float coarseLevelOut; // 0 fine, else N (coarse-L
 layout(location = 13) flat out int coarseBrickBaseOut; // downsampled brick base, or -1
 
 const int BLOCK_EMISSIVE_FLAG = (1 << 30);
-const int BLOCK_INDEX_MASK = BLOCK_EMISSIVE_FLAG - 1;
+const int BLOCK_MATERIAL_FLAG = (1 << 29); // real material (negative voxels), not band padding
+const int BLOCK_INDEX_MASK = BLOCK_MATERIAL_FLAG - 1;
 const int BLOCKS_PER_AXIS = 64;
 // Distance-LOD tags on the per-instance block ID (set by SdfDrawListScatterCS).
 // Block IDs are < 64^3 (2^18), so bits 29/30 are free. Must match the flags in

@@ -23,9 +23,18 @@ struct BrushState
 	glm::vec4 color = glm::vec4(1.0f, 0.35f, 0.75f, 1.0f);
 	bool useSphere = false;
 	int shapeMode = 0;        // index into BrushShapeName (U cycles)
+	int orientation = 0;      // shape up-axis, 90-deg steps (R cycles): 0:+Y 1:+X 2:+Z 3:-Y 4:-X 5:-Z
 	float radius = 0.01f;     // A/D
 	float smoothness = 0.001f;// Q/E
 	float zAxis = 0.2f;       // distance from camera, W/S
 	float action = 1.0f;      // 1.0 add (LMB), 0.0 remove (RMB)
 	bool emissive = false;    // toggled with I
+
+	// Placement readout for the editor UI (written by SdfEditor each frame).
+	glm::vec3 worldPos = glm::vec3(0.0f); // final brush center, world space
+	bool surfaceStuck = false;            // riding on a surface hit (vs free depth)
+	bool snapped = false;                 // grid snap active this frame (Ctrl)
+	// World -> shape-local sample rotation (the R-rotate operator), composed
+	// by SdfEditor; the indicator shader must use the exact stamp transform.
+	glm::mat4 rot = glm::mat4(1.0f);
 };

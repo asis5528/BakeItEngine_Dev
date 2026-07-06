@@ -21,6 +21,12 @@ public:
 	VkSampler texturesamp;
 	EditorGui(EngineContext& ctx);
 	void createdescriptor(VulkanTexture& tex);
+	// Re-point the viewport image descriptor (ds[0]) at the current
+	// post-process output. Reuses the existing set - allocating a fresh one
+	// per refresh (ImGui_ImplVulkan_AddTexture) leaks it: this backend has no
+	// RemoveTexture and the pool eventually runs dry. Call with the device
+	// idle (resize / swapchain recreate paths already are).
+	void refreshViewportTexture();
 	void run();
 
 	void tree(Node& node);

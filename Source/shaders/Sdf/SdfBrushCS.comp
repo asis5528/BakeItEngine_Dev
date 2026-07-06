@@ -61,7 +61,8 @@ layout(binding = 7) buffer FreeBrickStack {
 };
 
 const int BLOCK_EMISSIVE_FLAG = (1 << 30);
-const int BLOCK_INDEX_MASK = BLOCK_EMISSIVE_FLAG - 1;
+const int BLOCK_MATERIAL_FLAG = (1 << 29); // real material (negative voxels), not band padding
+const int BLOCK_INDEX_MASK = BLOCK_MATERIAL_FLAG - 1;
 const int BRICK_STRIDE = 9 * 9 * 9;
 
 // Brick-less storage classes (blocks[] < 0).
@@ -71,6 +72,7 @@ const float FAR_VALUE = 100.01;
 
 shared uint  sTouched;
 shared uint  sHasNegative;
+shared uint  sCoreNegative; // negative in the 8^3 CORE only (pad row belongs to the neighbor)
 shared uint  sHasPositive;
 shared uint  sNearSurfaceCount;
 shared int   sBrickBase; // allocation result published by thread 0
@@ -243,6 +245,7 @@ void main()
     if (lid == 0u) {
         sTouched = 0u;
         sHasNegative = 0u;
+        sCoreNegative = 0u;
         sHasPositive = 0u;
         sNearSurfaceCount = 0u;
         sBrickBase = -1;
@@ -302,6 +305,11 @@ void main()
         }
         if (h < 0.0) {
             atomicOr(sHasNegative, 1u);
+            // Pad row mirrors the neighbor's first layer - material lives in
+            // the core only (see SdfBrushTexCS).
+            if (all(lessThan(localOffset, ivec3(8)))) {
+                atomicOr(sCoreNegative, 1u);
+            }
         }
         if (h > 0.0) {
             atomicOr(sHasPositive, 1u);
@@ -342,6 +350,9 @@ void main()
                 // Emissive applies only to newly created blocks while ON.
                 flags = (ubo.BrushEmissive > 0.5 && ubo.BrushAction >= 0.5) ? BLOCK_EMISSIVE_FLAG : 0;
                 blockColors[index] = vec4(ubo.BrushColor.rgb, 1.0);
+            }
+            if (sCoreNegative != 0u) {
+                flags |= BLOCK_MATERIAL_FLAG; // real material IN THIS BLOCK, not band/pad
             }
             blocks[index] = blkBase | flags;
             sBrickBase = blkBase;

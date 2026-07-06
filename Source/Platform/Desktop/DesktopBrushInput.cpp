@@ -12,8 +12,16 @@ BrushInput DesktopBrushInput::poll()
 	b.drawDown = in.leftButtonDown;
 	b.eraseDown = in.rightButtonDown;
 	b.recolorModifier = in.shiftDown;
+	b.snapModifier = in.ctrlDown;
 	b.shapeTogglePressed = in.uPressed;
 	b.emissiveTogglePressed = in.iPressed;
+	b.physicsCommitPressed = in.pPressed;
+	b.rotateTogglePressed = in.rPressed;
+	b.typedChars = in.typedThisFrame;
+	b.confirmPressed = in.enterPressed;
+	b.cancelPressed = in.escPressed;
+	b.rotateSteps = in.arrowSteps;
+	b.fineModifier = in.altDown;
 
 	const float fine = in.altDown ? 0.1f : 1.0f;
 	b.radiusDelta = ((in.aDown ? 1.0f : 0.0f) - (in.dDown ? 1.0f : 0.0f)) * fine;

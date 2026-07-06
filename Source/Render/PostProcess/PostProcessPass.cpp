@@ -33,6 +33,8 @@ struct alignas(16) BrushIndicatorUbo
 	glm::vec4 depthFovTan[2];
 	// x: real-world occlusion on (depth bound), y: fullscreen debug viz on.
 	glm::vec4 depthCtrl;
+	// World -> shape-local sample rotation (matches SdfBrushTexCS's BrushRot).
+	glm::mat4 brushRot = glm::mat4(1.0f);
 };
 }
 
@@ -152,8 +154,12 @@ void PostProcessPass::update() {
         // are 15% larger than add stamps, mirror that here.
         const float effectiveRadius = brush->data.w * (brush->action < 0.5f ? 1.15f : 1.0f);
         u.brushCenterRadius = glm::vec4(-glm::vec3(brush->data), effectiveRadius);
-        u.brushParams = glm::vec4(float(brush->shapeMode), visible ? 1.0f : 0.0f, brush->action, 0.0f);
+        // x carries the shape; rotation travels as the brushRot matrix - .w is
+        // taken by the Quest depth-viz gate.
+        u.brushParams = glm::vec4(float(brush->shapeMode),
+            visible ? 1.0f : 0.0f, brush->action, 0.0f);
         u.brushColor = brush->color;
+        u.brushRot = brush->rot;
     }
 
 #ifdef BAKEIT_PLATFORM_ANDROID

@@ -7,6 +7,7 @@
 #include "Render/Renderer.h"
 #include "Features/Sdf/Edit/SdfEditor.h"
 #include <cstdio>
+#include <glm/gtc/quaternion.hpp> // quat_cast/eulerAngles: brush rotation readout
 
 namespace
 {
@@ -103,6 +104,28 @@ void DrawSdfAtlasUsageBar(const char* label, float fraction, int usedBricks, int
  void EditorGui::createdescriptor(VulkanTexture &tex) {
      ds.push_back(ImGui_ImplVulkan_AddTexture(tex.imageSampler,tex.imageView,tex.imageLayout));
 
+ }
+ void EditorGui::refreshViewportTexture() {
+     VkImageView view = renderer->postprocessingManager->framebuffers[renderer->postprocessingManager->bufferSize - 1]->displayImageView;
+     if (ds.empty()) {
+         ds.push_back(ImGui_ImplVulkan_AddTexture(renderer->standardSampler, view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
+         return;
+     }
+     if (ds[0] == VK_NULL_HANDLE) {
+         ds[0] = ImGui_ImplVulkan_AddTexture(renderer->standardSampler, view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+         return;
+     }
+     VkDescriptorImageInfo img{};
+     img.sampler = renderer->standardSampler;
+     img.imageView = view;
+     img.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+     VkWriteDescriptorSet write{};
+     write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+     write.dstSet = ds[0];
+     write.descriptorCount = 1;
+     write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+     write.pImageInfo = &img;
+     vkUpdateDescriptorSets(m_base->device, 1, &write, 0, nullptr);
  }
  void EditorGui::run() {
 	 setupStyle();
@@ -221,7 +244,7 @@ void DrawSdfAtlasUsageBar(const char* label, float fraction, int usedBricks, int
          vkDeviceWaitIdle(m_base->device);
          m_scene->recreate();
          m_scene->renderPass();
-         ds[0] = ImGui_ImplVulkan_AddTexture(renderer->standardSampler, renderer->postprocessingManager->framebuffers[renderer->postprocessingManager->bufferSize-1]->displayImageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+         refreshViewportTexture();
          //  vkDeviceWaitIdle(base->device);
            //cleanCommandBuffers();
          //  scene->framebuffers[0]->clean();
@@ -266,12 +289,49 @@ void DrawSdfAtlasUsageBar(const char* label, float fraction, int usedBricks, int
      if (brush) {
          ImGui::Text("Brush");
          ImGui::Text("Shape   : %s (U to cycle)", BrushShapeName(brush->shapeMode));
+         if (sdfEditor) {
+             if (sdfEditor->rotateModalActive) {
+                 static const char* kAxis[] = { "X", "Y", "Z" };
+                 if (sdfEditor->rotateModalNumber.empty()) {
+                     ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f),
+                         "Rotate  : [%s] %.1f deg (arrows 5, Alt 1, or type)   LMB/Enter=apply  RMB/Esc=cancel",
+                         kAxis[sdfEditor->rotateModalAxis % 3], sdfEditor->rotateModalMouseDeg);
+                 } else {
+                     ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f),
+                         "Rotate  : [%s] %s_   LMB/Enter=apply  RMB/Esc=cancel",
+                         kAxis[sdfEditor->rotateModalAxis % 3], sdfEditor->rotateModalNumber.c_str());
+                 }
+             } else {
+                 const glm::vec3 e = glm::degrees(glm::eulerAngles(glm::quat_cast(sdfEditor->brushShapeRot)));
+                 ImGui::Text("Rotation: %.0f %.0f %.0f deg", e.x, e.y, e.z);
+                 ImGui::SameLine();
+                 if (ImGui::SmallButton("reset##rot")) {
+                     sdfEditor->brushShapeRot = glm::mat3(1.0f);
+                 }
+                 ImGui::TextDisabled("R, then X/Y/Z + arrows/degrees + Enter (e.g. R X 30)");
+             }
+         }
          ImGui::Text("Radius  : %.4f (A/D)", brush->radius);
          ImGui::Text("Smooth  : %.4f (Q/E)", brush->smoothness);
          ImGui::ColorEdit3("Color", &brush->color.x);
-         ImGui::Text("Z Offset: %.4f (W/S)", brush->zAxis);
          ImGui::Text("Action  : %s", (brush->action < 0.5f) ? "Remove (RMB)" : "Add (LMB)");
          ImGui::Text("Emissive Paint: %s (I)", brush->emissive ? "On" : "Off");
+         ImGui::Separator();
+         ImGui::Text("Placement");
+         if (sdfEditor) {
+             ImGui::Checkbox("Surface stick", &sdfEditor->surfaceStickEnabled);
+             if (sdfEditor->surfaceStickEnabled) {
+                 ImGui::SliderFloat("depth bias (W/S)", &sdfEditor->surfaceBias, -0.25f, 0.5f, "%.3f");
+             }
+         }
+         ImGui::Text("Depth   : %s", brush->surfaceStuck ? "on surface" : "free (W/S)");
+         if (!brush->surfaceStuck) {
+             ImGui::Text("Cam dist: %.4f (W/S)", brush->zAxis);
+         }
+         ImGui::Text("Pos     : %.4f  %.4f  %.4f%s",
+             brush->worldPos.x, brush->worldPos.y, brush->worldPos.z,
+             brush->snapped ? "  [snapped]" : "");
+         ImGui::TextDisabled("hold Ctrl to snap to the block grid");
      }
      if (sdfVolume) {
          const SdfVolumeStats& atlas = sdfVolume->stats;
@@ -335,17 +395,33 @@ void DrawSdfAtlasUsageBar(const char* label, float fraction, int usedBricks, int
      // stand-in for the future VR grab/place mechanic.
      if (sdfEditor) {
          ImGui::Begin("Chunks");
+         // Object states & physics (BAKEIT_PHYSICS_RULES.md): sketch chunks
+         // hang where drawn; "P" (or this button) promotes them to physical.
+         if (ImGui::Button("Commit physics (P)", ImVec2(-1.0f, 0.0f))) {
+             sdfEditor->commitPhysics();
+         }
+         ImGui::SliderFloat("gravity", &sdfEditor->physicsGravity, 0.0f, 10.0f);
+         ImGui::SliderFloat("ground Y", &sdfEditor->physicsGroundY, -2.0f, 0.5f);
+         ImGui::SliderFloat("bounce", &sdfEditor->physicsRestitution, 0.0f, 0.9f);
+         ImGui::Separator();
          for (size_t ci = 0; ci < sdfEditor->chunks.size(); ++ci) {
              SdfChunk& c = sdfEditor->chunks[ci];
              ImGui::PushID(static_cast<int>(ci));
              ImGui::Text("Chunk %d%s%s", static_cast<int>(ci),
                  (static_cast<int>(ci) == sdfEditor->editableChunkIndex) ? " [target]" : "",
-                 c.active ? "" : " (absorbed)");
+                 !c.active ? " (absorbed)"
+                     : (!c.physical ? " (sketch)"
+                         : (c.asleep ? " (physical, resting)" : " (physical, falling)")));
              if (c.active && c.objectIndex >= 0) {
                  glm::mat4& m = m_scene->objects[c.objectIndex].ModelMatrix;
                  float pos[3] = { m[3].x, m[3].y, m[3].z };
                  if (ImGui::DragFloat3("pos", pos, 0.005f)) {
                      m[3] = glm::vec4(pos[0], pos[1], pos[2], 1.0f);
+                     // A hand-moved physical chunk re-falls from its new spot.
+                     if (c.physical) {
+                         c.asleep = false;
+                         c.velocityWS = glm::vec3(0.0f);
+                     }
                  }
                  if (ci != 0) {
                      if (ImGui::Button("Weld into chunk 0")) {

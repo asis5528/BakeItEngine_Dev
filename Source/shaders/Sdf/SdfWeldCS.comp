@@ -50,7 +50,8 @@ layout(std430, binding = 8) readonly buffer BlockBufferB {
 layout(binding = 9, r16f) uniform image3D bTilePool; // B's pool: read only (always the FINE pool)
 
 const int BLOCK_EMISSIVE_FLAG = (1 << 30);
-const int BLOCK_INDEX_MASK = BLOCK_EMISSIVE_FLAG - 1;
+const int BLOCK_MATERIAL_FLAG = (1 << 29); // real material (negative voxels), not band padding
+const int BLOCK_INDEX_MASK = BLOCK_MATERIAL_FLAG - 1;
 
 const int BLOCK_EMPTY = -999999;
 const int BLOCK_INTERIOR = -999998;
@@ -77,6 +78,7 @@ const float B_EMPTY_VAL    = ( 1.0 - TILE_FIELD_BIAS) * B_FIELD_INV_SCALE; // mo
 const float B_INTERIOR_VAL = (-1.0 - TILE_FIELD_BIAS) * B_FIELD_INV_SCALE; // most-negative code
 
 shared uint  sHasNegative;
+shared uint  sCoreNegative; // negative in the 8^3 CORE only (pad row belongs to the neighbor)
 shared uint  sHasPositive;
 shared uint  sNearSurfaceCount;
 shared int   sBrickBase;
@@ -182,13 +184,16 @@ void main()
 
     if (lid == 0u) {
         sHasNegative = 0u;
+        sCoreNegative = 0u;
         sHasPositive = 0u;
         sNearSurfaceCount = 0u;
         sBrickBase = -1;
     }
     barrier();
 
-    bool valid = all(lessThan(pos, dims));
+    // Through the +pad row at the domain edge (pos == dims), matching
+    // SdfBrushTexCS: the edge pad is the neighbor cell's first voxel plane.
+    bool valid = all(lessThanEqual(pos, dims));
 
     int blkRaw = aBlocks[index];
     int blkBase = (blkRaw & BLOCK_INDEX_MASK);
@@ -217,6 +222,11 @@ void main()
         }
         if (h < 0.0) {
             atomicOr(sHasNegative, 1u);
+            // Pad row mirrors the neighbor's first layer - material lives in
+            // the core only (see SdfBrushTexCS).
+            if (all(lessThan(localOffset, ivec3(8)))) {
+                atomicOr(sCoreNegative, 1u);
+            }
         }
         if (h > 0.0) {
             atomicOr(sHasPositive, 1u);
@@ -237,6 +247,9 @@ void main()
                 blkBase = AllocateBrickBase();
                 flags = 0;
                 aBlockColors[index] = vec4(0.9, 0.75, 0.5, 1.0); // welded-in material color
+            }
+            if (sCoreNegative != 0u) {
+                flags |= BLOCK_MATERIAL_FLAG;
             }
             aBlocks[index] = blkBase | flags;
             sBrickBase = blkBase;

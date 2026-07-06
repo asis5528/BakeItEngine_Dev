@@ -28,6 +28,7 @@ layout(binding = 0) uniform computeUbo {
     float _pad1;
     ivec4 DispatchBaseBlock;
     ivec4 CoarseParams; // x: table-base offset into the shared coarse table/colors (0 for fine)
+    mat4  BrushRot;     // world -> shape-local sample rotation (R-rotate operator, CPU-composed)
 } ubo;
 
 layout(binding = 1, r16f) uniform image3D tilePool; // sparse tile atlas (field)
@@ -52,7 +53,11 @@ layout(binding = 7) buffer FreeBrickStack {
 };
 
 const int BLOCK_EMISSIVE_FLAG = (1 << 30);
-const int BLOCK_INDEX_MASK = BLOCK_EMISSIVE_FLAG - 1;
+// Set when the block holds REAL material (any negative voxel). Band blocks
+// (allocated near-surface padding, positive-only) lack it - the CPU's split
+// connectivity must not treat them as substance (they'd bridge cuts).
+const int BLOCK_MATERIAL_FLAG = (1 << 29);
+const int BLOCK_INDEX_MASK = BLOCK_MATERIAL_FLAG - 1;
 
 const int BLOCK_EMPTY = -999999;
 const int BLOCK_INTERIOR = -999998;
@@ -85,6 +90,7 @@ float tileFieldInvScale() { return 1.0 / tileFieldScale(); }
 
 shared uint  sTouched;
 shared uint  sHasNegative;
+shared uint  sCoreNegative; // negative in the 8^3 CORE only (pad row belongs to the neighbor)
 shared uint  sHasPositive;
 shared uint  sNearSurfaceCount;
 shared int   sBrickBase; // tile index published by thread 0
@@ -130,6 +136,21 @@ float smax(float a, float b, float k) {
 }
 
 // --- Brush shape SDFs (p relative to the brush center, r = brush radius) -----
+// Brush orientation (ubo.CoarseParams.y, R cycles on desktop): rotate the
+// brush-local offset so the shape's canonical up (+Y) points along one of the
+// six axis directions - e.g. the flat plane cutter turned vertical. These are
+// the inverse (world -> shape-local) 90-degree rotations, NOT reflections, so
+// asymmetric shapes (cone, pyramid) stay right-handed. Must match PostPassFS.
+vec3 orientBrush(vec3 d, int o)
+{
+    if (o == 1) return vec3(-d.y,  d.x,  d.z); // up = +X
+    if (o == 2) return vec3( d.x,  d.z, -d.y); // up = +Z
+    if (o == 3) return vec3( d.x, -d.y, -d.z); // up = -Y
+    if (o == 4) return vec3( d.y, -d.x,  d.z); // up = -X
+    if (o == 5) return vec3( d.x, -d.z,  d.y); // up = -Z
+    return d;                                  // up = +Y (canonical)
+}
+
 // Mirror of SdfBrushCS.comp; keep mode<->name in sync with BrushShapeName().
 float sdfSphere(vec3 p, float r) { return length(p) - r; }
 
@@ -254,13 +275,19 @@ void main()
     if (lid == 0u) {
         sTouched = 0u;
         sHasNegative = 0u;
+        sCoreNegative = 0u;
         sHasPositive = 0u;
         sNearSurfaceCount = 0u;
         sBrickBase = -1;
     }
     barrier();
 
-    bool valid = all(lessThan(pos, dims));
+    // Valid THROUGH the +pad row at the domain edge (pos == dims): that pad
+    // plane coincides with the neighboring grid cell's first voxel plane.
+    // Clipping it to air capped strokes one voxel before the cell boundary
+    // (the visible gap between canvas cells); the analytic brush doesn't
+    // care about the domain, so evaluate it there like any interior pad.
+    bool valid = all(lessThanEqual(pos, dims));
 
     int blkRaw = blocks[index];
     int blkBase = (blkRaw & BLOCK_INDEX_MASK); // tile index for surface blocks
@@ -279,7 +306,7 @@ void main()
         }
 
         vec3 p = (vec3(pos) - vec3(dims) * 0.5) / vec3(dims);
-        vec3 pq = p + ubo.BrushData.xyz - 0.031;
+        vec3 pq = mat3(ubo.BrushRot) * (p + ubo.BrushData.xyz - 0.031);
 
         float brushRadius = ubo.BrushData.w;
         if (ubo.BrushAction < 0.5) {
@@ -307,6 +334,13 @@ void main()
         }
         if (h < 0.0) {
             atomicOr(sHasNegative, 1u);
+            // The pad row (local index 8) mirrors the NEIGHBOR block's first
+            // layer - counting it flags every air block hugging a material
+            // face as "material", building an invisible connected shell that
+            // vetoes cut detection. Substance lives in the core only.
+            if (all(lessThan(localOffset, ivec3(8)))) {
+                atomicOr(sCoreNegative, 1u);
+            }
         }
         if (h > 0.0) {
             atomicOr(sHasPositive, 1u);
@@ -332,6 +366,9 @@ void main()
                 blkBase = AllocateBrickBase();
                 flags = (ubo.BrushEmissive > 0.5 && ubo.BrushAction >= 0.5) ? BLOCK_EMISSIVE_FLAG : 0;
                 blockColors[index] = vec4(ubo.BrushColor.rgb, 1.0);
+            }
+            if (sCoreNegative != 0u) {
+                flags |= BLOCK_MATERIAL_FLAG; // real material IN THIS BLOCK, not band/pad
             }
             blocks[index] = blkBase | flags;
             sBrickBase = blkBase;

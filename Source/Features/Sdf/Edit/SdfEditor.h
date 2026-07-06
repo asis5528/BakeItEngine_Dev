@@ -9,6 +9,7 @@
 #include "Features/Sdf/Edit/SdfDrawList.h"
 #include "EngineContext.h"
 #include <glm/glm.hpp>
+#include <string>
 #include <vector>
 
 // SdfEditor - the volumetric brush editor.
@@ -119,13 +120,22 @@ public:
 	glm::ivec3 fineTexDirtyMin = glm::ivec3(1000000);
 	glm::ivec3 fineTexDirtyMax = glm::ivec3(-1000000);
 
-	// PARKED: draw-anywhere. Strokes into empty air spawn + chain chunks when
-	// this is on. Off by default - free-floating chunks can't blend across
-	// their bounds (cut/seam artifacts), and the proper fix (world-aligned
-	// grid canvas with a chunkGrid resolve in the shaders) is deferred until
-	// gameplay actually needs free-air drawing. Targeting existing chunks and
-	// deliberate spawnChunk() calls remain active regardless.
-	bool airDrawSpawnEnabled = false;
+	// Draw-anywhere, step 1: the world is a LAZY CHUNK-GRID CANVAS. Space is
+	// tiled by 1-unit cells; drawing into empty air spawns the cell's chunk
+	// GRID-ALIGNED (never brush-centered), and every stamp dispatches into
+	// all cells its footprint overlaps - the field stays seamless across
+	// cell boundaries by construction (both sides evaluate the same analytic
+	// brush). Known gap until step 2 (chunkGrid resolve in the render
+	// shaders): the raymarcher can't sample across a cell seam, so strokes
+	// straddling a boundary can show a shading crease along the seam plane.
+	bool airDrawSpawnEnabled = true;
+	// The chunk owning grid cell `cell` (active, unmoved, not physical), or
+	// -1. ensureCellChunk spawns (or recycles) the cell's chunk on demand.
+	int chunkForCell(const glm::ivec3& cell);
+	int ensureCellChunk(const glm::ivec3& cell);
+	// Chunks stamped by the current stroke: ALL of them get the release
+	// connectivity pass (a stroke may span several canvas cells).
+	std::vector<int> strokeTouchedChunks;
 
 	// Stroke targeting: which chunk the current/last stroke edits (picked by
 	// ray at stroke start), and which chunk submitted the last stamp (its
@@ -149,6 +159,67 @@ public:
 	// Nearest chunk whose bounds the world-space ray hits (each tested in its
 	// own object space); -1 when the ray misses everything (spawn cue).
 	int pickChunkIndexByRay(const glm::vec3& rayOriginWS, const glm::vec3& rayDirWS);
+	// First material-block hit along the world ray in chunk c (3D-DDA over the
+	// chunk's cached CPU block table); ray-t of the hit, or < 0 on miss.
+	float raycastChunkMaterial(SdfChunk& c, const glm::vec3& rayOriginWS, const glm::vec3& rayDirWS);
+
+	// --- Blender-style brush placement (GUI-tunable).
+	// Surface stick: while hovering, the brush rides ON the material surface
+	// under the cursor (nearest hit across all chunks) instead of at a manual
+	// camera distance; the depth locks for the length of a stroke (classic
+	// sculpt) so carving toward the camera can't drag the brush along. W/S
+	// then nudges surfaceBias (push into / pull off the surface); the manual
+	// camera-distance depth remains the fallback when aiming at empty air.
+	bool surfaceStickEnabled = true;
+	float surfaceBias = 0.0f;
+	// R-rotate operator (Blender style: R -> X/Y/Z -> typed degrees -> Enter
+	// applies, Esc cancels). While active, strokes are swallowed (typing must
+	// not paint). brushShapeRot accumulates the applied rotations; the GUI
+	// shows it and can reset it.
+	bool rotateModalActive = false;
+	int rotateModalAxis = 1;                    // 0/1/2 = world X/Y/Z
+	std::string rotateModalNumber;              // typed degrees (overrides the mouse)
+	float rotateModalMouseDeg = 0.0f;           // interactive angle from cursor motion
+	glm::mat3 brushShapeRot = glm::mat3(1.0f);  // accumulated shape rotation
+
+	// --- Object states & physics (BAKEIT_PHYSICS_RULES.md - the reference).
+	// Sketch chunks hang where drawn; the "P" commit promotes them to
+	// physical (one-way). Linear-only integration in updateChunkPhysics(),
+	// run at the top of update() every frame. Chunks are ~1 world unit across.
+	float physicsGravity = 9.8f;      // downward accel, world units / s^2 (1 unit ~ 1 m: earth gravity)
+	float physicsGroundY = -0.5f;     // ground plane height (chunk 0's bottom face)
+	float physicsRestitution = 0.2f;  // bounce energy kept on ground impact
+	float lastPhysicsTime = -1.0f;    // previous update() time, for dt
+	// "P" commit: promote every sketch chunk to physical, immediately.
+	// Already-physical chunks are untouched (drains the unassigned queue).
+	void commitPhysics();
+	// Retire a spawned chunk's slot (never chunk 0): recycle its tiles into
+	// the shared free stack, empty its table, stop its draws, mark inactive.
+	// spawnChunk() reuses retired slots - the chunk vector is a fixed budget
+	// (kMaxChunks, reserved so growth never reallocates), and without reuse a
+	// long session of cuts exhausts it ("chunk cap reached").
+	void retireChunkSlot(int chunkIndex);
+	// Promote one chunk: measure its content AABB (block-table readback,
+	// release-path - a discrete user action) and hand it to the integrator.
+	void makeChunkPhysical(int chunkIndex);
+	void updateChunkPhysics(float time);
+	// The connectivity rule (rules doc §1): a chunk = ONE connected piece of
+	// material. Runs on every stroke release: flood-fills the edited chunk's
+	// block table; one island stays, every other island moves into a fresh
+	// chunk by table surgery. strokeWasCut says whether the stroke erased:
+	// only then do split children inherit the parent's physical state (a cut
+	// piece falls instantly) - islands created by DRAWING are always born
+	// sketch and wait for the next "P", and the island keeping the parent's
+	// chunk is the one overlapping the pre-stroke content (so a freshly drawn
+	// blob can never steal a physical object's state). Also refreshes content
+	// bounds and wakes a physical chunk so it re-settles on its new shape.
+	void splitChunkIslands(int chunkIndex, bool strokeWasCut);
+	// Did the current stroke erase at any point? Sampled per frame while the
+	// pointer is down; consumed by the release split (see strokeWasCut).
+	bool strokeHadErase = false;
+	// Occupied-content AABB scan (block-table readback -> contentMin/MaxOS).
+	// False when the chunk holds no content.
+	bool computeChunkContentBounds(SdfChunk& c);
 
 	// Stroke gesture state. A stroke lasts as long as the button is held;
 	// dispatches happen when the cursor has moved far enough since the last

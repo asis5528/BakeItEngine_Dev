@@ -81,7 +81,8 @@ layout(location = 2) out vec4 outMotion;          // G-buffer slot (future defer
 out float gl_FragDepth;
 
 const int BLOCK_EMISSIVE_FLAG = (1 << 30);
-const int BLOCK_INDEX_MASK = BLOCK_EMISSIVE_FLAG - 1;
+const int BLOCK_MATERIAL_FLAG = (1 << 29); // real material (negative voxels), not band padding
+const int BLOCK_INDEX_MASK = BLOCK_MATERIAL_FLAG - 1;
 const int BLOCK_INTERIOR = -999998; // brick-less storage class: solid inside
 
 const int BLOCKS_PER_AXIS = 64;
