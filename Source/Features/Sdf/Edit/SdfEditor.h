@@ -133,6 +133,11 @@ public:
 	// -1. ensureCellChunk spawns (or recycles) the cell's chunk on demand.
 	int chunkForCell(const glm::ivec3& cell);
 	int ensureCellChunk(const glm::ivec3& cell);
+	// Is c part of the grid canvas (grid-aligned, identity model, not
+	// physical)? Strokes targeting a NON-canvas chunk (a fallen piece, a
+	// moved chunk) stamp ONLY that object - spilling into the overlapping
+	// grid cells would write an invisible coincident duplicate.
+	bool isCanvasChunk(const SdfChunk& c);
 	// Chunks stamped by the current stroke: ALL of them get the release
 	// connectivity pass (a stroke may span several canvas cells).
 	std::vector<int> strokeTouchedChunks;
@@ -162,6 +167,12 @@ public:
 	// First material-block hit along the world ray in chunk c (3D-DDA over the
 	// chunk's cached CPU block table); ray-t of the hit, or < 0 on miss.
 	float raycastChunkMaterial(SdfChunk& c, const glm::vec3& rayOriginWS, const glm::vec3& rayDirWS);
+	// Lazily refresh chunk c's CPU block-table mirror (only when a writer
+	// flagged it AND the chunk's stamps are idle). False = no usable mirror.
+	bool refreshChunkCpuTable(SdfChunk& c);
+	// Wake every physical chunk (edits/splits/welds may have removed a
+	// support: pieces re-settle, and re-sleep in one frame if still held up).
+	void wakePhysicalChunks();
 
 	// --- Blender-style brush placement (GUI-tunable).
 	// Surface stick: while hovering, the brush rides ON the material surface

@@ -51,6 +51,10 @@ struct Input
 	std::string typedThisFrame;
 	// interaction mode, toggled by middle mouse press
 	bool cameraMoveMode = false;
+	// The GUI owns the mouse this frame (ImGui hover/drag/click): the brush
+	// must not paint or pick through panels. Set by main each frame from
+	// ImGui::GetIO().WantCaptureMouse - the Platform layer stays ImGui-free.
+	bool uiWantsMouse = false;
 };
 
 #ifdef BAKEIT_PLATFORM_DESKTOP

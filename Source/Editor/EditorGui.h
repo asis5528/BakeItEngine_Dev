@@ -17,6 +17,9 @@ public:
 	BrushState* brush = nullptr;          // wired in main.cpp once SdfEditor exists
 	SdfEditor* sdfEditor = nullptr;       // wired in main.cpp: chunks panel (move/weld)
 	int frameID = 0;
+	// True while the cursor is over the Viewport window (the 3D scene) and
+	// not over any other panel/popup - the brush may interact only then.
+	bool viewportHovered = false;
 	std::vector<VkDescriptorSet> ds;
 	VkSampler texturesamp;
 	EditorGui(EngineContext& ctx);

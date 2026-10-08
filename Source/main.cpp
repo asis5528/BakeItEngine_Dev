@@ -813,6 +813,12 @@ private:
 
 
         editorGui->run();
+        // GUI mouse capture: clicks/drags on ImGui panels must not paint into
+        // the scene behind them. The 3D scene itself is an ImGui window (the
+        // Viewport image), so "GUI owns the mouse" means WantCaptureMouse AND
+        // not hovering the Viewport. SdfEditor polls this via BrushInput and
+        // runs AFTER this (clines->update), so the value is current-frame.
+        input.state.uiWantsMouse = ImGui::GetIO().WantCaptureMouse && !editorGui->viewportHovered;
         vr::VREvent_t event;
         //sym->PollNextEvent(&event, sizeof(event));
 

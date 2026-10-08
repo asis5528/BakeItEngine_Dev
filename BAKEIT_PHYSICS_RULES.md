@@ -131,15 +131,16 @@ they sample the same fields.
 | Stage | What | Status |
 |---|---|---|
 | 1 | Gravity + ground plane, linear motion, sleep-when-resting | DONE (2026-07-05) |
-| 2 | **Connectivity rule + `P` commit** (this doc's sections 1–2) | next |
-| 3 | **Contacts**: physical piece samples other chunks' SDFs at surface contact points; push out along gradient. v1: dynamic-vs-static only (falling pieces ignore each other) | planned |
+| 2 | **Connectivity rule + `P` commit** (this doc's sections 1–2) | DONE (2026-07-05) |
+| 3 | **Contacts**: a falling piece lands and rests ON other pieces | DONE first pass (2026-07-06): block-granular + vertical-only over the CPU block-table mirrors — the falling chunk's per-column bottom material blocks vs every other chunk's occupancy; tunneling guard (max 2 blocks fall/frame); a moving support carries its rider but never puts it to sleep; edits/splits/welds wake all physical pieces so removed supports re-settle. Voxel-precision push-out along the gradient stays future work (pieces rest up to 1 block proud of the visual surface) |
 | 4 | **Rotation**: contacts act at points → torque → pieces tumble and settle on their side | planned |
 | 5 | Mass from block occupancy, VR grab/throw, fluids | future |
 | 6 | Conduction over the connectivity graph: heat (baking! the sponge cooks from the pan inward), electricity, magnets — the voxel/block connectivity built for splitting doubles as the propagation medium | idea, parked |
 
-Field samples for contacts: start with a **CPU-side copy of the coarse
-field** (analytically re-stamped, accurate enough for a landing cake slice;
-latency-free). Revisit with a GPU contact kernel + readback only if needed.
+Field samples for contacts: the first pass uses the **CPU block-table
+mirrors** (already maintained for brush picking - fresher and finer than the
+planned coarse-field copy). Revisit with voxel-level readback or a GPU
+contact kernel when block-granular resting reads too coarse.
 
 ### Golden-rule compliance (BAKEIT_ENGINE_DIRECTION.md)
 

@@ -584,22 +584,35 @@ SdfChunk& SdfEditor::spawnChunk(const glm::vec3& translationWS, bool debugStamp,
 	return chunk;
 }
 
+bool SdfEditor::isCanvasChunk(const SdfChunk& c)
+{
+	// A canvas chunk sits exactly on the grid with an identity model.
+	// Physical or hand-moved chunks are OBJECTS now, not canvas.
+	if (!c.active || c.physical) {
+		return false;
+	}
+	const glm::vec3 snapped = glm::round(c.translationWS);
+	if (glm::any(glm::greaterThan(glm::abs(c.translationWS - snapped), glm::vec3(1e-4f)))) {
+		return false;
+	}
+	if (c.objectIndex >= 0
+		&& scene->objects[c.objectIndex].ModelMatrix != glm::mat4(1.0f)) {
+		return false;
+	}
+	return true;
+}
+
 int SdfEditor::chunkForCell(const glm::ivec3& cell)
 {
-	// A cell's canvas chunk sits exactly at the cell origin with an identity
-	// model. Physical or hand-moved chunks are OBJECTS now, not canvas - the
-	// cell becomes empty again and can lazily respawn a fresh chunk.
+	// The cell becomes empty again when its chunk stops being canvas
+	// (promoted physical / moved) and can lazily respawn a fresh chunk.
 	const glm::vec3 origin(cell);
 	for (size_t i = 0; i < chunks.size(); ++i) {
 		SdfChunk& c = chunks[i];
-		if (!c.active || c.physical) {
+		if (!isCanvasChunk(c)) {
 			continue;
 		}
 		if (glm::any(glm::greaterThan(glm::abs(c.translationWS - origin), glm::vec3(1e-4f)))) {
-			continue;
-		}
-		if (c.objectIndex >= 0
-			&& scene->objects[c.objectIndex].ModelMatrix != glm::mat4(1.0f)) {
 			continue;
 		}
 		return static_cast<int>(i);
@@ -888,6 +901,7 @@ void SdfEditor::weldChunkInto(int srcIndex, int dstIndex)
 	}
 	dst.cpuTableDirty = true;
 	src.cpuTableDirty = true;
+	wakePhysicalChunks(); // the absorbed chunk may have been someone's support
 	std::printf("Welded chunk %d into chunk %d (%d tiles freed)\n",
 		srcIndex, dstIndex, static_cast<int>(freed.size()));
 }
@@ -2027,6 +2041,10 @@ void SdfEditor::updateChunkPhysics(float time)
 		return;
 	}
 
+	auto isMaterialRaw = [](int32_t raw) {
+		return raw == kBlockInterior || (raw >= 0 && (raw & kBlockMaterialFlag) != 0);
+	};
+
 	for (SdfChunk& c : chunks) {
 		if (!c.active || !c.physical || c.asleep || c.objectIndex < 0) {
 			continue;
@@ -2034,7 +2052,16 @@ void SdfEditor::updateChunkPhysics(float time)
 		glm::mat4& m = scene->objects[c.objectIndex].ModelMatrix;
 
 		c.velocityWS.y -= physicsGravity * dt;
-		m[3] += glm::vec4(c.velocityWS * dt, 0.0f);
+		glm::vec3 disp = c.velocityWS * dt;
+		// Tunneling guard: the chunk-vs-chunk contact below is block-granular
+		// and samples at the destination - never fall more than 2 blocks in
+		// one frame, or a fast piece could pass straight through a thin one.
+		disp.y = glm::max(disp.y, -2.0f * c.blockSizeWS);
+		m[3] += glm::vec4(disp, 0.0f);
+
+		float pushUp = 0.0f;
+		bool contact = false;
+		bool supportMoving = false;
 
 		// Ground contact: lowest transformed corner of the content AABB vs the
 		// plane (8 corners - correct under any pottery rotation the object may
@@ -2048,18 +2075,102 @@ void SdfEditor::updateChunkPhysics(float time)
 			lowestY = glm::min(lowestY, (m * glm::vec4(p, 1.0f)).y);
 		}
 		if (lowestY < physicsGroundY) {
-			m[3].y += physicsGroundY - lowestY;
+			pushUp = physicsGroundY - lowestY;
+			contact = true;
+		}
+
+		// Chunk-vs-chunk resting (rules doc §3 stage 3, first pass): sample
+		// this chunk's BOTTOM material blocks (per-column lowest, from the
+		// CPU table mirror) against every other chunk's occupancy - a cut
+		// piece lands ON the piece below it, not through it. Block-granular
+		// and vertical-only, matching the linear integrator; dynamic pieces
+		// touching each other exchange support but a MOVING support never
+		// puts its rider to sleep (it would be left floating).
+		if (c.contentMaxOS.x >= c.contentMinOS.x && refreshChunkCpuTable(c)) {
+			const float bs = c.blockSizeWS;
+			const int bpa = static_cast<int>(c.blocksPerAxis);
+			const glm::vec3 cOrigin = c.translationWS + ChunkLocalCenterOrigin(bs); // block-CENTER origin
+			const glm::ivec3 bMin = glm::clamp(glm::ivec3(glm::round(
+				(c.contentMinOS - cOrigin + glm::vec3(0.5f * bs)) / bs)), glm::ivec3(0), glm::ivec3(bpa - 1));
+			const glm::ivec3 bMax = glm::clamp(glm::ivec3(glm::round(
+				(c.contentMaxOS - cOrigin - glm::vec3(0.5f * bs)) / bs)), glm::ivec3(0), glm::ivec3(bpa - 1));
+
+			// Bottom heightfield of the content region: lowest material block
+			// per (x,z) column - computed once, tested against every chunk.
+			const glm::ivec3 dim = bMax - bMin + glm::ivec3(1);
+			std::vector<int> bottomBy(static_cast<size_t>(dim.x) * dim.z, -1);
+			for (int bx = bMin.x; bx <= bMax.x; ++bx)
+			for (int bz = bMin.z; bz <= bMax.z; ++bz) {
+				for (int by = bMin.y; by <= bMax.y; ++by) {
+					if (isMaterialRaw(c.cpuTable[bx + by * bpa + bz * bpa * bpa])) {
+						bottomBy[(bx - bMin.x) + (bz - bMin.z) * dim.x] = by;
+						break;
+					}
+				}
+			}
+
+			const glm::vec3 cWorldMin = c.contentMinOS + glm::vec3(m[3]);
+			const glm::vec3 cWorldMax = c.contentMaxOS + glm::vec3(m[3]);
+			for (SdfChunk& t : chunks) {
+				if (&t == &c || !t.active || t.contentMaxOS.x < t.contentMinOS.x) {
+					continue;
+				}
+				const glm::vec3 tOff = (t.objectIndex >= 0)
+					? glm::vec3(scene->objects[t.objectIndex].ModelMatrix[3])
+					: glm::vec3(0.0f);
+				const glm::vec3 tWorldMin = t.contentMinOS + tOff - glm::vec3(2.0f * bs);
+				const glm::vec3 tWorldMax = t.contentMaxOS + tOff + glm::vec3(2.0f * bs);
+				if (glm::any(glm::lessThan(cWorldMax, tWorldMin))
+					|| glm::any(glm::greaterThan(cWorldMin, tWorldMax))) {
+					continue;
+				}
+				if (!refreshChunkCpuTable(t)) {
+					continue;
+				}
+				const int tbpa = static_cast<int>(t.blocksPerAxis);
+				const glm::vec3 tGrid = t.translationWS + ChunkLocalCenterOrigin(t.blockSizeWS)
+					- glm::vec3(0.5f * t.blockSizeWS); // block-CORNER origin
+				for (int bx = bMin.x; bx <= bMax.x; ++bx)
+				for (int bz = bMin.z; bz <= bMax.z; ++bz) {
+					const int lowBy = bottomBy[(bx - bMin.x) + (bz - bMin.z) * dim.x];
+					if (lowBy < 0) {
+						continue;
+					}
+					// Bottom-face center of this column's lowest block, world.
+					const glm::vec3 pw = cOrigin + glm::vec3(bx, lowBy, bz) * bs
+						+ glm::vec3(0.0f, -0.5f * bs, 0.0f) + glm::vec3(m[3]);
+					const glm::ivec3 cell = glm::ivec3(glm::floor((pw - tOff - tGrid) / t.blockSizeWS));
+					if (glm::any(glm::lessThan(cell, glm::ivec3(0)))
+						|| glm::any(glm::greaterThanEqual(cell, glm::ivec3(tbpa)))) {
+						continue;
+					}
+					if (!isMaterialRaw(t.cpuTable[cell.x + cell.y * tbpa + cell.z * tbpa * tbpa])) {
+						continue;
+					}
+					const float cellTopY = tGrid.y + float(cell.y + 1) * t.blockSizeWS + tOff.y;
+					const float pen = cellTopY - pw.y;
+					if (pen > 0.0f) {
+						contact = true;
+						pushUp = glm::max(pushUp, pen);
+						supportMoving = supportMoving || (t.physical && !t.asleep);
+					}
+				}
+			}
+		}
+
+		if (contact) {
+			m[3].y += pushUp;
 			if (c.velocityWS.y < 0.0f) {
 				c.velocityWS.y = -c.velocityWS.y * physicsRestitution;
 			}
-			// Grounded: kill residual bounce + slide, then sleep. A future
-			// drop (or the split feature re-dropping a piece) wakes it.
+			// Settled: kill residual bounce + slide, then sleep - unless the
+			// support itself is still falling (the rider must keep following).
 			if (c.velocityWS.y < 0.05f) {
 				c.velocityWS.y = 0.0f;
 			}
 			c.velocityWS.x *= glm::max(1.0f - 8.0f * dt, 0.0f);
 			c.velocityWS.z *= glm::max(1.0f - 8.0f * dt, 0.0f);
-			if (glm::dot(c.velocityWS, c.velocityWS) < 1e-6f) {
+			if (!supportMoving && glm::dot(c.velocityWS, c.velocityWS) < 1e-6f) {
 				c.velocityWS = glm::vec3(0.0f);
 				c.asleep = true;
 			}
@@ -2079,6 +2190,35 @@ bool SdfEditor::chunkContainsPoint(const SdfChunk& c, const glm::vec3& pWS, floa
 	ComputeChunkBounds(c.blocksPerAxis, c.blockSizeWS, c.translationWS, bmin, bmax);
 	return glm::all(glm::greaterThanEqual(p, bmin + margin))
 		&& glm::all(glm::lessThanEqual(p, bmax - margin));
+}
+
+bool SdfEditor::refreshChunkCpuTable(SdfChunk& c)
+{
+	// Lazy CPU-mirror refresh: only when a table writer flagged it AND the
+	// chunk's stamps are idle (a mid-stroke query keeps the stale mirror -
+	// one stamp of staleness is fine for aiming/contacts).
+	const size_t totalCells = static_cast<size_t>(c.blocksPerAxis) * c.blocksPerAxis * c.blocksPerAxis;
+	if (!c.cpuTableDirty && c.cpuTable.size() == totalCells) {
+		return true;
+	}
+	const bool stampIdle = !c.brushComp
+		|| vkGetFenceStatus(base->device, c.brushComp->computeFence) == VK_SUCCESS;
+	if (!stampIdle) {
+		return c.cpuTable.size() == totalCells; // stale mirror is still usable
+	}
+	c.cpuTable.resize(totalCells);
+	c.sbo[1].read(base->device, sizeof(int32_t) * totalCells, c.cpuTable.data());
+	c.cpuTableDirty = false;
+	return true;
+}
+
+void SdfEditor::wakePhysicalChunks()
+{
+	for (SdfChunk& c : chunks) {
+		if (c.active && c.physical) {
+			c.asleep = false;
+		}
+	}
 }
 
 float SdfEditor::raycastChunkMaterial(SdfChunk& c, const glm::vec3& rayOriginWS, const glm::vec3& rayDirWS)
@@ -2109,19 +2249,8 @@ float SdfEditor::raycastChunkMaterial(SdfChunk& c, const glm::vec3& rayOriginWS,
 		return -1.0f;
 	}
 
-	// Lazy CPU-mirror refresh: only when a table writer flagged it AND the
-	// chunk's stamps are idle (a mid-stroke query keeps the stale mirror -
-	// one stamp of staleness is fine for aiming).
-	if (c.cpuTableDirty || c.cpuTable.size() != totalCells) {
-		const bool stampIdle = !c.brushComp
-			|| vkGetFenceStatus(base->device, c.brushComp->computeFence) == VK_SUCCESS;
-		if (stampIdle) {
-			c.cpuTable.resize(totalCells);
-			c.sbo[1].read(base->device, sizeof(int32_t) * totalCells, c.cpuTable.data());
-			c.cpuTableDirty = false;
-		} else if (c.cpuTable.size() != totalCells) {
-			return -1.0f; // no mirror yet and the table is being written
-		}
+	if (!refreshChunkCpuTable(c)) {
+		return -1.0f; // no mirror yet and the table is being written
 	}
 
 	auto isMaterialRaw = [](int32_t raw) {
@@ -2728,6 +2857,9 @@ void SdfEditor::update(float time)
 			}
 			strokeTouchedChunks.clear();
 		}
+		// The stroke may have carved away somebody's support: every physical
+		// piece re-settles (and re-sleeps in a frame if still held up).
+		wakePhysicalChunks();
 	}
 	const glm::dvec2 cursorDelta = currentCursorPos - previousBrushCursorPos;
 	const bool movedEnough = glm::dot(cursorDelta, cursorDelta) > 0.25;
@@ -2809,7 +2941,12 @@ void SdfEditor::update(float time)
 		// submission order, so the LAST fence covers them all).
 		std::vector<int> stampTargets;
 		stampTargets.push_back(editableChunkIndex);
-		if (airDrawSpawnEnabled) {
+		// Cell spillover ONLY for canvas strokes: when the target is an
+		// OBJECT (fallen piece, moved chunk, off-grid spawn), the stamp stays
+		// inside it - writing the overlapping grid cells too would create an
+		// invisible coincident duplicate of the stroke (which then splits
+		// apart the moment both copies go physical).
+		if (airDrawSpawnEnabled && isCanvasChunk(chunks[editableChunkIndex])) {
 			const glm::vec3 pad(2.0f * chunk.blockSizeWS);
 			const glm::ivec3 cellMin = glm::ivec3(glm::floor(brushCenterWorld - brushExtent - pad + 0.5f));
 			const glm::ivec3 cellMax = glm::ivec3(glm::floor(brushCenterWorld + brushExtent + pad + 0.5f));

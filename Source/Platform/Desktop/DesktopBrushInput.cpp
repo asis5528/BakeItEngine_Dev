@@ -8,7 +8,7 @@ BrushInput DesktopBrushInput::poll()
 	BrushInput b;
 	const Input& in = *ctx.input;
 
-	b.interactionAllowed = !in.cameraMoveMode;
+	b.interactionAllowed = !in.cameraMoveMode && !in.uiWantsMouse;
 	b.drawDown = in.leftButtonDown;
 	b.eraseDown = in.rightButtonDown;
 	b.recolorModifier = in.shiftDown;

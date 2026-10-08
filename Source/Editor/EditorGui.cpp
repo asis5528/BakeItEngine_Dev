@@ -236,6 +236,7 @@ void DrawSdfAtlasUsageBar(const char* label, float fraction, int usedBricks, int
      ImGui::SetWindowCollapsed(1);
      bool k1 = 1;
      ImGui::Begin("Viewport", &k1, ImGuiWindowFlags_NoTitleBar);
+     viewportHovered = ImGui::IsWindowHovered();
      ImVec2 viewport_size = ImGui::GetWindowSize();
 
      if (viewport_size.x != m_scene->camera->viewportResolution.x || viewport_size.y != m_scene->camera->viewportResolution.y) {
